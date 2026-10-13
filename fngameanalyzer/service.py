@@ -34,6 +34,8 @@ def window_info(w):
         "name": pretty(w.get("event_id") or "", w["window_id"]),
         "begin": w["begin"], "end": w["end"], "final": w["final"], "status": status,
         "category": classify.of(w),
+        "rewards": (m.get("rewards") or {}).get("tiers", []), "cash_total": (m.get("rewards") or {}).get("cash_total", 0),
+        "payout_at": (m.get("rewards") or {}).get("payout_at"), "payout_rule": (m.get("rewards") or {}).get("payout_rule"),
         "match_cap": m.get("match_cap"), "mode": m.get("mode"), "game_type": m.get("game_type"),
         "lobby": m.get("lobby"), "stage": m.get("stage"), "advance": m.get("advance", []),
         "scoring": rules.describe(m["rules"]) if m.get("rules") else None,

@@ -54,6 +54,15 @@ async function home() {
 }
 
 // ------------------------------------------------------------------ Tournament
+
+function rewardsCard(w) {
+  const t = w.rewards || [];
+  const now = Date.now() / 1000;
+  const when = w.payout_at ? `<b>${fmt(w.payout_at)}</b> <small>(${Math.round((w.payout_at - w.end) / 60)} min after the window closes${w.payout_at < now ? " · already paid out" : ` · in ${dur(w.payout_at - now)}`})</small>` : "<span class=mut>not published</span>";
+  const where = x => x.kind === "rank" ? (x.from === x.upto ? `Place ${x.upto}` : `Places ${x.from}–${x.upto}`) : x.kind === "value" ? `${nf(x.upto)}+ points` : x.kind === "percentile" ? `Top ${x.upto}%` : esc(x.kind);
+  const body = t.length ? table(["Who", "Reward"], t.map(x => [where(x), x.items.map(i => `${i.type === "cash" ? "<b>" + esc(i.label) + "</b>" : esc(i.label)}`).join("<br>")])) : '<p class="mut">Epic lists no rewards for this window.</p>';
+  return `<div class="card"><h2>Rewards</h2><p>Paid out: ${when}</p>${w.cash_total ? `<p>Total cash prize pool: <b>$${nf(w.cash_total)}</b></p>` : ""}${body}<p class="small">Item names come from Epic's internal IDs, so they can look run together. Payout time is Epic's published rule (${esc(w.payout_rule || "n/a")}).</p></div>`;
+}
 let TW = null, TPAGE = 0, TQ = "", TTOP = null;
 async function tournament(id) {
   const w = await j("/api/window?window=" + encodeURIComponent(id));
@@ -73,6 +82,7 @@ async function tournament(id) {
       <div class="kpi"><div class="l">Games / lobby</div><div class="v" style="font-size:1rem">${w.match_cap || "?"} games · ${w.lobby ? w.lobby + (w.mode === "solo" ? " players" : " teams") : "lobby ?"}</div></div>
       <div class="kpi"><div class="l">Last queue</div><div class="v" style="font-size:1rem">games started before the end still count (~22 min)</div></div></div>
     <p class="small">${esc(w.scoring || "")}</p><p class="small">${adv}</p></div>
+  ${rewardsCard(w)}
   <div class="card"><h2>Rank calculator</h2>
     <div class="row"><div><label>Top X (1 – 10,000)</label><input id="x" type="number" min="1" max="10000" value="${TTOP}"></div>
     <div><label>Entrants (optional)</label><input id="e" type="number" min="1" placeholder="auto"></div>
@@ -141,6 +151,14 @@ async function boardLoad() {
   $("#pv").onclick = () => { TPAGE--; boardLoad() }; $("#nx").onclick = () => { TPAGE++; boardLoad() };
 }
 
+function rewardSummary(w) {
+  const items = (w.rewards || []).flatMap(t => t.items);
+  const parts = [];
+  if (w.cash_total) parts.push(`<b>$${nf(w.cash_total)}</b>`);
+  if (items.some(i => i.type === "item")) parts.push("cosmetics");
+  if (items.some(i => i.type === "advance")) parts.push("advance");
+  return parts.join(" · ") || "<span class=mut>-</span>";
+}
 // ------------------------------------------------------------------ Schedule
 async function schedule() {
   const all = (await j("/api/windows")).filter?.(w => ["upcoming", "live", "games finishing", "ended (collecting)"].includes(w.status)) || [];
@@ -152,7 +170,7 @@ async function schedule() {
     const fr = $("#fr").value, ft = $("#ft").value, fc = $("#fc").value;
     const l = all.filter(w => (!fr || w.region === fr) && (!ft || w.family === ft) && (!fc || w.category === fc)).sort((a, b) => a.begin - b.begin);
     const days = {}; l.forEach(w => (days[fmtDay(w.begin)] ||= []).push(w));
-    $("#sl").innerHTML = Object.entries(days).map(([d, ws]) => `<div class="card"><h2>${esc(d)}</h2>${table(["Start", "In", "Region", "Class", "Type", "Tournament", "Format"], ws.map(w => [new Date(w.begin * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), w.status === "upcoming" ? `<span data-cd="${w.begin}"></span>` : pill(w.status), w.region, esc(w.category), TYPE[w.family], link(w.window_id, w.name), `${w.match_cap || "?"} games`]))}</div>`).join("") || '<div class="card mut">Nothing matches.</div>';
+    $("#sl").innerHTML = Object.entries(days).map(([d, ws]) => `<div class="card"><h2>${esc(d)}</h2>${table(["Start", "In", "Region", "Class", "Type", "Tournament", "Format", "Rewards", "Paid"], ws.map(w => [new Date(w.begin * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), w.status === "upcoming" ? `<span data-cd="${w.begin}"></span>` : pill(w.status), w.region, esc(w.category), TYPE[w.family], link(w.window_id, w.name), `${w.match_cap || "?"} games`, rewardSummary(w), w.payout_at ? new Date(w.payout_at * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-"]))}</div>`).join("") || '<div class="card mut">Nothing matches.</div>';
     countdowns();
   };
   ["fr", "ft", "fc"].forEach(i => $("#" + i).onchange = draw); draw();

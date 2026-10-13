@@ -2,7 +2,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from . import classify, config, rules
+from . import classify as eventclass, config, rules
 
 
 def parse_time(s):
@@ -26,6 +26,78 @@ def team_mode(text):
     return "?"
 
 
+
+ITEM_TYPES = {"AthenaCharacter": "Outfit", "AthenaPickaxe": "Pickaxe", "AthenaBackpack": "Back Bling",
+              "AthenaItemWrap": "Wrap", "AthenaGlider": "Glider", "AthenaMusicPack": "Music",
+              "CosmeticVariantToken": "Style", "SparksSong": "Jam Track"}
+INTERNAL_TOKEN = re.compile(r"deny|regionlock|lock|ban", re.I)
+
+
+def _minutes(iso):
+    """'PT32M' / 'PT1H' / 'PT1H30M' -> minutes."""
+    m = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?", iso or "")
+    return int(m.group(1) or 0) * 60 + int(m.group(2) or 0) if m else None
+
+
+def _words(s):
+    s = re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=\D)(?=\d)", " ", s.replace("_", " "))
+    return s.strip()
+
+
+def _item(p):
+    t, v, q = p.get("rewardType"), str(p.get("value", "")), p.get("quantity", 1)
+    if t == "ecomm":
+        return {"type": "cash", "label": f"${q:,} {v}".replace(f"${q:,} USD", f"${q:,}"), "usd": q if v == "USD" else 0}
+    if t == "game":
+        kind, _, ident = v.partition(":")
+        name = re.sub(r"^(character|pickaxe|backpack|wrap|glider|spray|emoji|emote|toy|music|loadingscreen|bid|eid)_", "", ident, flags=re.I)
+        label = ITEM_TYPES.get(kind, "Emote")
+        if kind == "AthenaDance":
+            label = "Spray" if ident.lower().startswith("spray") else "Emoticon" if ident.lower().startswith("emoji") else "Emote"
+        return {"type": "item", "kind": label, "label": f"{label}: {name.replace('_', ' ').title()}", "id": v}
+    if t == "token":
+        if INTERNAL_TOKEN.search(v):
+            return None
+        name = re.sub(r"^S\d+_", "", v)
+        name = re.sub(r"_(NAC|NAW|EU|BR|ASIA|ME|OCE)$", "", name)
+        return {"type": "advance", "label": "Advance: " + _words(name)}
+    return {"type": "other", "label": f"{t}: {v}"}
+
+
+def reward_info(raw, ev, w, ld):
+    """Normalised rewards of a window and when they are paid out (epoch seconds)."""
+    cfg = (ld or {}).get("payoutsConfig") or {}
+    fmt = cfg.get("payoutTableIdFormat") or ""
+    cands = []
+    if fmt:
+        cands.append(fmt.replace("${windowId}", w["eventWindowId"]).replace("${eventId}", ev["eventId"])
+                     .replace("${round}", str(w.get("round", ""))))
+    cands += [w["eventWindowId"], ev["eventId"]]
+    table = next((raw.get("payoutTables", {}).get(c) for c in cands if raw.get("payoutTables", {}).get(c)), None)
+    tiers = []
+    for t in table or []:
+        kind, prev = t.get("scoringType"), 0
+        for r in sorted(t.get("ranks", []), key=lambda x: x["threshold"]):
+            items = [i for i in (_item(p) for p in r.get("payouts", [])) if i]
+            if items:
+                tiers.append({"kind": kind, "from": prev + 1 if kind == "rank" else None, "upto": r["threshold"], "items": items})
+            prev = r["threshold"]
+    cash = sum(i["usd"] * (t["upto"] - t["from"] + 1) for t in tiers if t["kind"] == "rank"
+               for i in t["items"] if i["type"] == "cash")
+    end = parse_time(w["endTime"])
+    date = cfg.get("payoutDate") or ""
+    m = re.fullmatch(r"(windowEnd|eventEnd)\+(PT.+)", date)
+    mins = _minutes(m.group(2)) if m else None
+    base = parse_time(ev["endTime"]) if m and m.group(1) == "eventEnd" else end
+    if mins is None:
+        mins = w.get("payoutDelay")
+    payout_at = base + mins * 60 if mins is not None else None
+    advance = sorted([t["upto"], next(i["label"] for i in t["items"] if i["type"] == "advance")]
+                     for t in tiers if t["kind"] == "rank" and any(i["type"] == "advance" for i in t["items"]))
+    return {"tiers": tiers, "cash_total": cash, "payout_at": payout_at,
+            "payout_rule": date or (f"window end + {mins} min" if mins is not None else None)}, advance
+
+
 def window_meta(raw, ev, w):
     """Game count, scoring rules, advancement cutoffs and type of one window."""
     tmpl = next((t for t in raw.get("templates", [])
@@ -38,14 +110,7 @@ def window_meta(raw, ev, w):
     rs = (raw.get("scoringRuleSets", {}).get(rsid)
           or raw.get("scoreLocationScoringRuleSets", {}).get(rsid))
     parsed = rules.parse(rs)
-    advance = []
-    for table in raw.get("payoutTables", {}).get(ev.get("eventId"), []) or []:
-        if table.get("scoringType") != "rank":
-            continue
-        for rk in table.get("ranks", []):
-            tokens = [p["value"] for p in rk.get("payouts", []) if p.get("rewardType") == "token"]
-            if tokens:
-                advance.append([rk["threshold"], tokens[0]])
+    rewards, advance = reward_info(raw, ev, w, ld)
     cap = tmpl.get("matchCap")
     playlist = tmpl.get("playlistId") or ""
     mode = team_mode(ev.get("eventId", ""))
@@ -55,10 +120,10 @@ def window_meta(raw, ev, w):
                              for k in config.RELOAD_WORDS) else "br")
     return {
         "match_cap": cap, "playlist": playlist, "ruleset": rsid,
-        "rules": parsed, "advance": sorted(advance),
+        "rules": parsed, "advance": advance, "rewards": rewards,
         "round_type": (w.get("metadata") or {}).get("RoundType"),
         "mode": mode, "game_type": gtype, "lobby": config.LOBBY.get((gtype, mode)),
-        "category": classify.category(ev.get("eventId", ""), w["eventWindowId"], playlist, gtype, mode),
+        "category": eventclass.category(ev.get("eventId", ""), w["eventWindowId"], playlist, gtype, mode),
         "stage": "open" if re.search(r"round1|heat", w["eventWindowId"], re.I) else "later",
         "format": rules.format_key(cap, parsed) if parsed else None,
     }

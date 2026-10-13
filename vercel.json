@@ -4,6 +4,6 @@
     "index.py": { "maxDuration": 300 }
   },
   "crons": [
-    { "path": "/api/tick", "schedule": "* * * * *" }
+    { "path": "/api/tick", "schedule": "0 12 * * *" }
   ]
 }

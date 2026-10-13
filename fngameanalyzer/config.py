@@ -20,4 +20,12 @@ FAMILIES = {
     "CASHCUP": ["cashcup", "cash_cup"],
 }
 REGIONS = ["NAC", "NAE", "NAW", "EU", "BR", "ASIA", "OCE", "ME"]
+# Teams per lobby by (game type, mode). None = unknown (Reload solo is 24 or 40): the model then
+# uses the highest placement seen in past games of the same playlist.
+LOBBY = {
+    ("br", "solo"): 100, ("br", "duos"): 50, ("br", "trios"): 33, ("br", "squads"): 25,
+    ("reload", "solo"): None, ("reload", "duos"): 20, ("reload", "squads"): 10,
+}
+RELOAD_WORDS = ["reload", "_re_", "blastberry", "dashberry", "punchberry", "piperboot",
+                "sourspawn", "jumpbear"]
 REQUEST_DELAY = 0.4  # seconds between API calls

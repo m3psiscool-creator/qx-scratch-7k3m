@@ -23,7 +23,8 @@ const $=id=>document.getElementById(id);let WS=[];
 const fmt=t=>new Date(t*1000).toLocaleString([],{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
 function info(){const w=WS.find(v=>v.window_id==$('w').value);if(!w){$('info').textContent='';return}
  $('info').innerHTML=`<b>${w.status}</b> &middot; ${fmt(w.begin)} &rarr; ${fmt(w.end)}<br>
- ${w.family} ${w.region} ${w.mode} ${w.round_type||''}<br>
+ ${w.family} ${w.region} &middot; ${w.game_type==='reload'?'Reload':'Battle Royale'} ${w.mode} &middot; ${w.stage==='open'?'open first round':'later round'}<br>
+ Lobby: ${w.lobby?w.lobby+' '+(w.mode==='solo'?'players':'teams'):'unknown (Reload solo is 24 or 40)'}<br>
  ${w.match_cap?w.match_cap+' games':'games unknown'}<br><small>${w.scoring||''}</small>
  ${w.advance.length?'<br>'+w.advance.map(a=>'Top '+a[0]+' &rarr; '+a[1]).join('<br>'):''}`}
 fetch('/api/windows').then(r=>r.json()).then(ws=>{WS=ws;
@@ -49,6 +50,7 @@ def window_info(w):
         "window_id": w["window_id"], "family": w["family"], "region": w["region"],
         "begin": w["begin"], "end": w["end"], "final": w["final"], "status": status,
         "match_cap": m.get("match_cap"), "mode": m.get("mode"), "round_type": m.get("round_type"),
+        "game_type": m.get("game_type"), "lobby": m.get("lobby"), "stage": m.get("stage"),
         "advance": m.get("advance", []),
         "scoring": rules.describe(m["rules"]) if m.get("rules") else None,
     }

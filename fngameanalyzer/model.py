@@ -158,6 +158,33 @@ MIN_PLAYERS = 100
 _game_cache = {}
 
 
+def observed_lobby(w):
+    """Highest placement seen in a window's recorded games (about the lobby size)."""
+    if len(w.get("sessions") or []) < 100:
+        return None
+    return max((g[0] for p in w["sessions"] for g in p), default=None)
+
+
+def lobby_size(w, finished):
+    """Teams per lobby: configured table value, else seen in past windows of the same playlist."""
+    meta = w.get("meta") or {}
+    seen = [observed_lobby(f) for f in finished
+            if (f.get("meta") or {}).get("playlist") and
+            f["meta"]["playlist"] == meta.get("playlist")]
+    seen = [s for s in seen if s]
+    return max(seen + [meta.get("lobby") or 0]) or None
+
+
+def rescale_placements(w, target_lobby):
+    """Copy of w whose placements are mapped to a lobby of target_lobby teams."""
+    src = (w.get("meta") or {}).get("lobby") or observed_lobby(w)
+    if not target_lobby or not src or src == target_lobby:
+        return w
+    f = target_lobby / src
+    sess = [[[max(1, math.ceil(g[0] * f))] + list(g[1:]) for g in p] for p in w["sessions"]]
+    return {**w, "sessions": sess, "window_id": f"{w['window_id']}@{target_lobby}"}
+
+
 def _rescored_games(w, rule_list):
     """Per-player list of per-game points for window w under the target's rules."""
     key = (w["window_id"], json.dumps(rule_list))
@@ -167,7 +194,37 @@ def _rescored_games(w, rule_list):
     return _game_cache[key]
 
 
-def rescored_prior(target, finished, rank, entrants=None):
+_cal_cache = {}
+
+
+def calibration(target, finished, rank):
+    """Leave-one-out back-test of the re-scoring on past windows of the same kind.
+
+    Returns (mean log error, error variance, n); error = actual - predicted in log1p space."""
+    meta = target.get("meta") or {}
+    key = (meta.get("game_type"), meta.get("mode"), meta.get("stage"), rank, len(finished))
+    if key in _cal_cache:
+        return _cal_cache[key]
+    tests = [w for w in finished
+             if (w.get("meta") or {}).get("mode") == meta.get("mode")
+             and w["meta"].get("game_type") == meta.get("game_type")
+             and w["meta"].get("stage") == meta.get("stage")
+             and w["meta"].get("rules") and len(w["sessions"]) >= 900
+             and len(w["sessions"]) >= rank]
+    tests = sorted(tests, key=lambda w: w["end"], reverse=True)[:6]
+    deltas = []
+    for t in tests:
+        others = [w for w in finished if w["window_id"] != t["window_id"]]
+        p = rescored_prior(t, others, rank, t.get("entrants"), calibrate=False)
+        if p:
+            deltas.append(_l(t["points"][rank - 1]) - p["mean"])
+    res = ((statistics.mean(deltas), statistics.pvariance(deltas), len(deltas))
+           if len(deltas) >= 4 else (0.0, 0.0, len(deltas)))
+    _cal_cache[key] = res
+    return res
+
+
+def rescored_prior(target, finished, rank, entrants=None, calibrate=True):
     """No past window has this format: replay old games under the target's scoring rules.
 
     Each past player's games are re-scored, M = target game count of them are drawn
@@ -177,26 +234,34 @@ def rescored_prior(target, finished, rank, entrants=None):
     rule_list, cap = meta.get("rules"), meta.get("match_cap")
     if not rule_list or not cap:
         return None
-    pool = [w for w in finished
-            if w["family"] == target["family"] and w["sessions"] and len(w["sessions"]) >= MIN_PLAYERS
-            and (w.get("meta") or {}).get("mode") == meta.get("mode")]
+    cands = [w for w in finished
+             if w["sessions"] and len(w["sessions"]) >= MIN_PLAYERS
+             and (w.get("meta") or {}).get("mode") == meta.get("mode")]
+    # Prefer the same game type (Reload/BR) and the same stage (open first round vs later round),
+    # then widen. Placements are rescaled to the target lobby size, so widening is safe.
+    same_type = [w for w in cands if w["meta"].get("game_type") == meta.get("game_type")]
+    same_stage = [w for w in same_type if w["meta"].get("stage") == meta.get("stage")]
+    pool = next((c for c in (same_stage, same_type, cands) if c), [])
     pool = sorted(pool, key=lambda w: w["end"], reverse=True)[:RESCORE_WINDOWS]
     if not pool:
         return None
     if not entrants:
         entrants = statistics.median(w["entrants"] for w in pool if w.get("entrants"))
+    target_lobby = lobby_size(target, finished)
     rng = random.Random(7)
     vals, ws, spread = [], [], []
     for i, w in enumerate(pool):
         r = max(1, round(rank * (w.get("entrants") or entrants) / entrants))
         if r > len(w["sessions"]):
             continue
-        games = [g for g in _rescored_games(w, rule_list) if g]
+        scaled = rescale_placements(w, target_lobby)
+        games = [g for g in _rescored_games(scaled, rule_list) if len(g) >= cap]
+        if len(games) < r:
+            continue
         reps = []
         for _ in range(RESCORE_REPS):
-            board = sorted((sum(rng.sample(g, cap)) if len(g) >= cap
-                            else sum(g) * cap / len(g)) for g in games)
-            reps.append(_l(board[-r]) if r <= len(board) else None)
+            board = sorted(sum(rng.sample(g, cap)) for g in games)
+            reps.append(_l(board[-r]))
         reps = [x for x in reps if x is not None]
         if reps:
             vals.append(statistics.mean(reps))
@@ -206,7 +271,10 @@ def rescored_prior(target, finished, rank, entrants=None):
         return None
     m, var = _wmean_var(vals, ws) if len(vals) > 1 else (vals[0], 0.25 ** 2)
     var = max(var + statistics.mean(spread), RESCORE_SD_FLOOR ** 2)
-    return {"mean": m, "var": var, "n": len(vals), "beta": 0.0, "entrants": entrants}
+    bias, cal_var, cal_n = calibration(target, finished, rank) if calibrate else (0.0, 0.0, 0)
+    return {"mean": m + bias, "var": var + cal_var, "n": len(vals), "beta": 0.0,
+            "entrants": entrants, "bias_corrected": round(math.expm1(bias), 3),
+            "backtest_n": cal_n}
 
 
 def predict(target, finished, rank, entrants=None, snapshot=None, snaps_by_window=None, now=None):

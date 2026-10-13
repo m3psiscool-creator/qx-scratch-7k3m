@@ -46,11 +46,18 @@ def window_meta(raw, ev, w):
             if tokens:
                 advance.append([rk["threshold"], tokens[0]])
     cap = tmpl.get("matchCap")
+    playlist = tmpl.get("playlistId") or ""
+    mode = team_mode(ev.get("eventId", ""))
+    if mode == "?":
+        mode = team_mode(playlist)
+    gtype = ("reload" if any(k in (playlist + ev.get("eventId", "")).lower()
+                             for k in config.RELOAD_WORDS) else "br")
     return {
-        "match_cap": cap, "playlist": tmpl.get("playlistId"), "ruleset": rsid,
+        "match_cap": cap, "playlist": playlist, "ruleset": rsid,
         "rules": parsed, "advance": sorted(advance),
         "round_type": (w.get("metadata") or {}).get("RoundType"),
-        "mode": team_mode(ev.get("eventId", "")),
+        "mode": mode, "game_type": gtype, "lobby": config.LOBBY.get((gtype, mode)),
+        "stage": "open" if re.search(r"round1|heat", w["eventWindowId"], re.I) else "later",
         "format": rules.format_key(cap, parsed) if parsed else None,
     }
 

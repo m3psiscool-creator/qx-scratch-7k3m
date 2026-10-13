@@ -26,12 +26,17 @@ def login(code):
     r = requests.post(
         f"{config.ACCOUNT}/public/account/{acc}/deviceAuth",
         headers={"Authorization": "Bearer " + tok["access_token"]}, timeout=30)
-    if r.status_code != 200:
-        raise RuntimeError(f"Device auth error {r.status_code}: {r.text[:300]}")
-    d = r.json()
-    config.AUTH_FILE.write_text(json.dumps(
-        {"account_id": acc, "device_id": d["deviceId"], "secret": d["secret"]}))
+    if r.status_code == 200:
+        d = r.json()
+        _save({"account_id": acc, "device_id": d["deviceId"], "secret": d["secret"]})
+    else:  # this client may not create device auth: keep a rolling refresh token instead
+        print("Device auth not allowed; using refresh token (re-login if idle > ~8h).")
+        _save({"account_id": acc, "refresh_token": tok["refresh_token"]})
     return acc
+
+
+def _save(d):
+    config.AUTH_FILE.write_text(json.dumps(d))
 
 
 class Session:
@@ -45,9 +50,15 @@ class Session:
 
     def bearer(self):
         if time.time() > self._exp - 60:
-            t = _token({"grant_type": "device_auth", "account_id": self.account_id,
-                        "device_id": self.auth["device_id"], "secret": self.auth["secret"],
-                        "token_type": "eg1"})
+            if "refresh_token" in self.auth:
+                t = _token({"grant_type": "refresh_token",
+                            "refresh_token": self.auth["refresh_token"], "token_type": "eg1"})
+                self.auth["refresh_token"] = t["refresh_token"]
+                _save(self.auth)
+            else:
+                t = _token({"grant_type": "device_auth", "account_id": self.account_id,
+                            "device_id": self.auth["device_id"], "secret": self.auth["secret"],
+                            "token_type": "eg1"})
             self._tok = t["access_token"]
             self._exp = time.time() + int(t.get("expires_in", 7200))
         return self._tok

@@ -10,8 +10,8 @@ ACCOUNT = "https://account-public-service-prod.ol.epicgames.com/account/api"
 EVENTS = "https://events-public-service-live.ol.epicgames.com/api/v1"
 
 # Public Fortnite PC client (well known, not a secret of the user).
-CLIENT_ID = "3446cd72694c4a4485d81b77adbb2141"  # iOS client; allowed to create device auth
-CLIENT_SECRET = "9209d4a5e25a457fb9b07489d313b41a"
+CLIENT_ID = "ec684b8c687f479fadea3cb2ad83f5c6"
+CLIENT_SECRET = "e1f31c211f28413186262d37a13fc84d"
 LOGIN_URL = f"https://www.epicgames.com/id/api/redirect?clientId={CLIENT_ID}&responseType=code"
 
 # family -> keywords searched (lowercase) in the event id

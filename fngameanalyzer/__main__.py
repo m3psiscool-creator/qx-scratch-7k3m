@@ -38,6 +38,8 @@ def _sync(e, regions):
     out = []
     for region in regions:
         for w in e.windows(region):
+            if w["region"] not in regions:  # the API also returns neighbouring regions
+                continue
             storage.upsert_window(w)
             out.append(w)
     return out
@@ -45,7 +47,8 @@ def _sync(e, regions):
 
 def cmd_collect(a):
     e = _epic()
-    have = {w["window_id"] for w in storage.windows(final=True) if w["sessions"]}
+    have = {w["window_id"] for w in storage.windows(final=True)
+            if w["sessions"] and w["players"] and (a.refresh is False)}
     for w in _sync(e, a.regions):
         if e.finished(w) and w["window_id"] not in have:
             try:
@@ -91,6 +94,8 @@ def main():
         s.add_argument("--regions", nargs="+", default=["EU"])
         if name != "probe":
             s.add_argument("--max-rank", type=int, default=1000)
+        if name == "collect":
+            s.add_argument("--refresh", action="store_true", help="re-download stored windows")
         if name == "watch":
             s.add_argument("--interval", type=int, default=300)
         s.set_defaults(f=f)

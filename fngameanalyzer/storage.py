@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS windows(
  begin REAL, end REAL, entrants INTEGER, points TEXT, games TEXT, final INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS snapshots(
  id INTEGER PRIMARY KEY AUTOINCREMENT, window_id TEXT, ts REAL,
- entrants INTEGER, points TEXT, games TEXT);
+ entrants INTEGER, points TEXT, games TEXT, top TEXT);
+CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS names(account_id TEXT PRIMARY KEY, name TEXT);
 """
 
 
@@ -18,9 +20,10 @@ def db():
     c = sqlite3.connect(config.DB_FILE)
     c.row_factory = sqlite3.Row
     c.executescript(SCHEMA)
-    for col in ("meta", "sessions"):  # added later; migrate old databases
+    for table, col in (("windows", "meta"), ("windows", "sessions"), ("windows", "players"),
+                       ("snapshots", "top")):  # added later; migrate old databases
         try:
-            c.execute(f"ALTER TABLE windows ADD COLUMN {col} TEXT")
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
             pass
     return c
@@ -37,17 +40,21 @@ def upsert_window(w):
 
 def save_final(window_id, lb):
     with db() as c:
-        c.execute("UPDATE windows SET entrants=?,points=?,games=?,sessions=?,final=1"
+        c.execute("UPDATE windows SET entrants=?,points=?,games=?,sessions=?,players=?,final=1"
                   " WHERE window_id=?",
                   (lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]),
-                   json.dumps(lb.get("sessions", [])), window_id))
+                   json.dumps(lb.get("sessions", [])), json.dumps(lb.get("players", [])),
+                   window_id))
 
 
 def save_snapshot(window_id, lb, ts=None):
+    top = [{"rank": i + 1, "players": lb["players"][i], "points": lb["points"][i],
+            "games": lb["games"][i]} for i in range(min(60, len(lb["points"])))
+           ] if lb.get("players") else []
     with db() as c:
-        c.execute("INSERT INTO snapshots(window_id,ts,entrants,points,games) VALUES(?,?,?,?,?)",
+        c.execute("INSERT INTO snapshots(window_id,ts,entrants,points,games,top) VALUES(?,?,?,?,?,?)",
                   (window_id, ts or time.time(), lb["entrants"],
-                   json.dumps(lb["points"]), json.dumps(lb["games"])))
+                   json.dumps(lb["points"]), json.dumps(lb["games"]), json.dumps(top)))
 
 
 def _w(r):
@@ -55,6 +62,7 @@ def _w(r):
     d["points"] = json.loads(d["points"]) if d["points"] else []
     d["games"] = json.loads(d["games"]) if d["games"] else []
     d["sessions"] = json.loads(d["sessions"]) if d.get("sessions") else []
+    d["players"] = json.loads(d["players"]) if d.get("players") else []
     d["meta"] = json.loads(d["meta"]) if d.get("meta") else {}
     return d
 
@@ -71,13 +79,59 @@ def get_window(window_id):
     return _w(r) if r else None
 
 
-def snapshots(window_id):
+def snapshots(window_id, last=None, light=False):
+    q = "SELECT * FROM snapshots WHERE window_id=? ORDER BY ts" + (" DESC LIMIT ?" if last else "")
     with db() as c:
-        rows = c.execute("SELECT * FROM snapshots WHERE window_id=? ORDER BY ts", (window_id,))
+        rows = c.execute(q, (window_id, last) if last else (window_id,))
         out = []
         for r in rows:
             d = dict(r)
             d["points"] = json.loads(d["points"])
             d["games"] = json.loads(d["games"])
+            d["top"] = json.loads(d["top"]) if d.get("top") else []
             out.append(d)
-    return out
+    return out[::-1] if last else out
+
+
+def window_list():
+    """Windows without the big columns."""
+    return [{k: v for k, v in w.items() if k not in ("points", "games", "sessions", "players")}
+            for w in windows()]
+
+
+def kv_get(k):
+    with db() as c:
+        r = c.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
+    return json.loads(r[0]) if r else None
+
+
+def kv_set(k, v):
+    with db() as c:
+        c.execute("INSERT INTO kv(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
+                  (k, json.dumps(v)))
+
+
+import contextlib  # noqa: E402
+
+
+@contextlib.contextmanager
+def locked(name="auth"):
+    yield  # single local process: no lock needed
+
+
+def names_get(ids):
+    with db() as c:
+        return {r[0]: r[1] for r in c.execute("SELECT account_id,name FROM names") if r[0] in set(ids)}
+
+
+def names_set(d):
+    with db() as c:
+        for k, v in d.items():
+            c.execute("INSERT INTO names VALUES(?,?) ON CONFLICT(account_id) DO UPDATE SET name=excluded.name",
+                      (k, v))
+
+
+import os as _os  # noqa: E402
+
+if _os.environ.get("POSTGRES_URL") or _os.environ.get("DATABASE_URL"):
+    from .storage_pg import *  # noqa: F401,F403,E402  (hosted: use Postgres instead)

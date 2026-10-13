@@ -2,7 +2,10 @@ import os
 from pathlib import Path
 
 HOME = Path(os.environ.get("FNGA_HOME", Path.home() / ".fngameanalyzer"))
-HOME.mkdir(parents=True, exist_ok=True)
+try:
+    HOME.mkdir(parents=True, exist_ok=True)
+except OSError:  # read-only filesystem (hosted)
+    pass
 AUTH_FILE = HOME / "auth.json"
 DB_FILE = HOME / "data.db"
 
@@ -19,7 +22,9 @@ FAMILIES = {
     "FNCS": ["fncs"],
     "CASHCUP": ["cashcup", "cash_cup"],
 }
-REGIONS = ["NAC", "NAE", "NAW", "EU", "BR", "ASIA", "OCE", "ME"]
+# Epic's own tournamentType -> our family. Anything else (Ranked, Victory, Workshop...) is ignored.
+TOURNAMENT_TYPES = {"CashCup": "CASHCUP", "FNCS": "FNCS", "ShopCup": "SKINCUP"}
+REGIONS =["NAC", "NAE", "NAW", "EU", "BR", "ASIA", "OCE", "ME"]
 # Teams per lobby by (game type, mode). None = unknown (Reload solo is 24 or 40): the model then
 # uses the highest placement seen in past games of the same playlist.
 LOBBY = {
@@ -28,4 +33,6 @@ LOBBY = {
 }
 RELOAD_WORDS = ["reload", "_re_", "blastberry", "dashberry", "punchberry", "piperboot",
                 "sourspawn", "jumpbear"]
-REQUEST_DELAY = 0.4  # seconds between API calls
+REQUEST_DELAY = float(os.environ.get("FNGA_DELAY", "0.4"))  # seconds between API calls
+# Regions the hosted collector tracks (comma separated Epic region codes in event ids).
+TRACKED_REGIONS = [r for r in os.environ.get("FNGA_REGIONS", "NAC,BR").split(",") if r]

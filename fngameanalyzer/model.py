@@ -113,10 +113,60 @@ def progress(target, snap, rank, pool, now=None):
     return max(time_p, 0.01), "time"
 
 
+_timed_cache = {}
+
+
+def _timed_games(w):
+    """Per player: list of (end time, points) per game, scored with the window's own rules."""
+    if w["window_id"] not in _timed_cache:
+        rl = (w.get("meta") or {}).get("rules") or []
+        _timed_cache[w["window_id"]] = [
+            [(g[3], rules.game_points(rl, rules.session_stats(g))) for g in p if len(g) > 3 and g[3]]
+            for p in w["sessions"]]
+    return _timed_cache[w["window_id"]]
+
+
+def board_at(w, t):
+    """Rebuilt leaderboard (points, best first) of a finished window at time t."""
+    return sorted((sum(pt for end, pt in p if end <= t) for p in _timed_games(w)), reverse=True)
+
+
+def shape_pool(target, finished, limit=12):
+    """Finished windows that ran like the target (same game count, similar length)."""
+    meta = target.get("meta") or {}
+    dur = target["end"] - target["begin"]
+    pool = [w for w in finished
+            if w["window_id"] != target["window_id"] and len(w.get("sessions") or []) >= 300
+            and (w.get("meta") or {}).get("match_cap") == meta.get("match_cap")
+            and abs((w["end"] - w["begin"]) - dur) <= 0.25 * dur
+            and any(len(g) > 3 and g[3] for g in w["sessions"][0][:1])]
+    same = [w for w in pool if w["meta"].get("game_type") == meta.get("game_type")]
+    return sorted(same if len(same) >= 3 else pool, key=lambda w: w["end"], reverse=True)[:limit]
+
+
+def reconstructed_growth(target, snap, finished, rank):
+    """log(final / now) at the same point in time of the window, seen in similar past windows."""
+    p = min(max((snap["ts"] - target["begin"]) / max(target["end"] - target["begin"], 1), 0.0), 1.0)
+    out = []
+    for w in shape_pool(target, finished):
+        if rank > len(w["points"]) * 0.5:
+            continue
+        cur = board_at(w, w["begin"] + p * (w["end"] - w["begin"]))
+        if rank <= len(cur) and cur[rank - 1] > 0:
+            out.append(_l(w["points"][rank - 1]) - _l(cur[rank - 1]))
+    return p, out
+
+
 def live(target, snap, finished, rank, snaps_by_window=None, now=None):
     cur = _at(snap["points"], rank)
     if cur is None:
         return None
+    p_t, rg = reconstructed_growth(target, snap, finished, rank)
+    if len(rg) >= 3 and p_t >= 0.03:
+        g = statistics.mean(rg)
+        var = max(statistics.pvariance(rg) * (1 + 1 / len(rg)), 0.05 ** 2)
+        return {"mean": _l(cur) + g, "var": var, "progress": p_t, "basis": "time (rebuilt from past events)",
+                "learned": True, "current": cur, "n": len(rg)}
     pool = comparable(target, finished)
     p, basis = progress(target, snap, rank, pool, now)
     growth = []
@@ -248,6 +298,8 @@ def rescored_prior(target, finished, rank, entrants=None, calibrate=True):
     if not entrants:
         entrants = statistics.median(w["entrants"] for w in pool if w.get("entrants"))
     target_lobby = lobby_size(target, finished)
+    if not target_lobby and pool[0]["meta"].get("game_type") != meta.get("game_type"):
+        return None  # unknown lobby size and a different game type: placements aren't comparable
     rng = random.Random(7)
     vals, ws, spread = [], [], []
     for i, w in enumerate(pool):
@@ -255,12 +307,14 @@ def rescored_prior(target, finished, rank, entrants=None, calibrate=True):
         if r > len(w["sessions"]):
             continue
         scaled = rescale_placements(w, target_lobby)
-        games = [g for g in _rescored_games(scaled, rule_list) if len(g) >= cap]
+        # history keeps at most 11 games, so a 12-game target scales up from 11
+        games = [g for g in _rescored_games(scaled, rule_list) if len(g) >= cap - 1]
         if len(games) < r:
             continue
         reps = []
         for _ in range(RESCORE_REPS):
-            board = sorted(sum(rng.sample(g, cap)) for g in games)
+            board = sorted(sum(rng.sample(g, min(cap, len(g)))) * cap / min(cap, len(g))
+                           for g in games)
             reps.append(_l(board[-r]))
         reps = [x for x in reps if x is not None]
         if reps:

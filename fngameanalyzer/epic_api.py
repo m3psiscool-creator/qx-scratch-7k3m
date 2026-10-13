@@ -66,6 +66,15 @@ class Epic:
     def __init__(self, session):
         self.s = session
 
+    def display_names(self, ids):
+        out = {}
+        for i in range(0, len(ids), 100):
+            chunk = ids[i:i + 100]
+            r = self.s.get(f"{config.ACCOUNT}/public/account", accountId=chunk)
+            for a in r:
+                out[a["id"]] = a.get("displayName") or a["id"][:8]
+        return out
+
     def raw_events(self, region="EU"):
         return self.s.get(f"{config.EVENTS}/events/Fortnite/download/{self.s.account_id}",
                           region=region, platform="Windows", teamAccountIds=self.s.account_id)
@@ -76,9 +85,12 @@ class Epic:
         out = []
         for ev in raw.get("events", []):
             fam, reg = classify(ev.get("eventId", ""))
+            ttype = (ev.get("metadata") or {}).get("tournamentType")
+            if ttype:  # Epic labels it: trust that over name guesses
+                fam = config.TOURNAMENT_TYPES.get(ttype)
             for w in ev.get("eventWindows", []):
                 f2, r2 = classify(w.get("eventWindowId", ""))
-                fam2 = fam or f2
+                fam2 = fam or (f2 if not ttype else None)
                 if not fam2:
                     continue
                 out.append({
@@ -96,7 +108,7 @@ class Epic:
 
     def leaderboard(self, event_id, window_id, max_rank=1000):
         """Points, games and per-game [placement, elims, win] by rank (index 0 = rank 1)."""
-        points, games, sessions = [], [], []
+        points, games, sessions, players = [], [], [], []
         p, total, per = 0, 1, 0
         while p < total and len(points) < max_rank:
             d = self.page(event_id, window_id, p)
@@ -108,7 +120,9 @@ class Epic:
                 hist = e.get("sessionHistory") or []
                 games.append(len(hist))
                 sessions.append([[(s.get("trackedStats") or {}).get(k, 0) for k in rules.STATS]
+                                 + [round(parse_time(s["endTime"])) if s.get("endTime") else 0]
                                  for s in hist])
+                players.append(e.get("teamAccountIds") or [])
             p += 1
             if not ents:
                 break
@@ -116,7 +130,7 @@ class Epic:
         if total > p and per:  # truncated: estimate from last page
             last = self.page(event_id, window_id, total - 1)
             entrants = (total - 1) * per + len(last.get("entries", []))
-        return {"points": points, "games": games, "sessions": sessions,
+        return {"points": points, "games": games, "sessions": sessions, "players": players,
                 "entrants": entrants, "total_pages": total}
 
     @staticmethod

@@ -7,7 +7,7 @@ from .epic_api import Epic
 
 SYNC_EVERY = 600       # refresh the event list this often (seconds)
 MAX_RANK = 1000
-BACKFILL_PER_POLL = 2  # old finished windows downloaded per pass when time allows
+BACKFILL_PER_POLL = 1  # old finished windows downloaded per pass when time allows
 
 
 def sync_windows(e, force=False):
@@ -50,7 +50,7 @@ def _final(e, w):
     return ("empty", w["window_id"], 0)
 
 
-def poll_once(e, budget=22.0):
+def poll_once(e, budget=12.0):
     """One pass: snapshot every live window (in parallel), then store finished windows."""
     t0 = time.time()
     now = t0

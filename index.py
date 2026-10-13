@@ -79,7 +79,7 @@ def tick(authorization: str = Header(default=""), x_admin_key: str = Header(defa
     secret = os.environ.get("CRON_SECRET", "")
     if not (secret and hmac.compare_digest(authorization, f"Bearer {secret}")) and not _is_admin(x_admin_key):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
-    return collector.run_tick(duration=int(os.environ.get("TICK_SECONDS", "55")))
+    return collector.run_tick(duration=int(os.environ.get("TICK_SECONDS", "25")))
 
 
 @app.post("/api/admin/window")

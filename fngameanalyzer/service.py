@@ -2,7 +2,7 @@
 import statistics
 import time
 
-from . import auth, config, model, rules, storage
+from . import auth, classify, config, model, rules, storage
 from .epic_api import Epic
 
 
@@ -30,6 +30,7 @@ def window_info(w):
         "window_id": w["window_id"], "family": w["family"], "region": w["region"],
         "name": pretty(w.get("event_id") or "", w["window_id"]),
         "begin": w["begin"], "end": w["end"], "final": w["final"], "status": status,
+        "category": classify.of(w),
         "match_cap": m.get("match_cap"), "mode": m.get("mode"), "game_type": m.get("game_type"),
         "lobby": m.get("lobby"), "stage": m.get("stage"), "advance": m.get("advance", []),
         "scoring": rules.describe(m["rules"]) if m.get("rules") else None,
@@ -43,7 +44,15 @@ def list_windows():
                                      else -w["begin"]))
 
 
-def run_predict(window_id, top, entrants=None):
+def run_predict(window_id, top, entrants=None, approx=False):
+    model._ctx.approx = bool(approx)
+    try:
+        return _run_predict(window_id, top, entrants)
+    finally:
+        model._ctx.approx = False
+
+
+def _run_predict(window_id, top, entrants=None):
     target = storage.get_window(window_id)
     if not target:
         raise ValueError("Unknown window")
@@ -54,8 +63,13 @@ def run_predict(window_id, top, entrants=None):
         snap = last[0] if last else None
     entrants = entrants or (snap or {}).get("entrants")
     r = model.predict(target, finished, top, entrants, snap, {})
+    if r and not model.approx() and not r["prior"] and not (r.get("live") or {}).get("learned"):
+        r = None   # strict: a class with no history gets no estimate rather than a crude guess
     if not r:
-        raise ValueError("Not enough data to predict this window yet")
+        cat = classify.of(target)
+        n = sum(1 for w in finished if classify.of(w) == cat and w["family"] == target["family"])
+        raise ValueError(f"No usable '{cat}' history yet ({n} finished events of that class). "
+                         "Tick 'Allow similar classes' to estimate from the nearest other classes.")
     r["entrants_used"] = entrants or (r["prior"] or {}).get("entrants") or 0
     r["snapshot_age_s"] = round(time.time() - snap["ts"]) if snap else None
     if not target["final"]:
@@ -110,7 +124,9 @@ def live_view(window_id, n=25):
             storage.names_set({k: v for k, v in names.items() if k in missing})
         except Exception:
             pass  # names are a nicety
-    form = player_form(ids, storage.windows(final=True), w["family"])
+    cat = classify.of(w)
+    form = player_form(ids, [f for f in storage.windows(final=True) if classify.of(f) == cat],
+                       w["family"])
     return {"snapshot": {"age_s": round(time.time() - s["ts"]), "entrants": s["entrants"]},
             "top": [{"rank": t["rank"], "points": t["points"], "games": t["games"],
                      "players": [{"id": a, "name": names.get(a, a[:8]), **form.get(a, {})}

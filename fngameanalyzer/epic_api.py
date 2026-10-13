@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 
-from . import config, rules
+from . import classify, config, rules
 
 
 def parse_time(s):
@@ -57,6 +57,7 @@ def window_meta(raw, ev, w):
         "rules": parsed, "advance": sorted(advance),
         "round_type": (w.get("metadata") or {}).get("RoundType"),
         "mode": mode, "game_type": gtype, "lobby": config.LOBBY.get((gtype, mode)),
+        "category": classify.category(ev.get("eventId", ""), w["eventWindowId"], playlist, gtype, mode),
         "stage": "open" if re.search(r"round1|heat", w["eventWindowId"], re.I) else "later",
         "format": rules.format_key(cap, parsed) if parsed else None,
     }

@@ -48,9 +48,9 @@ def windows():
 
 
 @app.get("/api/predict")
-def predict(window: str, top: int, entrants: str = ""):
+def predict(window: str, top: int, entrants: str = "", approx: int = 0):
     try:
-        return service.run_predict(window, top, int(entrants) if entrants else None)
+        return service.run_predict(window, top, int(entrants) if entrants else None, bool(approx))
     except Exception as e:
         return _err(e)
 

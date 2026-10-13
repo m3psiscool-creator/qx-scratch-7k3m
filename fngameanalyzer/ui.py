@@ -22,11 +22,14 @@ th{color:var(--mut);font-weight:500;font-size:.82rem}.num{font-variant-numeric:t
 <div class=card>
  <div class=row>
   <label>Region <select id=fr onchange="render()"><option value="">All regions</option></select></label>
+  <label>Class <select id=fc onchange="render()"><option value="">All classes</option></select></label>
   <label>Type <select id=ft onchange="render()"><option value="">All types</option>
    <option value=FNCS>FNCS</option><option value=CASHCUP>Cash cups</option><option value=SKINCUP>Skin cups</option></select></label>
  </div>
  <label>Tournament <select id=w></select></label>
  <div id=info style="margin-top:10px"></div>
+ <label style="display:flex;gap:8px;align-items:center"><input id=ap type=checkbox style="width:auto;margin:0">
+  <span>Allow similar classes when this class has no history <small>(approximate)</small></span></label>
  <div class=row>
   <label>Top X <input id=x type=number min=1 value=35></label>
   <label>Entrants (optional) <input id=e type=number min=1 placeholder="auto"></label>
@@ -52,7 +55,7 @@ function cur(){return WS.find(v=>v.window_id==$('w').value)}
 function info(){const w=cur();if(!w){$('info').textContent='';return}
  const cls=(w.status=='live'||w.status=='games finishing')?'live':w.status=='upcoming'?'up':'';
  $('info').innerHTML=`<span class="pill ${cls}">${w.status}</span> ${fmt(w.begin)} &rarr; ${fmt(w.end)}<br>
- <b>${esc(w.name)}</b> &middot; ${TYPE[w.family]} ${w.region} &middot; ${w.game_type=='reload'?'Reload':'Battle Royale'} ${w.mode} &middot; ${w.match_cap||'?'} games
+ <b>${esc(w.name)}</b> &middot; ${TYPE[w.family]} ${w.region} &middot; <b>${w.category}</b> &middot; ${w.game_type=='reload'?'Reload':'Battle Royale'} ${w.mode} &middot; ${w.match_cap||'?'} games
  &middot; lobby ${w.lobby?w.lobby+(w.mode=='solo'?' players':' teams'):'unknown'}<br>
  <small>${w.scoring||''}</small>${w.advance.length?'<br><small>'+w.advance.map(a=>'Top '+a[0]+' advance').join(', ')+'</small>':''}`;
  live()}
@@ -62,11 +65,11 @@ async function status(){const s=await j('/api/status');
 const TYPE={FNCS:'FNCS',CASHCUP:'Cash cup',SKINCUP:'Skin cup'};
 const GROUPS=[['Live now',w=>w.status=='live'||w.status=='games finishing'],['Collecting results',w=>w.status=='ended (collecting)'],
  ['Upcoming (soonest first)',w=>w.status=='upcoming'],['Finished (latest first)',w=>w.status=='finished']];
-function render(){const fr=$('fr').value,ft=$('ft').value,keep=$('w').value;
- const list=ALL.filter(w=>(!fr||w.region==fr)&&(!ft||w.family==ft));
+function render(){const fr=$('fr').value,ft=$('ft').value,fc=$('fc').value,keep=$('w').value;
+ const list=ALL.filter(w=>(!fr||w.region==fr)&&(!ft||w.family==ft)&&(!fc||w.category==fc));
  WS=list;let html='';
  for(const [t,f] of GROUPS){const g=list.filter(f);if(!g.length)continue;
-  html+=`<optgroup label="${t} (${g.length})">`+g.map(w=>`<option value="${w.window_id}">${fmt(w.begin)} · ${w.region} · ${TYPE[w.family]} · ${esc(w.name)}</option>`).join('')+'</optgroup>'}
+  html+=`<optgroup label="${t} (${g.length})">`+g.map(w=>`<option value="${w.window_id}">${fmt(w.begin)} · ${w.region} · ${TYPE[w.family]} · ${esc(w.category)} · ${esc(w.name)}</option>`).join('')+'</optgroup>'}
  $('w').innerHTML=html||'<option>No tournaments match</option>';
  if(list.some(w=>w.window_id==keep))$('w').value=keep;else{const first=list.find(w=>w.status=='live'||w.status=='games finishing')||list.find(w=>w.status=='upcoming')||list[0];if(first)$('w').value=first.window_id}
  info()}
@@ -74,9 +77,11 @@ let ALL=[];
 async function load(){ALL=await j('/api/windows');
  const regs=[...new Set(ALL.map(w=>w.region))].sort();
  $('fr').innerHTML='<option value="">All regions</option>'+regs.map(r=>`<option>${r}</option>`).join('');
+ const cats=[...new Set(ALL.map(w=>w.category))].sort();
+ $('fc').innerHTML='<option value="">All classes</option>'+cats.map(c=>`<option>${c}</option>`).join('');
  $('w').onchange=info;render();status()}
 async function go(){const w=cur();if(!w)return;
- const q=new URLSearchParams({window:w.window_id,top:$('x').value,entrants:$('e').value});
+ const q=new URLSearchParams({window:w.window_id,top:$('x').value,entrants:$('e').value,approx:$('ap').checked?1:0});
  const d=await j('/api/predict?'+q);
  if(d.error){$('out').innerHTML=`<div class=card>${esc(d.error)}</div>`;return}
  const row=(l,r,b)=>`<tr><td>${l}</td><td class=num>${r.low}</td><td class="num ${b?'big':''}">${r.likely}</td><td class=num>${r.safe}</td></tr>`;

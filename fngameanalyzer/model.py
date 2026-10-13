@@ -9,7 +9,14 @@ import math
 import random
 import statistics
 
-from . import rules
+from . import classify, rules
+import threading
+
+_ctx = threading.local()   # per-request switch: allow similar classes when a class has no history
+
+
+def approx():
+    return getattr(_ctx, 'approx', False)
 
 DECAY = 0.7
 BETA_GRID = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -36,7 +43,8 @@ def comparable(target, finished):
     """Finished windows with the SAME format (game count + scoring rules)."""
     same = [w for w in finished
             if w["family"] == target["family"] and w["window_id"] != target["window_id"]
-            and w["points"] and _fmt(w) == _fmt(target)]
+            and w["points"] and _fmt(w) == _fmt(target)
+            and classify.of(w) == classify.of(target)]
     reg = [w for w in same if w["region"] == target["region"]]
     pool = reg if len(reg) >= 3 else same
     return sorted(pool, key=lambda w: w["end"], reverse=True)
@@ -141,8 +149,11 @@ def shape_pool(target, finished, limit=12):
             and abs((w["end"] - w["begin"]) - dur) <= 0.25 * dur
             and any(len(g) > 3 and g[3] for g in w["sessions"][0][:1])]
     pool = [w for w in pool if _timing_ok(w)]
-    same = [w for w in pool if w["meta"].get("game_type") == meta.get("game_type")]
-    return sorted(same if len(same) >= 3 else pool, key=lambda w: w["end"], reverse=True)[:limit]
+    cat = classify.of(target)
+    same = [w for w in pool if classify.of(w) == cat]
+    if approx() and len(same) < 3:   # explicitly allowed: nearest classes by game type, then any
+        same = [w for w in pool if w["meta"].get("game_type") == meta.get("game_type")] or pool
+    return sorted(same, key=lambda w: w["end"], reverse=True)[:limit]
 
 
 def _timing_ok(w):
@@ -270,12 +281,11 @@ def calibration(target, finished, rank):
 
     Returns (mean log error, error variance, n); error = actual - predicted in log1p space."""
     meta = target.get("meta") or {}
-    key = (meta.get("game_type"), meta.get("mode"), meta.get("stage"), rank, len(finished))
+    key = (classify.of(target), meta.get("stage"), rank, len(finished), approx())
     if key in _cal_cache:
         return _cal_cache[key]
     tests = [w for w in finished
-             if (w.get("meta") or {}).get("mode") == meta.get("mode")
-             and w["meta"].get("game_type") == meta.get("game_type")
+             if classify.of(w) == classify.of(target)
              and w["meta"].get("stage") == meta.get("stage")
              and w["meta"].get("rules") and len(w["sessions"]) >= 900
              and len(w["sessions"]) >= rank]
@@ -304,7 +314,10 @@ def rescored_prior(target, finished, rank, entrants=None, calibrate=True):
         return None
     cands = [w for w in finished
              if w["sessions"] and len(w["sessions"]) >= MIN_PLAYERS
-             and (w.get("meta") or {}).get("mode") == meta.get("mode")]
+             and classify.of(w) == classify.of(target)]
+    if not cands and approx():   # explicitly allowed: other classes with the same team size
+        cands = [w for w in finished if w["sessions"] and len(w["sessions"]) >= MIN_PLAYERS
+                 and (w.get("meta") or {}).get("mode") == meta.get("mode")]
     # Prefer the same game type (Reload/BR) and the same stage (open first round vs later round),
     # then widen. Placements are rescaled to the target lobby size, so widening is safe.
     same_type = [w for w in cands if w["meta"].get("game_type") == meta.get("game_type")]

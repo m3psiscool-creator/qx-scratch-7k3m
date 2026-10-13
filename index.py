@@ -51,8 +51,8 @@ def _api(fn, *a, **k):
 
 
 @app.get("/api/home")
-def api_home():
-    return _api(insights.home)
+def api_home(region: str = ""):
+    return _api(insights.home, region)
 
 
 @app.get("/api/board")
@@ -106,7 +106,7 @@ def api_window(window: str):
         w = storage.get_window(window)
         if not w:
             raise ValueError("Unknown window")
-        return service.window_info(w)
+        return {**service.window_info(w), "siblings": service.siblings(window)}
     return _api(f)
 
 

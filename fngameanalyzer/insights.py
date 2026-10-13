@@ -35,9 +35,9 @@ def _name_map(ids):
 
 
 # ---------------------------------------------------------------- home
-def home():
+def home(region=""):
     now = time.time()
-    infos = service.list_windows()
+    infos = [w for w in service.list_windows() if not region or w["region"] == region]
     live = [w for w in infos if w["status"] in ("live", "games finishing", "ended (collecting)")]
     out = []
     for w in live:

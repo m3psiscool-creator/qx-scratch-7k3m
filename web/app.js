@@ -10,6 +10,9 @@ const dur = s => { s = Math.max(0, Math.round(s)); const d = Math.floor(s / 8640
 const TYPE = { FNCS: "FNCS", CASHCUP: "Cash cup", SKINCUP: "Skin cup" };
 const LIVE = ["live", "games finishing", "ended (collecting)"];
 let timers = [], charts = [];
+let REGION = ""; try { REGION = localStorage.getItem("region") || ""; } catch (e) { }
+const rgSel = document.querySelector("#rg"); if (rgSel) { rgSel.value = REGION; rgSel.onchange = () => { REGION = rgSel.value; try { localStorage.setItem("region", REGION); } catch (e) { } route(); }; }
+const DOT = { live: "#2ecc71", "games finishing": "#2ecc71", "ended (collecting)": "#f5a623", upcoming: "#f5a623", finished: "#9aa3b4", "no results": "#9aa3b4" };
 
 async function j(url, opt) {
   const r = await fetch(url, opt);
@@ -32,7 +35,7 @@ setInterval(() => { countdowns(); $("#clock").textContent = new Date().toLocaleT
 
 // ------------------------------------------------------------------ Home
 async function home() {
-  const d = await j("/api/home");
+  const d = await j("/api/home" + (REGION ? "?region=" + REGION : ""));
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
   const live = d.live.map(w => {
     const rows = Object.keys(w.now).map(r => {
@@ -49,12 +52,20 @@ async function home() {
   }).join("") || `<div class="card mut">Nothing is live right now.</div>`;
   const up = table(["Starts", "In", "Region", "Class", "Tournament"], d.upcoming.map(w => [fmt(w.begin), `<span data-cd="${w.begin}"></span>`, w.region, esc(w.category), link(w.window_id, w.name)]));
   const fin = table(["Ended", "Region", "Class", "Tournament"], d.finished.map(w => [fmt(w.end), w.region, esc(w.category), link(w.window_id, w.name)]));
-  app.innerHTML = `<h1>Live now</h1>${live}<div class="grid g2"><div class="card"><h2>Starting soon</h2>${up}</div><div class="card"><h2>Just finished</h2>${fin}</div></div>`;
+  app.innerHTML = `<h1>Live now${REGION ? " · " + REGION : ""}</h1>${live}<div class="grid g2"><div class="card"><h2>Starting soon</h2>${up}</div><div class="card"><h2>Just finished</h2>${fin}</div></div>`;
   countdowns();
 }
 
 // ------------------------------------------------------------------ Tournament
 
+function regionChips(w) {
+  const sib = w.siblings || [];
+  if (sib.length < 2) return "";
+  return `<div class="tabs" style="margin-top:10px"><span class="small" style="align-self:center">Same event in:</span>` + sib.map(o => {
+    const on = o.window_id === w.window_id;
+    return `<a class="pill" href="#/t/${encodeURIComponent(o.window_id)}" style="${on ? "background:var(--ac);color:#fff" : ""};padding:5px 12px;font-size:.85rem" title="${esc(o.status)} · ${fmt(o.begin)}"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${DOT[o.status] || "#999"};margin-right:6px"></span>${esc(o.region)}</a>`;
+  }).join("") + `</div>`;
+}
 function rewardsCard(w) {
   const t = w.rewards || [];
   const now = Date.now() / 1000;
@@ -76,6 +87,7 @@ async function tournament(id) {
   <div class="card"><div class="row" style="align-items:center"><div style="flex:3"><h1 style="margin:0">${esc(w.name)}</h1>
     <span class="pill">${esc(w.region)}</span> <span class="pill">${esc(w.category)}</span> <span class="pill">${TYPE[w.family]}</span> ${pill(w.status)}</div>
     <div class="small" style="flex:2;text-align:right" id="cd"></div></div>
+    ${regionChips(w)}
     <div class="grid g4" style="margin-top:10px">
       <div class="kpi"><div class="l">Starts</div><div class="v" style="font-size:1rem">${fmt(w.begin)}</div></div>
       <div class="kpi"><div class="l">Games starting until</div><div class="v" style="font-size:1rem">${fmt(w.end)}</div></div>
@@ -166,6 +178,7 @@ async function schedule() {
   app.innerHTML = `<h1>Schedule</h1><div class="card"><div class="row"><div><label>Region</label><select id="fr"><option value="">All</option>${regs.map(r => `<option>${r}</option>`).join("")}</select></div>
    <div><label>Type</label><select id="ft"><option value="">All</option>${Object.entries(TYPE).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>
    <div><label>Class</label><select id="fc"><option value="">All</option>${cats.map(c => `<option>${esc(c)}</option>`).join("")}</select></div></div></div><div id="sl"></div>`;
+  $("#fr").value = REGION;
   const draw = () => {
     const fr = $("#fr").value, ft = $("#ft").value, fc = $("#fc").value;
     const l = all.filter(w => (!fr || w.region === fr) && (!ft || w.family === ft) && (!fc || w.category === fc)).sort((a, b) => a.begin - b.begin);
@@ -187,6 +200,7 @@ async function archive() {
    <div><label>Class</label><select id="fc"><option value="">All</option>${cats.map(c => `<option>${esc(c)}</option>`).join("")}</select></div>
    <div><label>Search</label><input id="fq" placeholder="event name"></div><div style="flex:0"><button class="sec" id="csv">CSV</button></div></div></div><div class="card" id="al"></div>`;
   let cur = [];
+  $("#fr").value = REGION;
   const draw = () => {
     const fr = $("#fr").value, ft = $("#ft").value, fc = $("#fc").value, q = $("#fq").value.toLowerCase();
     cur = all.filter(w => (!fr || w.region === fr) && (!ft || w.family === ft) && (!fc || w.category === fc) && (!q || w.name.toLowerCase().includes(q) || w.window_id.toLowerCase().includes(q)));

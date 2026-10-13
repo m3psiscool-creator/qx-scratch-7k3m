@@ -218,3 +218,21 @@ def thresholds(window_id):
 def series_view(window_id):
     rows = storage.series(window_id)
     return {"ranks": [str(r) for r in config.SERIES_RANKS], "points": rows}
+
+
+REGION_SUFFIX = None
+
+
+def siblings(window_id):
+    """The same event in every region (window ids differ only in the trailing region code)."""
+    import re
+    strip = lambda x: re.sub(r"_(NAC|NAW|EU|BR|ASIA|ME|OCE)$", "", x)
+    key = strip(window_id)
+    out = []
+    for x in storage.window_list():
+        if strip(x["window_id"]) == key:
+            i = window_info(x)
+            out.append({"window_id": i["window_id"], "region": i["region"], "status": i["status"],
+                        "begin": i["begin"], "end": i["end"]})
+    order = {r: n for n, r in enumerate(config.ALL_REGIONS)}
+    return sorted(out, key=lambda o: order.get(o["region"], 99))

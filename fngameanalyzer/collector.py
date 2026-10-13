@@ -140,7 +140,7 @@ def backfill_names(budget):
     return len(got)
 
 
-def run_tick(duration=50, interval=30):
+def run_tick(duration=50, interval=30, force_sync=False):
     """Poll now and every `interval` seconds until `duration` has passed."""
     t0 = time.time()
     try:
@@ -149,7 +149,7 @@ def run_tick(duration=50, interval=30):
     except auth.NotLoggedIn as ex:
         return {"ok": False, "error": str(ex)}
     log = []
-    synced = sync_windows(e)
+    synced = sync_windows(e, force=force_sync)
     if (storage.kv_get("last_prune") or 0) < time.time() - 6 * 3600:
         storage.prune(3)
         storage.kv_set("last_prune", time.time())

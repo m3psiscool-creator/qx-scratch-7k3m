@@ -38,4 +38,7 @@ POST_END_GRACE = 22 * 60       # shown as "games finishing"
 FINALIZE_AFTER = 25 * 60       # keep polling this long after the end, then store the final board
 REQUEST_DELAY =float(os.environ.get("FNGA_DELAY", "0.4"))  # seconds between API calls
 # Regions the hosted collector tracks (comma separated Epic region codes in event ids).
-TRACKED_REGIONS = [r for r in os.environ.get("FNGA_REGIONS", "NAC,BR").split(",") if r]
+ALL_REGIONS = ["NAC", "NAW", "EU", "BR", "ASIA", "ME", "OCE"]
+TRACKED_REGIONS = [r for r in os.environ.get("FNGA_REGIONS", ",".join(ALL_REGIONS)).split(",") if r]
+# region parameter of Epic's event download call (NAE returns both NAC and NAW events)
+DOWNLOAD_REGIONS = ["NAE", "EU", "BR", "ASIA", "ME", "OCE"]

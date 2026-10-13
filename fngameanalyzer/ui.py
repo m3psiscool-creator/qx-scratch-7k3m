@@ -20,6 +20,11 @@ th{color:var(--mut);font-weight:500;font-size:.82rem}.num{font-variant-numeric:t
 <main>
 <h1>FN Game Analyzer <small id=status></small></h1>
 <div class=card>
+ <div class=row>
+  <label>Region <select id=fr onchange="render()"><option value="">All regions</option></select></label>
+  <label>Type <select id=ft onchange="render()"><option value="">All types</option>
+   <option value=FNCS>FNCS</option><option value=CASHCUP>Cash cups</option><option value=SKINCUP>Skin cups</option></select></label>
+ </div>
  <label>Tournament <select id=w></select></label>
  <div id=info style="margin-top:10px"></div>
  <div class=row>
@@ -47,17 +52,29 @@ function cur(){return WS.find(v=>v.window_id==$('w').value)}
 function info(){const w=cur();if(!w){$('info').textContent='';return}
  const cls=(w.status=='live'||w.status=='games finishing')?'live':w.status=='upcoming'?'up':'';
  $('info').innerHTML=`<span class="pill ${cls}">${w.status}</span> ${fmt(w.begin)} &rarr; ${fmt(w.end)}<br>
- <b>${w.family}</b> ${w.region} &middot; ${w.game_type=='reload'?'Reload':'Battle Royale'} ${w.mode} &middot; ${w.match_cap||'?'} games
+ <b>${esc(w.name)}</b> &middot; ${TYPE[w.family]} ${w.region} &middot; ${w.game_type=='reload'?'Reload':'Battle Royale'} ${w.mode} &middot; ${w.match_cap||'?'} games
  &middot; lobby ${w.lobby?w.lobby+(w.mode=='solo'?' players':' teams'):'unknown'}<br>
  <small>${w.scoring||''}</small>${w.advance.length?'<br><small>'+w.advance.map(a=>'Top '+a[0]+' advance').join(', ')+'</small>':''}`;
  live()}
 async function status(){const s=await j('/api/status');
  $('status').textContent=s.logged_in?(s.last_tick_age_s!=null?'collector: '+ago(s.last_tick_age_s):'collector: waiting'):'not logged in';
  if(!s.logged_in){$('loginbox').style.display='block';$('ll').href=s.login_url}}
-async function load(){WS=await j('/api/windows');
- $('w').innerHTML=WS.map(w=>`<option value="${w.window_id}">[${w.status}] ${fmt(w.begin)} - ${w.window_id}</option>`).join('')||'<option>No tournaments yet</option>';
- const first=WS.find(w=>w.status=='live'||w.status=='games finishing')||WS.find(w=>w.status=='upcoming');if(first)$('w').value=first.window_id;
- $('w').onchange=info;info();status()}
+const TYPE={FNCS:'FNCS',CASHCUP:'Cash cup',SKINCUP:'Skin cup'};
+const GROUPS=[['Live now',w=>w.status=='live'||w.status=='games finishing'],['Collecting results',w=>w.status=='ended (collecting)'],
+ ['Upcoming (soonest first)',w=>w.status=='upcoming'],['Finished (latest first)',w=>w.status=='finished']];
+function render(){const fr=$('fr').value,ft=$('ft').value,keep=$('w').value;
+ const list=ALL.filter(w=>(!fr||w.region==fr)&&(!ft||w.family==ft));
+ WS=list;let html='';
+ for(const [t,f] of GROUPS){const g=list.filter(f);if(!g.length)continue;
+  html+=`<optgroup label="${t} (${g.length})">`+g.map(w=>`<option value="${w.window_id}">${fmt(w.begin)} · ${w.region} · ${TYPE[w.family]} · ${esc(w.name)}</option>`).join('')+'</optgroup>'}
+ $('w').innerHTML=html||'<option>No tournaments match</option>';
+ if(list.some(w=>w.window_id==keep))$('w').value=keep;else{const first=list.find(w=>w.status=='live'||w.status=='games finishing')||list.find(w=>w.status=='upcoming')||list[0];if(first)$('w').value=first.window_id}
+ info()}
+let ALL=[];
+async function load(){ALL=await j('/api/windows');
+ const regs=[...new Set(ALL.map(w=>w.region))].sort();
+ $('fr').innerHTML='<option value="">All regions</option>'+regs.map(r=>`<option>${r}</option>`).join('');
+ $('w').onchange=info;render();status()}
 async function go(){const w=cur();if(!w)return;
  const q=new URLSearchParams({window:w.window_id,top:$('x').value,entrants:$('e').value});
  const d=await j('/api/predict?'+q);
@@ -74,7 +91,10 @@ function evidence(d){const p=d.parts||{},lv=d.live,sn=d.snapshots;
   :`<div><span class="pill up">LEADERBOARD NOT USED</span> <small>no live board collected for this tournament${d.snapshot_age_s==null?'':''}</small></div>`;
  const hist=p.history?`<div>History only says <b>${p.history.likely}</b> <small>(${pc(p.history.weight)} of the answer; ${d.prior.n} comparable windows)</small></div>`:'<div><small>No comparable history, so this is live-only.</small></div>';
  const meta=sn?`<div><small>Board refreshed ${ago(d.snapshot_age_s)} &middot; ${sn.count} snapshots saved${sn.first?' since '+new Date(sn.first*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''} &middot; ${d.board_players} players on the board</small></div>`:'';
- return live+hist+meta+'<div><small>'+esc(d.method||'')+'</small></div>'}
+ const an=(lv&&lv.analogs&&lv.analogs.length)?`<details style="margin-top:8px"><summary><small>Same moment in ${lv.analogs.length} past events (other regions included)</small></summary>
+  <table><tr><th>Region</th><th>Event</th><th>Then</th><th>Final</th><th>x</th></tr>${lv.analogs.map(a=>`<tr><td>${a.region}</td><td><small>${esc(a.window.replace(/^S\d+_/,''))}</small></td><td class=num>${a.now}</td><td class=num>${a.final}</td><td class=num>${a.now?(a.final/a.now).toFixed(2):'-'}</td></tr>`).join('')}</table></details>`:'';
+ const gl=lv&&lv.games_left_median!=null?`<div><small>Typical games still to come for contenders: ~${lv.games_left_median.toFixed(1)} (includes the last queue that starts before the cutoff)${lv.bias?'; back-test correction '+(lv.bias*100).toFixed(0)+'%':''}</small></div>`:'';
+ return live+hist+gl+meta+an+'<div><small>'+esc(d.method||'')+'</small></div>'}
 const ACTIVE=['live','games finishing','ended (collecting)'];
 async function live(){const w=cur();if(!w||!ACTIVE.includes(w.status)){$('live').innerHTML='';return}
  const d=await j('/api/live?window='+encodeURIComponent(w.window_id));

@@ -140,8 +140,20 @@ def shape_pool(target, finished, limit=12):
             and (w.get("meta") or {}).get("match_cap") == meta.get("match_cap")
             and abs((w["end"] - w["begin"]) - dur) <= 0.25 * dur
             and any(len(g) > 3 and g[3] for g in w["sessions"][0][:1])]
+    pool = [w for w in pool if _timing_ok(w)]
     same = [w for w in pool if w["meta"].get("game_type") == meta.get("game_type")]
     return sorted(same if len(same) >= 3 else pool, key=lambda w: w["end"], reverse=True)[:limit]
+
+
+def _timing_ok(w):
+    """Game timestamps must fit the scheduled window (some events ran off their listed times)."""
+    ends = [e for p in _timed_games(w) for e, _ in p]
+    if not ends:
+        return False
+    dur = w["end"] - w["begin"]
+    late = sum(1 for e in ends if e > w["begin"] + 0.5 * dur) / len(ends)
+    inside = sum(1 for e in ends if w["begin"] <= e <= w["end"] + 1800) / len(ends)
+    return late >= 0.25 and inside >= 0.95
 
 
 def reconstructed_growth(target, snap, finished, rank):
@@ -163,6 +175,10 @@ def live(target, snap, finished, rank, snaps_by_window=None, now=None):
     cur = _at(snap["points"], rank)
     if cur is None:
         return None
+    from . import sim  # player-by-player simulation (preferred)
+    est = sim.live_estimate(target, snap, finished, rank)
+    if est:
+        return est
     p_t, rg = reconstructed_growth(target, snap, finished, rank)
     if len(rg) >= 3 and p_t >= 0.03:
         g = statistics.mean(rg)

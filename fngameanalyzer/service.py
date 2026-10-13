@@ -6,6 +6,19 @@ from . import auth, config, model, rules, storage
 from .epic_api import Epic
 
 
+def pretty(event_id, window_id):
+    """'epicgames_S42_EliteKadoThorneCup_NAC' + window id -> 'Elite Kado Thorne Cup'."""
+    import re
+    name = re.sub(r"^epicgames_", "", event_id)
+    name = re.sub(r"^S\d+_", "", name)
+    name = re.sub(r"_(NAC|NAW|EU|BR|ASIA|ME|OCE)$", "", name)
+    name = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name.replace("_", " "))
+    rest = window_id.replace(event_id.replace("epicgames_", ""), "")
+    extra = re.findall(r"(Round\d|Day\d|Heat\d|Event\d+|Final)", window_id)
+    seen = [x for x in dict.fromkeys(extra) if x not in name]
+    return (name + (" · " + " ".join(seen) if seen else "")).strip()
+
+
 def window_info(w):
     m = w.get("meta") or {}
     now = time.time()
@@ -15,6 +28,7 @@ def window_info(w):
               else "ended (collecting)")
     return {
         "window_id": w["window_id"], "family": w["family"], "region": w["region"],
+        "name": pretty(w.get("event_id") or "", w["window_id"]),
         "begin": w["begin"], "end": w["end"], "final": w["final"], "status": status,
         "match_cap": m.get("match_cap"), "mode": m.get("mode"), "game_type": m.get("game_type"),
         "lobby": m.get("lobby"), "stage": m.get("stage"), "advance": m.get("advance", []),

@@ -65,18 +65,27 @@ class Session:
             raise NotLoggedIn("Not logged in: open the site's Login page")
         self.account_id = d["account_id"]
 
+    _mem = {"tok": None, "exp": 0}   # per-process cache: avoids a database read per request
+
     def bearer(self):
+        m = Session._mem
+        if m["tok"] and time.time() < m["exp"] - 300:
+            return m["tok"]
         d = load()
         if d.get("access_token") and time.time() < d["expires_at"] - 300:
+            m.update(tok=d["access_token"], exp=d["expires_at"])
             return d["access_token"]
         with storage.locked("auth"):  # another run may have refreshed while we waited
             d = load()
             if d.get("access_token") and time.time() < d["expires_at"] - 300:
+                m.update(tok=d["access_token"], exp=d["expires_at"])
                 return d["access_token"]
             try:
-                return _store(_token({"grant_type": "refresh_token",
-                                      "refresh_token": d["refresh_token"],
-                                      "token_type": "eg1"}))["access_token"]
+                d = _store(_token({"grant_type": "refresh_token",
+                                   "refresh_token": d["refresh_token"],
+                                   "token_type": "eg1"}))
+                m.update(tok=d["access_token"], exp=d["expires_at"])
+                return d["access_token"]
             except RuntimeError as e:
                 raise NotLoggedIn(f"Epic login expired, log in again ({e})")
 

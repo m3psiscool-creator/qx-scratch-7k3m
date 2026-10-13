@@ -43,15 +43,11 @@ def describe(rules, match_cap=None):
     parts = []
     for stat, rule, tiers in rules:
         if stat == "PLACEMENT_STAT_INDEX":
-            runs, prev = [], None
-            for k, p, _ in tiers:
-                if prev and prev[2] == p:
-                    prev[1] = k
-                else:
-                    prev = [k, k, p]
-                    runs.append(prev)
-            parts.append("placement: " + ", ".join(
-                f"{a}{'' if a == b else '-' + str(b)}={p}" for a, b, p in runs))
+            last = tiers[-1][0]
+            pts = lambda n: sum(p for k, p, _ in tiers if n <= k)
+            marks = sorted({1, 2, 3, 5, 10, 25, last})
+            parts.append("placement points: " + ", ".join(f"#{n}={pts(n)}" for n in marks if n <= last)
+                         + f", beyond #{last}=0")
         elif stat == "TEAM_ELIMS_STAT_INDEX":
             k, p, m = tiers[0]
             parts.append(f"+{p} per elim" if m else f"{p} pts for {k}+ elims")

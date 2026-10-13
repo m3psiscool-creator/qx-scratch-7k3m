@@ -143,7 +143,7 @@ async function boardLoad() {
 
 // ------------------------------------------------------------------ Schedule
 async function schedule() {
-  const all = (await j("/api/windows")).filter?.(w => w.status !== "finished") || [];
+  const all = (await j("/api/windows")).filter?.(w => ["upcoming", "live", "games finishing", "ended (collecting)"].includes(w.status)) || [];
   const regs = [...new Set(all.map(w => w.region))].sort(), cats = [...new Set(all.map(w => w.category))].sort();
   app.innerHTML = `<h1>Schedule</h1><div class="card"><div class="row"><div><label>Region</label><select id="fr"><option value="">All</option>${regs.map(r => `<option>${r}</option>`).join("")}</select></div>
    <div><label>Type</label><select id="ft"><option value="">All</option>${Object.entries(TYPE).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></div>

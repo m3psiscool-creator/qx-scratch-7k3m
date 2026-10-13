@@ -1,49 +1,24 @@
 # FN Game Analyzer
 
-Predicts the points needed for any rank (top X) in Fortnite FNCS and Cash Cup event windows. The user opens a local web page, picks a window, types X, and gets Low / Most likely / Safe (~95%) numbers. Works before an event (from past results) and live (from the current leaderboard).
+Hosted site that predicts the points needed for any rank (1-10,000) in Fortnite FNCS, Cash Cup and Skin Cup (ShopCup) windows, live and before they start. Production: https://fn-game-analyzer.vercel.app (Vercel, project `fn-game-analyzer`, team james-projects-996f2671, Hobby plan). Repo: github.com/m3psiscool-creator/fn-game-analyzer.
 
 ## User preferences
-- Keep answers short. Give step-by-step instructions with every step listed.
-- Critique your own answer before giving it.
-- Ask the user for missing information instead of guessing.
-- The user is on Windows (PowerShell). Use `python` or `py`, and Windows-safe commands.
+- Short answers; list every step; critique own answer; ask for missing info rather than guess.
+- User is on Windows (PowerShell). Use the full python path (`%LOCALAPPDATA%\Programs\Python\Python312\python.exe`) in non-fresh shells.
+- User does NOT want to run commands on their computer: everything runs on Vercel.
 
-## Status (read this first)
-All code was written in a cloud sandbox that could NOT reach Epic's servers. Only the model is tested (synthetic data, `python -m unittest discover tests`). The Epic login, API client and response parsing have never run against real Epic data. Parser field names are best guesses from community docs: `pointsEarned`, `sessionHistory`, `totalPages`, `entries`, `eventWindows`.
+## Architecture
+- `index.py` FastAPI entrypoint. Serves `web/` (index.html, app.js, style.css: hash-routed SPA, Chart.js from cdnjs) and `/api/*`.
+- `fngameanalyzer/`: `config` (regions, lobby sizes, DEEP_RANKS), `auth` (rolling Epic refresh token in DB, lock), `epic_api` (events + leaderboards, parallel pages, deep thresholds), `classify` (event class), `rules` (scoring rules, rescoring), `storage` (sqlite local) / `storage_pg` (Neon Postgres, chosen by POSTGRES_URL), `collector` (tick), `model`/`sim` (prediction), `service`/`insights` (API logic).
+- Tick: `/api/tick` (header `x-admin-key` or Vercel cron bearer). cron-job.org calls it every minute; one pass takes <25s (Hobby cron is daily only). Each pass: sync event list (every 10 min, all regions), snapshot live windows (until end + 25 min, because games started before the end still count), store finals (backfill newest first), deep thresholds backfill, stored predictions, player-name backfill.
+- Storage per window: top-1000 points/games/per-game sessions (placement, elims, win, end time)/players, plus points at ranks 1000,1500..10000 (`deep`). Snapshots also write compact `series`. Full snapshots of finished windows are pruned after 3 days.
 
-**Next step on the user's PC:** run `login`, then `probe`, and fix any parsing mismatches using the saved raw JSON in `~/.fngameanalyzer/probe_events.json` and `probe_leaderboard.json`. Then `collect`, `serve`.
+## Model
+- Events are classified (`classify.py`): reload|br, zb, solo|duo|trio|squads, mobile. History is only used within the same class (checkbox `approx` allows nearby classes explicitly).
+- Live: player-by-player simulation (`sim.py`) using comparable players at the same moment in same-class past events (games played, points/game, pace scaling), with back-test bias correction. Ranks >700 scale from rank 500; ranks never predicted below current.
+- No history for a class = explicit "no history" message.
 
-## Commands
-- `pip install -r requirements.txt`
-- `python -m fngameanalyzer login` — one-time. User opens the printed link while logged in to Epic and pastes the `authorizationCode`. The user must do this step; do not try to automate it.
-- `python -m fngameanalyzer probe` — dumps raw Epic JSON and reports how many FNCS/Cash Cup windows were recognised.
-- `python -m fngameanalyzer collect [--regions ...] [--max-rank N]` — stores final leaderboards of finished windows.
-- `python -m fngameanalyzer watch [--interval S]` — polls live windows and stores snapshots (needed to train the live predictor).
-- `python -m fngameanalyzer serve [--port 8765]` — web UI at http://localhost:8765
-- `python -m fngameanalyzer predict <window_id> <top> [--entrants N]`
-- Tests: `python -m unittest discover tests`
-
-## Layout
-- `fngameanalyzer/config.py` — paths (`~/.fngameanalyzer/`, override with `FNGA_HOME`), Epic URLs, public auth client, event family keywords.
-- `auth.py` — authorization code -> device auth saved to `auth.json`; `Session` refreshes the bearer token.
-- `epic_api.py` — events service client. `classify()` decides FNCS/CASHCUP and region from the event id text. `leaderboard()` returns points, games played (length of `sessionHistory`), entrants, total pages.
-- `storage.py` — SQLite: `windows` and `snapshots` (points/games stored as JSON arrays by rank).
-- `model.py` — prediction (see below).
-- `web.py` — stdlib HTTP server and single-page UI.
-- `__main__.py` — CLI.
-
-## Model (model.py)
-Works in log1p(points). Combines two estimates by inverse variance:
-- **Prior:** recency-weighted (decay 0.7) points at rank X from comparable finished windows (same family; same region if at least 3 exist). Entrant adjustment scales the looked-up rank by (past entrants / target entrants)^beta; beta is chosen by leave-one-out over a grid and needs 5+ windows, else 0.
-- **Live:** current points at rank X scaled to the end of the window. Progress = games played near rank X when available, else elapsed time. Growth factor learned from past snapshots at the same progress (needs 3+, from `watch`); otherwise naive extrapolation with a wide band.
-- Output: `low`/`high` is a 90% interval, `safe` is the upper end (~95% one-sided), `likely` is the median.
-
-## Known limits and risks
-- Epic's internal endpoints are unofficial and may change or block access. Use only the user's own account and keep request rates low.
-- Past events only have final results, so live growth curves must be learned from `watch` snapshots.
-- Event matching depends on event id text; real ids may not match `FAMILIES` keywords in `config.py`.
-- Games-played progress depends on Epic returning `sessionHistory`.
-- Never commit `auth.json` or the data folder (both are gitignored).
-
-## Git
-Develop on branch `claude/dazzling-davinci-t4bu0c`. Do not open a pull request unless the user asks.
+## Operations
+- Secrets live in Vercel env (ADMIN_KEY, CRON_SECRET) and the Neon DB; Epic login is done on the Status page. Re-login only if the collector is idle >8h.
+- Deploy: `npx vercel deploy --prod --scope james-projects-996f2671` (CLI is logged in as m3psisgood-2280), also pushes to GitHub.
+- Known limits: Epic endpoints are unofficial; only the top 1000 players are stored per event (ranks 1001-10000 are thresholds only); sessionHistory is capped (11 games on some events).

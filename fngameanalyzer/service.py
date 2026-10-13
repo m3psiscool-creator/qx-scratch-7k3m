@@ -27,7 +27,8 @@ def window_info(w):
     status = ("finished" if w["final"] else "upcoming" if now < w["begin"]
               else "live" if now <= w["end"]
               else "games finishing" if now <= w["end"] + config.POST_END_GRACE
-              else "ended (collecting)")
+              else "ended (collecting)" if now <= w["end"] + config.FINALIZE_AFTER + 6 * 3600
+              else "no results")
     return {
         "window_id": w["window_id"], "family": w["family"], "region": w["region"],
         "name": pretty(w.get("event_id") or "", w["window_id"]),
@@ -40,7 +41,7 @@ def window_info(w):
 
 
 def list_windows():
-    order = {"live": 0, "games finishing": 0, "ended (collecting)": 1, "upcoming": 2, "finished": 3}
+    order = {"live": 0, "games finishing": 0, "ended (collecting)": 1, "upcoming": 2, "finished": 3, "no results": 4}
     ws = [window_info(w) for w in storage.window_list()]
     return sorted(ws, key=lambda w: (order[w["status"]], w["begin"] if w["status"] != "finished"
                                      else -w["begin"]))

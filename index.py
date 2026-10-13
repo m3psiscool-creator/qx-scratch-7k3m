@@ -28,8 +28,8 @@ def home():
 
 @app.get("/api/status")
 def status():
-    s = auth.status()
     try:
+        s = auth.status()
         tick = storage.kv_get("last_tick")
     except Exception as e:  # database not connected yet
         return {"logged_in": False, "db_error": str(e)[:200], "login_url": config.LOGIN_URL}

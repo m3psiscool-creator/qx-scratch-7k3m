@@ -64,9 +64,18 @@ class Session:
         return self._tok
 
     def get(self, url, **params):
-        time.sleep(config.REQUEST_DELAY)
-        r = requests.get(url, params=params, timeout=30,
-                         headers={"Authorization": "Bearer " + self.bearer()})
-        if r.status_code != 200:
-            raise RuntimeError(f"GET {url} -> {r.status_code}: {r.text[:300]}")
-        return r.json()
+        for attempt in range(5):
+            time.sleep(config.REQUEST_DELAY * (attempt + 1))
+            try:
+                r = requests.get(url, params=params, timeout=30,
+                                 headers={"Authorization": "Bearer " + self.bearer()})
+            except requests.ConnectionError:
+                if attempt == 4:
+                    raise
+                continue
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < 4:
+                time.sleep(2 * (attempt + 1))
+                continue
+            if r.status_code != 200:
+                raise RuntimeError(f"GET {url} -> {r.status_code}: {r.text[:300]}")
+            return r.json()

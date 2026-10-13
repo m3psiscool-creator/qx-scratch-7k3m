@@ -48,7 +48,11 @@ def cmd_collect(a):
     have = {w["window_id"] for w in storage.windows(final=True)}
     for w in _sync(e, a.regions):
         if e.finished(w) and w["window_id"] not in have:
-            lb = e.leaderboard(w["event_id"], w["window_id"], a.max_rank)
+            try:
+                lb = e.leaderboard(w["event_id"], w["window_id"], a.max_rank)
+            except Exception as ex:
+                print("skipped", w["window_id"], str(ex)[:120])
+                continue
             storage.save_final(w["window_id"], lb)
             print("stored", w["window_id"], len(lb["points"]), "ranks")
             have.add(w["window_id"])

@@ -19,5 +19,5 @@ FAMILIES = {
     "FNCS": ["fncs"],
     "CASHCUP": ["cashcup", "cash_cup"],
 }
-REGIONS = ["NAC", "NAW", "EU", "BR", "ASIA", "OCE", "ME"]
+REGIONS = ["NAC", "NAE", "NAW", "EU", "BR", "ASIA", "OCE", "ME"]
 REQUEST_DELAY = 0.4  # seconds between API calls

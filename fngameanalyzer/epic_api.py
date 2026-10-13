@@ -23,7 +23,7 @@ class Epic:
 
     def raw_events(self, region="EU"):
         return self.s.get(f"{config.EVENTS}/events/Fortnite/download/{self.s.account_id}",
-                          region=region, platform="Windows", teamAccountIds="")
+                          region=region, platform="Windows", teamAccountIds=self.s.account_id)
 
     def windows(self, region="EU", raw=None):
         """List recognised FNCS/Cash Cup windows."""

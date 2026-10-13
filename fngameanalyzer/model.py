@@ -146,12 +146,14 @@ def shape_pool(target, finished, limit=12):
 
 def reconstructed_growth(target, snap, finished, rank):
     """log(final / now) at the same point in time of the window, seen in similar past windows."""
+    after = snap["ts"] - target["end"]          # seconds past the end: games are finishing
     p = min(max((snap["ts"] - target["begin"]) / max(target["end"] - target["begin"], 1), 0.0), 1.0)
     out = []
     for w in shape_pool(target, finished):
         if rank > len(w["points"]) * 0.5:
             continue
-        cur = board_at(w, w["begin"] + p * (w["end"] - w["begin"]))
+        t = w["end"] + after if after > 0 else w["begin"] + p * (w["end"] - w["begin"])
+        cur = board_at(w, t)
         if rank <= len(cur) and cur[rank - 1] > 0:
             out.append(_l(w["points"][rank - 1]) - _l(cur[rank - 1]))
     return p, out
@@ -344,7 +346,11 @@ def predict(target, finished, rank, entrants=None, snapshot=None, snaps_by_windo
         return None
     m, sd = c
     f = lambda z: round(math.expm1(z))
+    ws = [(name, e) for name, e in (("history", pr), ("live", lv)) if e]
+    tot = sum(1 / e["var"] for _, e in ws)
+    parts = {name: {"likely": f(e["mean"]), "weight": round(1 / e["var"] / tot, 2)} for name, e in ws}
     return {
         "rank": rank, "low": f(m - Z90 * sd), "likely": f(m), "safe": f(m + Z90 * sd),
+        "parts": parts,
         "prior": pr, "live": lv, "method": method if pr else None,
     }

@@ -33,6 +33,9 @@ LOBBY = {
 }
 RELOAD_WORDS = ["reload", "_re_", "blastberry", "dashberry", "punchberry", "piperboot",
                 "sourspawn", "jumpbear"]
-REQUEST_DELAY = float(os.environ.get("FNGA_DELAY", "0.4"))  # seconds between API calls
+# Games must START before a window ends but can finish up to ~22 min later and still count.
+POST_END_GRACE = 22 * 60       # shown as "games finishing"
+FINALIZE_AFTER = 25 * 60       # keep polling this long after the end, then store the final board
+REQUEST_DELAY =float(os.environ.get("FNGA_DELAY", "0.4"))  # seconds between API calls
 # Regions the hosted collector tracks (comma separated Epic region codes in event ids).
 TRACKED_REGIONS = [r for r in os.environ.get("FNGA_REGIONS", "NAC,BR").split(",") if r]

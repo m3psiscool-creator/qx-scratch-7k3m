@@ -28,10 +28,9 @@ def poll_once(e):
     now = time.time()
     done = []
     wl = storage.window_list()
-    live = [w for w in wl if not w["final"] and w["begin"] - LIVE_MARGIN <= now <= w["end"] + LIVE_MARGIN]
+    # live = open, or closed but with games still finishing (they were started before the end)
+    live = [w for w in wl if not w["final"] and w["begin"] <= now <= w["end"] + config.FINALIZE_AFTER]
     for w in live:
-        if now < w["begin"]:
-            continue
         try:
             lb = e.leaderboard(w["event_id"], w["window_id"], MAX_RANK)
             if lb["points"]:
@@ -39,7 +38,8 @@ def poll_once(e):
                 done.append(("snapshot", w["window_id"], len(lb["points"])))
         except Exception as ex:  # one bad window must not stop the others
             done.append(("error", w["window_id"], str(ex)[:150]))
-    ended = [w for w in wl if not w["final"] and now > w["end"] + LIVE_MARGIN
+    # the final board is stored only once every in-flight game has had time to finish
+    ended = [w for w in wl if not w["final"] and now > w["end"] + config.FINALIZE_AFTER
              and now - w["end"] < 3 * 86400]
     for w in ended[:1]:
         try:

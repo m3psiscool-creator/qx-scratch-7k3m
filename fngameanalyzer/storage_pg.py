@@ -115,6 +115,13 @@ def snapshots(window_id, last=None, light=False):
     return out[::-1] if last else out
 
 
+def snapshot_stats(window_id):
+    with db() as c:
+        r = c.execute("SELECT count(*),min(ts),max(ts) FROM snapshots WHERE window_id=%s",
+                      (window_id,)).fetchone()
+    return {"count": r[0], "first": r[1], "last": r[2]}
+
+
 def kv_get(k):
     with db() as c:
         r = c.execute("SELECT v FROM kv WHERE k=%s", (k,)).fetchone()

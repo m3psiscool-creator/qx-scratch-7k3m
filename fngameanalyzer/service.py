@@ -2,15 +2,17 @@
 import statistics
 import time
 
-from . import auth, model, rules, storage
+from . import auth, config, model, rules, storage
 from .epic_api import Epic
 
 
 def window_info(w):
     m = w.get("meta") or {}
     now = time.time()
-    status = ("finished" if w["final"] else "live" if w["begin"] <= now <= w["end"]
-              else "ended (collecting)" if w["end"] < now else "upcoming")
+    status = ("finished" if w["final"] else "upcoming" if now < w["begin"]
+              else "live" if now <= w["end"]
+              else "games finishing" if now <= w["end"] + config.POST_END_GRACE
+              else "ended (collecting)")
     return {
         "window_id": w["window_id"], "family": w["family"], "region": w["region"],
         "begin": w["begin"], "end": w["end"], "final": w["final"], "status": status,
@@ -21,7 +23,7 @@ def window_info(w):
 
 
 def list_windows():
-    order = {"live": 0, "ended (collecting)": 1, "upcoming": 2, "finished": 3}
+    order = {"live": 0, "games finishing": 0, "ended (collecting)": 1, "upcoming": 2, "finished": 3}
     ws = [window_info(w) for w in storage.window_list()]
     return sorted(ws, key=lambda w: (order[w["status"]], w["begin"] if w["status"] != "finished"
                                      else -w["begin"]))
@@ -42,6 +44,9 @@ def run_predict(window_id, top, entrants=None):
         raise ValueError("Not enough data to predict this window yet")
     r["entrants_used"] = entrants or (r["prior"] or {}).get("entrants") or 0
     r["snapshot_age_s"] = round(time.time() - snap["ts"]) if snap else None
+    if not target["final"]:
+        r["snapshots"] = storage.snapshot_stats(window_id)
+        r["board_players"] = len(snap["points"]) if snap else 0
     r["cutoffs"] = []
     for rank, label in (target["meta"].get("advance") or []):
         if rank != top:

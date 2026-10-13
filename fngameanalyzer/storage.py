@@ -93,6 +93,13 @@ def snapshots(window_id, last=None, light=False):
     return out[::-1] if last else out
 
 
+def snapshot_stats(window_id):
+    with db() as c:
+        r = c.execute("SELECT count(*),min(ts),max(ts) FROM snapshots WHERE window_id=?",
+                      (window_id,)).fetchone()
+    return {"count": r[0], "first": r[1], "last": r[2]}
+
+
 def window_list():
     """Windows without the big columns."""
     return [{k: v for k, v in w.items() if k not in ("points", "games", "sessions", "players")}

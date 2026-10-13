@@ -45,7 +45,7 @@ const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[
 async function j(u,o){const r=await fetch(u,o);return r.json()}
 function cur(){return WS.find(v=>v.window_id==$('w').value)}
 function info(){const w=cur();if(!w){$('info').textContent='';return}
- const cls=w.status=='live'?'live':w.status=='upcoming'?'up':'';
+ const cls=(w.status=='live'||w.status=='games finishing')?'live':w.status=='upcoming'?'up':'';
  $('info').innerHTML=`<span class="pill ${cls}">${w.status}</span> ${fmt(w.begin)} &rarr; ${fmt(w.end)}<br>
  <b>${w.family}</b> ${w.region} &middot; ${w.game_type=='reload'?'Reload':'Battle Royale'} ${w.mode} &middot; ${w.match_cap||'?'} games
  &middot; lobby ${w.lobby?w.lobby+(w.mode=='solo'?' players':' teams'):'unknown'}<br>
@@ -56,7 +56,7 @@ async function status(){const s=await j('/api/status');
  if(!s.logged_in){$('loginbox').style.display='block';$('ll').href=s.login_url}}
 async function load(){WS=await j('/api/windows');
  $('w').innerHTML=WS.map(w=>`<option value="${w.window_id}">[${w.status}] ${fmt(w.begin)} - ${w.window_id}</option>`).join('')||'<option>No tournaments yet</option>';
- const first=WS.find(w=>w.status=='live')||WS.find(w=>w.status=='upcoming');if(first)$('w').value=first.window_id;
+ const first=WS.find(w=>w.status=='live'||w.status=='games finishing')||WS.find(w=>w.status=='upcoming');if(first)$('w').value=first.window_id;
  $('w').onchange=info;info();status()}
 async function go(){const w=cur();if(!w)return;
  const q=new URLSearchParams({window:w.window_id,top:$('x').value,entrants:$('e').value});
@@ -66,9 +66,17 @@ async function go(){const w=cur();if(!w)return;
  const lv=d.live;
  $('out').innerHTML=`<div class=card><table><tr><th>Rank</th><th>Low</th><th>Most likely</th><th>Safe (~95%)</th></tr>
  ${row('Top '+d.rank,d,1)}${(d.cutoffs||[]).map(c=>row('Top '+c.rank,c)).join('')}</table>
- <p><small>${d.method?'Method: '+esc(d.method)+'. ':''}${d.prior?d.prior.n+' comparable past windows. ':''}
- ${lv?`Live: ${lv.current} pts now at rank ${d.rank}, ${(lv.progress*100).toFixed(0)}% through (${esc(lv.basis)}${lv.n?', '+lv.n+' past events':''}). Board updated ${ago(d.snapshot_age_s)}.`:'No live board yet.'}</small></p></div>`}
-async function live(){const w=cur();if(!w||w.status=='upcoming'||w.status=='finished'){$('live').innerHTML='';return}
+ <div style="margin-top:10px">${evidence(d)}</div></div>`}
+function evidence(d){const p=d.parts||{},lv=d.live,sn=d.snapshots;
+ const pc=x=>Math.round(x*100)+'%';
+ const live=lv?`<div><span class="pill live">LIVE LEADERBOARD USED</span> rank ${d.rank} has <b>${lv.current}</b> pts now &rarr; projects to <b>${p.live.likely}</b>
+  <small>(${pc(p.live.weight)} of the answer; ${(lv.progress*100).toFixed(0)}% through, learned from ${lv.n||'?'} past events)</small></div>`
+  :`<div><span class="pill up">LEADERBOARD NOT USED</span> <small>no live board collected for this tournament${d.snapshot_age_s==null?'':''}</small></div>`;
+ const hist=p.history?`<div>History only says <b>${p.history.likely}</b> <small>(${pc(p.history.weight)} of the answer; ${d.prior.n} comparable windows)</small></div>`:'<div><small>No comparable history, so this is live-only.</small></div>';
+ const meta=sn?`<div><small>Board refreshed ${ago(d.snapshot_age_s)} &middot; ${sn.count} snapshots saved${sn.first?' since '+new Date(sn.first*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):''} &middot; ${d.board_players} players on the board</small></div>`:'';
+ return live+hist+meta+'<div><small>'+esc(d.method||'')+'</small></div>'}
+const ACTIVE=['live','games finishing','ended (collecting)'];
+async function live(){const w=cur();if(!w||!ACTIVE.includes(w.status)){$('live').innerHTML='';return}
  const d=await j('/api/live?window='+encodeURIComponent(w.window_id));
  if(!d.snapshot){$('live').innerHTML='<div class=card><small>Waiting for the first live board...</small></div>';return}
  $('live').innerHTML=`<div class=card><b>Live top ${d.top.length}</b> <small>updated ${ago(d.snapshot.age_s)}, ${d.snapshot.entrants} entrants</small>
@@ -78,5 +86,5 @@ async function live(){const w=cur();if(!w||w.status=='upcoming'||w.status=='fini
 async function login(){const r=await j('/api/login',{method:'POST',headers:{'content-type':'application/json'},
  body:JSON.stringify({code:$('code').value.trim(),key:$('key').value})});
  $('lmsg').textContent=r.ok?'Logged in. The collector will start on its next run.':(r.error||'failed');if(r.ok)status()}
-load();setInterval(()=>{status();live();const w=cur();if(w&&w.status=='live')go()},30000);
+load();setInterval(()=>{status();live();const w=cur();if(w&&ACTIVE.includes(w.status))go()},30000);
 </script></html>"""

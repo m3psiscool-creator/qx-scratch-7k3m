@@ -63,7 +63,7 @@ def _run_predict(window_id, top, entrants=None):
         last = storage.snapshots(window_id, last=1)
         snap = last[0] if last else None
     entrants = entrants or (snap or {}).get("entrants")
-    if top > 1000:
+    if top > 700:
         d = deep_predict(target, finished, snap, top)
         d["snapshot_age_s"] = round(time.time() - snap["ts"]) if snap else None
         d["cutoffs"] = []
@@ -76,6 +76,10 @@ def _run_predict(window_id, top, entrants=None):
         n = sum(1 for w in finished if classify.of(w) == cat and w["family"] == target["family"])
         raise ValueError(f"No usable '{cat}' history yet ({n} finished events of that class). "
                          "Tick 'Allow similar classes' to estimate from the nearest other classes.")
+    cur = (r.get("live") or {}).get("current")
+    if cur:   # a rank's score never falls
+        for k in ("low", "likely", "safe"):
+            r[k] = max(r[k], round(cur))
     r["entrants_used"] = entrants or (r["prior"] or {}).get("entrants") or 0
     r["snapshot_age_s"] = round(time.time() - snap["ts"]) if snap else None
     if not target["final"]:
@@ -140,8 +144,10 @@ def live_view(window_id, n=25):
 
 
 # ---- thresholds beyond the stored top-1000 board -------------------------------------------
-def _interp_deep(points_1000, deep, rank):
-    """Points at an arbitrary rank > 1000 from the stored thresholds (log-linear in between)."""
+def _interp_deep(points_1000, deep, rank, points=None):
+    """Points at an arbitrary rank from the stored board and thresholds (log-linear in between)."""
+    if points and rank <= len(points):
+        return points[rank - 1]
     pts = {1000: points_1000}
     pts.update({int(r): v["points"] for r, v in (deep or {}).items() if "points" in v})
     ks = sorted(pts)
@@ -162,14 +168,15 @@ def deep_predict(target, finished, snap, rank):
             and w["window_id"] != target["window_id"] and w.get("deep")
             and len(w["points"]) >= 1000]
     if snap and snap.get("deep"):
-        now_r = _interp_deep(snap["points"][999], snap["deep"], rank)
-        base = model.predict(target, finished, 1000, snap.get("entrants"), snap, {})
-        now_1000 = snap["points"][999]
-        if now_r and base and now_1000 > 0:
-            k = lambda x: round(now_r * x / now_1000)
+        now_r = _interp_deep(snap["points"][min(999, len(snap["points"]) - 1)], snap["deep"], rank, snap["points"])
+        ref = min(500, len(snap["points"]))   # the simulation is only trustworthy well inside the board
+        base = model.predict(target, finished, ref, snap.get("entrants"), snap, {})
+        now_ref = snap["points"][ref - 1]
+        if now_r and base and now_ref > 0:
+            k = lambda x: max(round(now_r * x / now_ref), round(now_r))   # a threshold never falls
             return {"rank": rank, "low": k(base["low"]), "likely": k(base["likely"]),
                     "safe": k(base["safe"]), "current": round(now_r),
-                    "method": "live points at this rank scaled by the predicted growth of rank 1000 (approximate)",
+                    "method": f"live points at this rank scaled by the predicted growth of rank {ref} (approximate)",
                     "history_events": len(hist)}
     vals = sorted(v for v in (_interp_deep(w["points"][999], w["deep"], rank) for w in hist) if v)
     if not vals:

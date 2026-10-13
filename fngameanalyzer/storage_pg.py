@@ -18,9 +18,14 @@ CREATE TABLE IF NOT EXISTS snapshots(
  id SERIAL PRIMARY KEY, window_id TEXT, ts DOUBLE PRECISION,
  entrants INTEGER, points TEXT, games TEXT, top TEXT);
 CREATE INDEX IF NOT EXISTS snap_win ON snapshots(window_id, ts);
+CREATE TABLE IF NOT EXISTS series(
+ window_id TEXT, ts DOUBLE PRECISION, d TEXT);
+CREATE INDEX IF NOT EXISTS series_win ON series(window_id, ts);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS names(account_id TEXT PRIMARY KEY, name TEXT);
 """
+ALTERS = ["ALTER TABLE windows ADD COLUMN IF NOT EXISTS deep TEXT",
+          "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS deep TEXT"]
 _ready = False
 _cache = {"t": 0, "rows": None}
 _lock = threading.Lock()
@@ -31,6 +36,8 @@ def db():
     c = psycopg.connect(URL, autocommit=True, prepare_threshold=None)
     if not _ready:
         c.execute(SCHEMA)
+        for a in ALTERS:
+            c.execute(a)
         _ready = True
     return c
 
@@ -44,12 +51,12 @@ def _row(r, full=True):
          "end": r[5], "entrants": r[6], "final": r[7], "meta": _j(r[8], {})}
     if full:
         d.update(points=_j(r[9], []), games=_j(r[10], []), sessions=_j(r[11], []),
-                 players=_j(r[12], []))
+                 players=_j(r[12], []), deep=_j(r[13], {}))
     return d
 
 
 COLS = "window_id,event_id,family,region,begin_ts,end_ts,entrants,final,meta"
-FULL = COLS + ",points,games,sessions,players"
+FULL = COLS + ",points,games,sessions,players,deep"
 
 
 def upsert_window(w):
@@ -64,21 +71,63 @@ def upsert_window(w):
 
 def save_final(window_id, lb):
     with db() as c:
-        c.execute("UPDATE windows SET entrants=%s,points=%s,games=%s,sessions=%s,players=%s,final=1"
+        c.execute("UPDATE windows SET entrants=%s,points=%s,games=%s,sessions=%s,players=%s,deep=%s,final=1"
                   " WHERE window_id=%s",
                   (lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]),
-                   json.dumps(lb.get("sessions", [])), json.dumps(lb.get("players", [])), window_id))
+                   json.dumps(lb.get("sessions", [])), json.dumps(lb.get("players", [])),
+                   json.dumps(lb.get("deep", {})), window_id))
     _cache["rows"] = None
 
 
+def _series_point(lb):
+    from . import config
+    d = {str(r): lb["points"][r - 1] for r in config.SERIES_RANKS if r <= len(lb["points"])}
+    for r, v in (lb.get("deep") or {}).items():
+        d[r] = v["points"]
+    return d
+
+
 def save_snapshot(window_id, lb, ts=None):
+    ts = ts or time.time()
     top = [{"rank": i + 1, "players": lb["players"][i], "points": lb["points"][i],
             "games": lb["games"][i]} for i in range(min(60, len(lb["points"])))
            ] if lb.get("players") else []
     with db() as c:
-        c.execute("INSERT INTO snapshots(window_id,ts,entrants,points,games,top) VALUES(%s,%s,%s,%s,%s,%s)",
-                  (window_id, ts or time.time(), lb["entrants"], json.dumps(lb["points"]),
-                   json.dumps(lb["games"]), json.dumps(top)))
+        c.execute("INSERT INTO snapshots(window_id,ts,entrants,points,games,top,deep) VALUES(%s,%s,%s,%s,%s,%s,%s)",
+                  (window_id, ts, lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]),
+                   json.dumps(top), json.dumps(lb.get("deep", {}))))
+        c.execute("INSERT INTO series(window_id,ts,d) VALUES(%s,%s,%s)",
+                  (window_id, ts, json.dumps({"p": _series_point(lb), "e": lb["entrants"]})))
+
+
+def set_deep(window_id, deep):
+    with db() as c:
+        c.execute("UPDATE windows SET deep=%s WHERE window_id=%s", (json.dumps(deep), window_id))
+    _cache["rows"] = None
+
+
+def series(window_id):
+    """Compact points-by-rank history of a window: [{ts, p:{rank:points}, e: entrants}]."""
+    with db() as c:
+        rows = c.execute("SELECT ts,d FROM series WHERE window_id=%s ORDER BY ts", (window_id,)).fetchall()
+    return [{"ts": r[0], **json.loads(r[1])} for r in rows]
+
+
+def prune(days=3):
+    """Drop full boards of snapshots for windows finished more than `days` days ago (series stays)."""
+    cut = time.time() - days * 86400
+    with db() as c:
+        r = c.execute("DELETE FROM snapshots WHERE window_id IN "
+                      "(SELECT window_id FROM windows WHERE final=1 AND end_ts<%s)", (cut,))
+        return r.rowcount
+
+
+def deep_missing(limit=1):
+    with db() as c:
+        rows = c.execute("SELECT window_id,event_id FROM windows WHERE final=1 AND "
+                         "(deep IS NULL OR deep='' OR deep='{}') ORDER BY end_ts DESC LIMIT %s",
+                         (limit,)).fetchall()
+    return [{"window_id": r[0], "event_id": r[1]} for r in rows]
 
 
 def window_list():
@@ -106,12 +155,13 @@ def get_window(window_id):
 
 
 def snapshots(window_id, last=None, light=False):
-    q = "SELECT ts,entrants,points,games,top FROM snapshots WHERE window_id=%s ORDER BY ts" + (
+    q = "SELECT ts,entrants,points,games,top,deep FROM snapshots WHERE window_id=%s ORDER BY ts" + (
         " DESC LIMIT %s" if last else "")
     with db() as c:
         rows = c.execute(q, (window_id, last) if last else (window_id,)).fetchall()
     out = [{"ts": r[0], "entrants": r[1], "points": json.loads(r[2]), "games": json.loads(r[3]),
-            "top": json.loads(r[4]) if r[4] else []} for r in rows]
+            "top": json.loads(r[4]) if r[4] else [], "deep": json.loads(r[5]) if r[5] else {}}
+           for r in rows]
     return out[::-1] if last else out
 
 

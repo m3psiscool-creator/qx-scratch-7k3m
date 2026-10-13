@@ -42,3 +42,8 @@ ALL_REGIONS = ["NAC", "NAW", "EU", "BR", "ASIA", "ME", "OCE"]
 TRACKED_REGIONS = [r for r in os.environ.get("FNGA_REGIONS", ",".join(ALL_REGIONS)).split(",") if r]
 # region parameter of Epic's event download call (NAE returns both NAC and NAW events)
 DOWNLOAD_REGIONS = ["NAE", "EU", "BR", "ASIA", "ME", "OCE"]
+
+# Points are stored at these ranks for every event (Epic lists at most 10,000 places).
+DEEP_RANKS = [1000] + list(range(1500, 10001, 500))
+SERIES_RANKS = [1, 2, 3, 5, 10, 15, 20, 25, 30, 35, 40, 50, 60, 75, 100, 150, 200, 250, 300, 400,
+                500, 750] + DEEP_RANKS

@@ -1,4 +1,5 @@
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from . import classify, config, rules
@@ -107,16 +108,40 @@ class Epic:
             f"{config.EVENTS}/leaderboards/Fortnite/{event_id}/{window_id}/{self.s.account_id}",
             page=page, rank=0, appId="Fortnite", showLiveSessions="true")
 
-    def leaderboard(self, event_id, window_id, max_rank=1000):
-        """Points, games and per-game [placement, elims, win] by rank (index 0 = rank 1)."""
+    def _entries(self, d):
+        return sorted(d.get("entries", []), key=lambda e: e.get("rank", 0))
+
+    def leaderboard(self, event_id, window_id, max_rank=1000, deep=True):
+        """Top `max_rank` places (points, games, per-game stats, players) plus the points and
+        games at the deep threshold ranks (1000, 1500, ... 10000). Pages are fetched in parallel."""
+        first = self.page(event_id, window_id, 0)
+        total = first.get("totalPages", 1) or 1
+        top_pages = list(range(1, min(total, -(-max_rank // 100))))
+        deep_pages = {}
+        if deep:
+            for r in config.DEEP_RANKS:
+                pg = (r - 1) // 100
+                if pg < total and pg > (max_rank - 1) // 100:
+                    deep_pages[pg] = r
+        want = sorted(set(top_pages) | set(deep_pages) | {total - 1} - {0})
+        pages = {0: first}
+        if want:
+            def get(x):
+                try:
+                    return self.page(event_id, window_id, x)
+                except Exception:
+                    return None   # a missing deep page only loses that threshold
+            with ThreadPoolExecutor(max_workers=6) as ex:
+                for pg, d in zip(want, ex.map(get, want)):
+                    if d is not None:
+                        pages[pg] = d
+            if any(pg not in pages for pg in top_pages):
+                raise RuntimeError("leaderboard page missing")
         points, games, sessions, players = [], [], [], []
-        p, total, per = 0, 1, 0
-        while p < total and len(points) < max_rank:
-            d = self.page(event_id, window_id, p)
-            total = d.get("totalPages", 1) or 1
-            ents = sorted(d.get("entries", []), key=lambda e: e.get("rank", 0))
-            per = per or len(ents)
-            for e in ents:
+        for pg in sorted(k for k in pages if k < -(-max_rank // 100)):
+            for e in self._entries(pages[pg]):
+                if len(points) >= max_rank:
+                    break
                 points.append(float(e.get("pointsEarned", e.get("score", 0)) or 0))
                 hist = e.get("sessionHistory") or []
                 games.append(len(hist))
@@ -124,15 +149,25 @@ class Epic:
                                  + [round(parse_time(s["endTime"])) if s.get("endTime") else 0]
                                  for s in hist])
                 players.append(e.get("teamAccountIds") or [])
-            p += 1
-            if not ents:
-                break
-        entrants = len(points)
-        if total > p and per:  # truncated: estimate from last page
-            last = self.page(event_id, window_id, total - 1)
-            entrants = (total - 1) * per + len(last.get("entries", []))
+        deep_out = {}
+        for r in config.DEEP_RANKS:
+            pg = (r - 1) // 100
+            if r <= len(points):
+                deep_out[str(r)] = {"points": points[r - 1], "games": games[r - 1]}
+            elif pg in pages:
+                es = [e for e in self._entries(pages[pg]) if e.get("rank") == r]
+                if es:
+                    deep_out[str(r)] = {"points": float(es[0].get("pointsEarned", 0) or 0),
+                                        "games": len(es[0].get("sessionHistory") or [])}
+        last = self._entries(pages[total - 1]) if total - 1 in pages else []
+        entrants = (total - 1) * 100 + len(last) if last else len(points)
         return {"points": points, "games": games, "sessions": sessions, "players": players,
-                "entrants": entrants, "total_pages": total}
+                "entrants": entrants, "total_pages": total, "deep": deep_out,
+                "capped": total >= 100}
+
+    def deep_only(self, event_id, window_id):
+        """Deep thresholds only (used to backfill finished events)."""
+        return self.leaderboard(event_id, window_id, max_rank=100)["deep"]
 
     @staticmethod
     def finished(w, now=None):

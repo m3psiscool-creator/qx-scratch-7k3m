@@ -65,6 +65,15 @@ def poll_once(e, budget=12.0):
     # older windows we never saw are backfilled newest first
     ended = sorted((w for w in wl if not w["final"] and now > w["end"] + config.FINALIZE_AFTER),
                    key=lambda w: -w["end"])
+    # deep thresholds (rank 1500 ... 10000) for finished events saved before they were tracked
+    if time.time() - t0 < budget:
+        for w in storage.deep_missing(1):
+            try:
+                deep = e.deep_only(w["event_id"], w["window_id"])
+                storage.set_deep(w["window_id"], deep or {"_": 0})
+                done.append(("deep", w["window_id"], len(deep)))
+            except Exception as ex:
+                done.append(("error", w["window_id"], str(ex)[:150]))
     todo = []
     for w in ended:  # skip windows Epic has no board for; check lazily to save database reads
         if len(todo) >= BACKFILL_PER_POLL:
@@ -88,6 +97,9 @@ def run_tick(duration=50, interval=30):
         return {"ok": False, "error": str(ex)}
     log = []
     synced = sync_windows(e)
+    if (storage.kv_get("last_prune") or 0) < time.time() - 6 * 3600:
+        storage.prune(3)
+        storage.kv_set("last_prune", time.time())
     while True:
         t = time.time()
         log.extend(poll_once(e))

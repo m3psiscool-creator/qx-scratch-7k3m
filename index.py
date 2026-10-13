@@ -55,6 +55,22 @@ def predict(window: str, top: int, entrants: str = "", approx: int = 0):
         return _err(e)
 
 
+@app.get("/api/thresholds")
+def thresholds(window: str):
+    try:
+        return service.thresholds(window)
+    except Exception as e:
+        return _err(e)
+
+
+@app.get("/api/series")
+def series(window: str):
+    try:
+        return service.series_view(window)
+    except Exception as e:
+        return _err(e)
+
+
 @app.get("/api/live")
 def live(window: str):
     try:

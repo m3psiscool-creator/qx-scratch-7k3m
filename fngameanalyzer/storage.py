@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS snapshots(
  id INTEGER PRIMARY KEY AUTOINCREMENT, window_id TEXT, ts REAL,
  entrants INTEGER, points TEXT, games TEXT, top TEXT);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS series(window_id TEXT, ts REAL, d TEXT);
 CREATE TABLE IF NOT EXISTS names(account_id TEXT PRIMARY KEY, name TEXT);
 """
 
@@ -21,7 +22,7 @@ def db():
     c.row_factory = sqlite3.Row
     c.executescript(SCHEMA)
     for table, col in (("windows", "meta"), ("windows", "sessions"), ("windows", "players"),
-                       ("snapshots", "top")):  # added later; migrate old databases
+                       ("snapshots", "top"), ("windows", "deep"), ("snapshots", "deep")):  # added later; migrate old databases
         try:
             c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
@@ -40,21 +41,53 @@ def upsert_window(w):
 
 def save_final(window_id, lb):
     with db() as c:
-        c.execute("UPDATE windows SET entrants=?,points=?,games=?,sessions=?,players=?,final=1"
+        c.execute("UPDATE windows SET entrants=?,points=?,games=?,sessions=?,players=?,deep=?,final=1"
                   " WHERE window_id=?",
                   (lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]),
                    json.dumps(lb.get("sessions", [])), json.dumps(lb.get("players", [])),
-                   window_id))
+                   json.dumps(lb.get("deep", {})), window_id))
+
+
+def _series_point(lb):
+    d = {str(r): lb["points"][r - 1] for r in config.SERIES_RANKS if r <= len(lb["points"])}
+    for r, v in (lb.get("deep") or {}).items():
+        d[r] = v["points"]
+    return d
 
 
 def save_snapshot(window_id, lb, ts=None):
+    ts = ts or time.time()
     top = [{"rank": i + 1, "players": lb["players"][i], "points": lb["points"][i],
             "games": lb["games"][i]} for i in range(min(60, len(lb["points"])))
            ] if lb.get("players") else []
     with db() as c:
-        c.execute("INSERT INTO snapshots(window_id,ts,entrants,points,games,top) VALUES(?,?,?,?,?,?)",
-                  (window_id, ts or time.time(), lb["entrants"],
-                   json.dumps(lb["points"]), json.dumps(lb["games"]), json.dumps(top)))
+        c.execute("INSERT INTO snapshots(window_id,ts,entrants,points,games,top,deep) VALUES(?,?,?,?,?,?,?)",
+                  (window_id, ts, lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]),
+                   json.dumps(top), json.dumps(lb.get("deep", {}))))
+        c.execute("INSERT INTO series VALUES(?,?,?)",
+                  (window_id, ts, json.dumps({"p": _series_point(lb), "e": lb["entrants"]})))
+
+
+def set_deep(window_id, deep):
+    with db() as c:
+        c.execute("UPDATE windows SET deep=? WHERE window_id=?", (json.dumps(deep), window_id))
+
+
+def series(window_id):
+    with db() as c:
+        rows = c.execute("SELECT ts,d FROM series WHERE window_id=? ORDER BY ts", (window_id,)).fetchall()
+    return [{"ts": r[0], **json.loads(r[1])} for r in rows]
+
+
+def prune(days=3):
+    return 0   # local database: keep everything
+
+
+def deep_missing(limit=1):
+    with db() as c:
+        rows = c.execute("SELECT window_id,event_id FROM windows WHERE final=1 AND "
+                         "(deep IS NULL OR deep='' OR deep='{}') ORDER BY end DESC LIMIT ?", (limit,))
+        return [{"window_id": r[0], "event_id": r[1]} for r in rows]
 
 
 def _w(r):
@@ -63,6 +96,7 @@ def _w(r):
     d["games"] = json.loads(d["games"]) if d["games"] else []
     d["sessions"] = json.loads(d["sessions"]) if d.get("sessions") else []
     d["players"] = json.loads(d["players"]) if d.get("players") else []
+    d["deep"] = json.loads(d["deep"]) if d.get("deep") else {}
     d["meta"] = json.loads(d["meta"]) if d.get("meta") else {}
     return d
 
@@ -89,6 +123,7 @@ def snapshots(window_id, last=None, light=False):
             d["points"] = json.loads(d["points"])
             d["games"] = json.loads(d["games"])
             d["top"] = json.loads(d["top"]) if d.get("top") else []
+            d["deep"] = json.loads(d["deep"]) if d.get("deep") else {}
             out.append(d)
     return out[::-1] if last else out
 

@@ -4,10 +4,9 @@ import os
 import time
 
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from fngameanalyzer import auth, collector, config, service, storage
-from fngameanalyzer.ui import PAGE
+from fngameanalyzer import auth, collector, config, insights, service, storage
 
 app = FastAPI()
 
@@ -21,9 +20,94 @@ def _err(e, code=200):
     return JSONResponse({"error": str(e)}, status_code=code)
 
 
+WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
+
+
+def _file(name, ctype):
+    with open(os.path.join(WEB, name), encoding="utf-8") as f:
+        return Response(f.read(), media_type=ctype, headers={"Cache-Control": "public, max-age=60"})
+
+
 @app.get("/", response_class=HTMLResponse)
-def home():
-    return PAGE
+def home_page():
+    return _file("index.html", "text/html; charset=utf-8")
+
+
+@app.get("/app.js")
+def app_js():
+    return _file("app.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/style.css")
+def style_css():
+    return _file("style.css", "text/css; charset=utf-8")
+
+
+def _api(fn, *a, **k):
+    try:
+        return fn(*a, **k)
+    except Exception as e:
+        return _err(e)
+
+
+@app.get("/api/home")
+def api_home():
+    return _api(insights.home)
+
+
+@app.get("/api/board")
+def api_board(window: str, page: int = 0, q: str = ""):
+    return _api(insights.board, window, page, q)
+
+
+@app.get("/api/archive")
+def api_archive():
+    return _api(insights.archive)
+
+
+@app.get("/api/classes")
+def api_classes():
+    return _api(insights.classes)
+
+
+@app.get("/api/class")
+def api_class(name: str):
+    return _api(insights.class_detail, name)
+
+
+@app.get("/api/player")
+def api_player(id: str):
+    return _api(insights.player, id)
+
+
+@app.get("/api/players")
+def api_players(q: str = "", category: str = ""):
+    return _api(insights.player_search, q) if q else _api(insights.top_players, category or None)
+
+
+@app.get("/api/fncs")
+def api_fncs():
+    return _api(insights.fncs)
+
+
+@app.get("/api/accuracy")
+def api_accuracy():
+    return _api(insights.accuracy)
+
+
+@app.get("/api/status_full")
+def api_status_full():
+    return _api(insights.status)
+
+
+@app.get("/api/window")
+def api_window(window: str):
+    def f():
+        w = storage.get_window(window)
+        if not w:
+            raise ValueError("Unknown window")
+        return service.window_info(w)
+    return _api(f)
 
 
 @app.get("/api/status")

@@ -13,7 +13,8 @@ def pretty(event_id, window_id):
     name = re.sub(r"^epicgames_", "", event_id)
     name = re.sub(r"^S\d+_", "", name)
     name = re.sub(r"_(NAC|NAW|EU|BR|ASIA|ME|OCE)$", "", name)
-    name = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name.replace("_", " "))
+    name = name.replace("_", " ")
+    name = re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", name)
     rest = window_id.replace(event_id.replace("epicgames_", ""), "")
     extra = re.findall(r"(Round\d|Day\d|Heat\d|Event\d+|Final)", window_id)
     seen = [x for x in dict.fromkeys(extra) if x not in name]

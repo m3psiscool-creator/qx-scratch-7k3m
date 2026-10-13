@@ -173,6 +173,27 @@ def names_set(d):
                       (k, v))
 
 
+def names_search(q, limit=20):
+    with db() as c:
+        return c.execute("SELECT account_id,name FROM names WHERE name LIKE ? LIMIT ?", ("%" + q + "%", limit)).fetchall()
+
+
+def add_predictions(rows):
+    pass
+
+
+def predictions_for(window_id):
+    return []
+
+
+def predictions_all():
+    return []
+
+
+def counts():
+    return {"windows": len(windows())}
+
+
 import os as _os  # noqa: E402
 
 if _os.environ.get("POSTGRES_URL") or _os.environ.get("DATABASE_URL"):

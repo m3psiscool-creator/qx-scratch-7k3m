@@ -87,6 +87,59 @@ def poll_once(e, budget=12.0):
     return done
 
 
+PRED_EVERY = 240   # seconds between stored predictions for the same window and rank
+
+
+def store_predictions(budget):
+    """Save predictions for live windows (feeds the home page and the accuracy page)."""
+    from . import insights, service
+    t0 = time.time()
+    rows = []
+    now = time.time()
+    for w in storage.window_list():
+        if w["final"] or not (w["begin"] + 600 <= now <= w["end"] + config.POST_END_GRACE):
+            continue
+        ranks = sorted(set(insights.PRED_RANKS) | {r for r, _ in (w["meta"].get("advance") or [])})
+        for r in ranks:
+            if time.time() - t0 > budget:
+                break
+            key = f"pred:{w['window_id']}:{r}"
+            if now - (storage.kv_get(key) or 0) < PRED_EVERY:
+                continue
+            try:
+                d = service.run_predict(w["window_id"], r, None, True)
+                rows.append((w["window_id"], now, r, d["low"], d["likely"], d["safe"],
+                             (d.get("live") or {}).get("progress"), (d.get("live") or {}).get("current") or d.get("current")))
+                storage.kv_set(key, now)
+            except Exception:
+                storage.kv_set(key, now)   # don't retry a failing rank every pass
+    if rows:
+        storage.add_predictions(rows)
+    return len(rows)
+
+
+def backfill_names(budget):
+    """Look up display names of top finishers so players can be searched by name."""
+    if time.time() - (storage.kv_get("last_names") or 0) < 20:
+        return 0
+    storage.kv_set("last_names", time.time())
+    ids = []
+    for w in storage.windows(final=True)[:60]:
+        for accts in (w.get("players") or [])[:100]:
+            ids.extend(accts)
+    ids = list(dict.fromkeys(ids))
+    have = storage.names_get(ids)
+    todo = [i for i in ids if i not in have][:200]
+    if not todo:
+        return 0
+    try:
+        got = Epic(auth.Session()).display_names(todo)
+    except Exception:
+        return 0
+    storage.names_set(got)
+    return len(got)
+
+
 def run_tick(duration=50, interval=30):
     """Poll now and every `interval` seconds until `duration` has passed."""
     t0 = time.time()
@@ -109,6 +162,17 @@ def run_tick(duration=50, interval=30):
         if not any(x[0] == "snapshot" for x in log):
             break  # nothing live: no point waiting
         time.sleep(max(wait, 0))
+    left = duration + 8 - (time.time() - t0)
+    try:
+        n = store_predictions(max(left - 4, 0)) if left > 6 else 0
+        if n:
+            log.append(("predictions", "", n))
+        if time.time() - t0 < duration + 4:
+            nn = backfill_names(5)
+            if nn:
+                log.append(("names", "", nn))
+    except Exception as ex:
+        log.append(("error", "extras", str(ex)[:120]))
     out = {"ok": True, "synced": synced, "log": log[-12:], "seconds": round(time.time() - t0, 1)}
     storage.kv_set("last_tick", {"at": time.time(), "synced": synced, "log": log[-12:]})
     return out

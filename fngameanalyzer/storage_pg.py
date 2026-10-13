@@ -21,6 +21,10 @@ CREATE INDEX IF NOT EXISTS snap_win ON snapshots(window_id, ts);
 CREATE TABLE IF NOT EXISTS series(
  window_id TEXT, ts DOUBLE PRECISION, d TEXT);
 CREATE INDEX IF NOT EXISTS series_win ON series(window_id, ts);
+CREATE TABLE IF NOT EXISTS predictions(
+ window_id TEXT, ts DOUBLE PRECISION, rank INTEGER, low INTEGER, likely INTEGER, safe INTEGER,
+ progress DOUBLE PRECISION, cur DOUBLE PRECISION);
+CREATE INDEX IF NOT EXISTS pred_win ON predictions(window_id, rank, ts);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS names(account_id TEXT PRIMARY KEY, name TEXT);
 """
@@ -209,3 +213,41 @@ def names_set(d):
         for k, v in d.items():
             c.execute("INSERT INTO names VALUES(%s,%s) ON CONFLICT(account_id) DO UPDATE SET name=excluded.name",
                       (k, v))
+
+
+def names_search(q, limit=20):
+    with db() as c:
+        return c.execute("SELECT account_id,name FROM names WHERE name ILIKE %s ORDER BY length(name) LIMIT %s",
+                         ("%" + q + "%", limit)).fetchall()
+
+
+def add_predictions(rows):
+    """rows: (window_id, ts, rank, low, likely, safe, progress, current)."""
+    with db() as c:
+        for r in rows:
+            c.execute("INSERT INTO predictions VALUES(%s,%s,%s,%s,%s,%s,%s,%s)", r)
+
+
+def predictions_for(window_id):
+    with db() as c:
+        return [{"ts": r[0], "rank": r[1], "low": r[2], "likely": r[3], "safe": r[4], "progress": r[5],
+                 "current": r[6]} for r in c.execute(
+            "SELECT ts,rank,low,likely,safe,progress,cur FROM predictions WHERE window_id=%s ORDER BY ts",
+            (window_id,)).fetchall()]
+
+
+def predictions_all():
+    with db() as c:
+        return c.execute("SELECT window_id,ts,rank,low,likely,safe,progress FROM predictions").fetchall()
+
+
+def counts():
+    with db() as c:
+        return {"windows": c.execute("SELECT count(*) FROM windows").fetchone()[0],
+                "final": c.execute("SELECT count(*) FROM windows WHERE final=1").fetchone()[0],
+                "snapshots": c.execute("SELECT count(*) FROM snapshots").fetchone()[0],
+                "series": c.execute("SELECT count(*) FROM series").fetchone()[0],
+                "predictions": c.execute("SELECT count(*) FROM predictions").fetchone()[0],
+                "names": c.execute("SELECT count(*) FROM names").fetchone()[0],
+                "deep_missing": c.execute("SELECT count(*) FROM windows WHERE final=1 AND (deep IS NULL OR deep='' OR deep='{}')").fetchone()[0],
+                "db_mb": round(c.execute("SELECT pg_database_size(current_database())").fetchone()[0] / 1e6, 1)}

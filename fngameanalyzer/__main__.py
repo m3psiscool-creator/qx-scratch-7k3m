@@ -13,7 +13,7 @@ def _epic():
 def cmd_login(a):
     print("1. Log in to Epic in your browser.\n2. Open this link:\n  ", config.LOGIN_URL)
     print("3. Copy the value of authorizationCode from the page.")
-    code = input("authorizationCode: ").strip().strip('"')
+    code = (a.code or input("authorizationCode: ")).strip().strip('"')
     print("Logged in as", auth.login(code))
 
 
@@ -79,7 +79,9 @@ def cmd_predict(a):
 def main():
     p = argparse.ArgumentParser(prog="fngameanalyzer")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("login").set_defaults(f=cmd_login)
+    s = sub.add_parser("login")
+    s.add_argument("code", nargs="?")
+    s.set_defaults(f=cmd_login)
     for name, f in (("probe", cmd_probe), ("collect", cmd_collect), ("watch", cmd_watch)):
         s = sub.add_parser(name)
         s.add_argument("--regions", nargs="+", default=["EU"])

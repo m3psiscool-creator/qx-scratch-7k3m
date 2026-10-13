@@ -1,32 +1,57 @@
 import json
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from . import model, storage
+from . import model, rules, storage
 
 PAGE = """<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width">
 <title>FN Game Analyzer</title>
-<style>body{font:16px system-ui;max-width:640px;margin:2rem auto;padding:0 1rem}
+<style>body{font:16px system-ui;max-width:680px;margin:2rem auto;padding:0 1rem}
 select,input,button{font:inherit;padding:.4rem;margin:.2rem 0;width:100%;box-sizing:border-box}
 table{width:100%;border-collapse:collapse;margin-top:1rem}td,th{padding:.4rem;border-bottom:1px solid #8884;text-align:left}
-.big{font-size:1.4rem;font-weight:700}</style>
+.big{font-size:1.4rem;font-weight:700}.box{border:1px solid #8884;border-radius:6px;padding:.6rem;margin:.6rem 0}
+small{opacity:.75}</style>
 <h1>FN Game Analyzer</h1>
-<label>Window <select id=w></select></label>
-<label>Top X <input id=x type=number min=1 value=100></label>
-<label>Entrants (optional) <input id=e type=number min=1></label>
+<label>Tournament window <select id=w onchange=info()></select></label>
+<div id=info class=box></div>
+<label>Top X <input id=x type=number min=1 value=35></label>
+<label>Entrants in this window (optional - leave blank to use a typical past number) <input id=e type=number min=1></label>
 <button onclick=go()>Predict</button><div id=out></div>
 <script>
-const $=id=>document.getElementById(id);
-fetch('/api/windows').then(r=>r.json()).then(ws=>{
- $('w').innerHTML=ws.map(w=>`<option value="${w.window_id}">${w.family} ${w.region} - ${w.window_id}${w.final?' (finished)':''}</option>`).join('')||'<option>No data - run collect</option>'});
+const $=id=>document.getElementById(id);let WS=[];
+const fmt=t=>new Date(t*1000).toLocaleString([],{weekday:'short',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+function info(){const w=WS.find(v=>v.window_id==$('w').value);if(!w){$('info').textContent='';return}
+ $('info').innerHTML=`<b>${w.status}</b> &middot; ${fmt(w.begin)} &rarr; ${fmt(w.end)}<br>
+ ${w.family} ${w.region} ${w.mode} ${w.round_type||''}<br>
+ ${w.match_cap?w.match_cap+' games':'games unknown'}<br><small>${w.scoring||''}</small>
+ ${w.advance.length?'<br>'+w.advance.map(a=>'Top '+a[0]+' &rarr; '+a[1]).join('<br>'):''}`}
+fetch('/api/windows').then(r=>r.json()).then(ws=>{WS=ws;
+ $('w').innerHTML=ws.map(w=>`<option value="${w.window_id}">[${w.status}] ${fmt(w.begin)} - ${w.window_id}</option>`).join('')||'<option>No data - run collect</option>';info()});
 async function go(){
  const q=new URLSearchParams({window:$('w').value,top:$('x').value,entrants:$('e').value});
  const d=await (await fetch('/api/predict?'+q)).json();
  if(d.error){$('out').textContent=d.error;return}
- $('out').innerHTML=`<table><tr><th>Low</th><th>Most likely</th><th>Safe (~95%)</th></tr>
- <tr class=big><td>${d.low}</td><td>${d.likely}</td><td>${d.safe}</td></tr></table>
- <p>Prior: ${d.prior?d.prior.n+' past windows':'none'}. Live: ${d.live?'progress '+(d.live.progress*100).toFixed(0)+'% by '+d.live.basis+(d.live.learned?'':' (naive)'):'no snapshot'}.</p>`}
+ const row=(l,r)=>`<tr><td>${l}</td><td>${r.low}</td><td class=big>${r.likely}</td><td>${r.safe}</td></tr>`;
+ $('out').innerHTML=`<table><tr><th>Rank</th><th>Low</th><th>Most likely</th><th>Safe (~95%)</th></tr>
+ ${row('Top '+d.rank,d)}${(d.cutoffs||[]).map(c=>row('Top '+c.rank+' ('+c.label+')',c)).join('')}</table>
+ <p><small>Method: ${d.method}. ${d.prior?d.prior.n+' past windows. Assumed entrants: '+Math.round(d.entrants_used||0)+'.':''}
+ ${d.live?' Live: progress '+(d.live.progress*100).toFixed(0)+'% by '+d.live.basis+(d.live.learned?'':' (naive)'):' No live snapshot.'}</small></p>`}
 </script>"""
+
+
+def window_info(w):
+    m = w["meta"]
+    now = time.time()
+    status = "finished" if w["final"] else ("live" if w["begin"] <= now <= w["end"] else
+                                            "finished (not collected)" if w["end"] < now else "upcoming")
+    return {
+        "window_id": w["window_id"], "family": w["family"], "region": w["region"],
+        "begin": w["begin"], "end": w["end"], "final": w["final"], "status": status,
+        "match_cap": m.get("match_cap"), "mode": m.get("mode"), "round_type": m.get("round_type"),
+        "advance": m.get("advance", []),
+        "scoring": rules.describe(m["rules"]) if m.get("rules") else None,
+    }
 
 
 def make_handler():
@@ -45,8 +70,9 @@ def make_handler():
             if u.path == "/":
                 return self._send(PAGE, "text/html")
             if u.path == "/api/windows":
-                ws = [{k: w[k] for k in ("window_id", "family", "region", "begin", "end", "final")}
-                      for w in storage.windows()]
+                ws = sorted((window_info(w) for w in storage.windows()),
+                            key=lambda w: (w["status"] == "finished", w["begin"]
+                                           if w["status"] != "finished" else -w["begin"]))
                 return self._send(json.dumps(ws))
             if u.path == "/api/predict":
                 try:
@@ -73,6 +99,14 @@ def run_predict(window_id, top, entrants=None):
     r = model.predict(target, finished, top, entrants, snap, by_win)
     if not r:
         raise ValueError("Not enough data: run collect first")
+    r["entrants_used"] = entrants or (r["prior"] or {}).get("entrants") or 0
+    r["cutoffs"] = []
+    for rank, label in (target["meta"].get("advance") or []):
+        if rank != top:
+            c = model.predict(target, finished, rank, entrants, snap, by_win)
+            if c:
+                r["cutoffs"].append({"rank": rank, "label": label, "low": c["low"],
+                                     "likely": c["likely"], "safe": c["safe"]})
     return r
 
 

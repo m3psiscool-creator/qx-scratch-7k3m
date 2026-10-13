@@ -4,8 +4,12 @@ Prior: recency-weighted points at rank X from comparable finished windows.
 Live: current points at rank X scaled to the end of the window.
 Combined by inverse variance.
 """
+import json
 import math
+import random
 import statistics
+
+from . import rules
 
 DECAY = 0.7
 BETA_GRID = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -24,10 +28,15 @@ def _at(points, rank):
     return points[rank - 1] if 1 <= rank <= len(points) else None
 
 
+def _fmt(w):
+    return (w.get("meta") or {}).get("format")
+
+
 def comparable(target, finished):
+    """Finished windows with the SAME format (game count + scoring rules)."""
     same = [w for w in finished
             if w["family"] == target["family"] and w["window_id"] != target["window_id"]
-            and w["points"]]
+            and w["points"] and _fmt(w) == _fmt(target)]
     reg = [w for w in same if w["region"] == target["region"]]
     pool = reg if len(reg) >= 3 else same
     return sorted(pool, key=lambda w: w["end"], reverse=True)
@@ -142,8 +151,71 @@ def combine(estimates):
     return m, math.sqrt(1 / sum(w))
 
 
+RESCORE_WINDOWS = 8
+RESCORE_REPS = 20
+RESCORE_SD_FLOOR = 0.12
+MIN_PLAYERS = 100
+_game_cache = {}
+
+
+def _rescored_games(w, rule_list):
+    """Per-player list of per-game points for window w under the target's rules."""
+    key = (w["window_id"], json.dumps(rule_list))
+    if key not in _game_cache:
+        _game_cache[key] = [[rules.game_points(rule_list, rules.session_stats(g)) for g in p]
+                            for p in w["sessions"]]
+    return _game_cache[key]
+
+
+def rescored_prior(target, finished, rank, entrants=None):
+    """No past window has this format: replay old games under the target's scoring rules.
+
+    Each past player's games are re-scored, M = target game count of them are drawn
+    (without replacement) to rebuild a board, and the value at the percentile-matched
+    rank is read off. Repeated and averaged over several draws."""
+    meta = target.get("meta") or {}
+    rule_list, cap = meta.get("rules"), meta.get("match_cap")
+    if not rule_list or not cap:
+        return None
+    pool = [w for w in finished
+            if w["family"] == target["family"] and w["sessions"] and len(w["sessions"]) >= MIN_PLAYERS
+            and (w.get("meta") or {}).get("mode") == meta.get("mode")]
+    pool = sorted(pool, key=lambda w: w["end"], reverse=True)[:RESCORE_WINDOWS]
+    if not pool:
+        return None
+    if not entrants:
+        entrants = statistics.median(w["entrants"] for w in pool if w.get("entrants"))
+    rng = random.Random(7)
+    vals, ws, spread = [], [], []
+    for i, w in enumerate(pool):
+        r = max(1, round(rank * (w.get("entrants") or entrants) / entrants))
+        if r > len(w["sessions"]):
+            continue
+        games = [g for g in _rescored_games(w, rule_list) if g]
+        reps = []
+        for _ in range(RESCORE_REPS):
+            board = sorted((sum(rng.sample(g, cap)) if len(g) >= cap
+                            else sum(g) * cap / len(g)) for g in games)
+            reps.append(_l(board[-r]) if r <= len(board) else None)
+        reps = [x for x in reps if x is not None]
+        if reps:
+            vals.append(statistics.mean(reps))
+            ws.append(DECAY ** i)
+            spread.append(statistics.pvariance(reps))
+    if not vals:
+        return None
+    m, var = _wmean_var(vals, ws) if len(vals) > 1 else (vals[0], 0.25 ** 2)
+    var = max(var + statistics.mean(spread), RESCORE_SD_FLOOR ** 2)
+    return {"mean": m, "var": var, "n": len(vals), "beta": 0.0, "entrants": entrants}
+
+
 def predict(target, finished, rank, entrants=None, snapshot=None, snaps_by_window=None, now=None):
     pr = prior(target, finished, rank, entrants)
+    method = "same-format history"
+    if not pr or pr["n"] < 2:
+        rp = rescored_prior(target, finished, rank, entrants)
+        if rp:
+            pr, method = rp, "past games re-scored under this event's rules"
     lv = live(target, snapshot, finished, rank, snaps_by_window, now) if snapshot else None
     c = combine([pr, lv])
     if not c:
@@ -152,5 +224,5 @@ def predict(target, finished, rank, entrants=None, snapshot=None, snaps_by_windo
     f = lambda z: round(math.expm1(z))
     return {
         "rank": rank, "low": f(m - Z90 * sd), "likely": f(m), "safe": f(m + Z90 * sd),
-        "prior": pr, "live": lv,
+        "prior": pr, "live": lv, "method": method if pr else None,
     }

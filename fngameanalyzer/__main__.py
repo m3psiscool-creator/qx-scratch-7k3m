@@ -45,7 +45,7 @@ def _sync(e, regions):
 
 def cmd_collect(a):
     e = _epic()
-    have = {w["window_id"] for w in storage.windows(final=True)}
+    have = {w["window_id"] for w in storage.windows(final=True) if w["sessions"]}
     for w in _sync(e, a.regions):
         if e.finished(w) and w["window_id"] not in have:
             try:

@@ -18,20 +18,29 @@ def db():
     c = sqlite3.connect(config.DB_FILE)
     c.row_factory = sqlite3.Row
     c.executescript(SCHEMA)
+    for col in ("meta", "sessions"):  # added later; migrate old databases
+        try:
+            c.execute(f"ALTER TABLE windows ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass
     return c
 
 
 def upsert_window(w):
     with db() as c:
-        c.execute("""INSERT INTO windows(window_id,event_id,family,region,begin,end)
-                     VALUES(:window_id,:event_id,:family,:region,:begin,:end)
-                     ON CONFLICT(window_id) DO UPDATE SET end=excluded.end""", w)
+        c.execute("""INSERT INTO windows(window_id,event_id,family,region,begin,end,meta)
+                     VALUES(:window_id,:event_id,:family,:region,:begin,:end,:meta)
+                     ON CONFLICT(window_id) DO UPDATE SET
+                       begin=excluded.begin, end=excluded.end, meta=excluded.meta""",
+                  {**w, "meta": json.dumps(w.get("meta") or {})})
 
 
 def save_final(window_id, lb):
     with db() as c:
-        c.execute("UPDATE windows SET entrants=?,points=?,games=?,final=1 WHERE window_id=?",
-                  (lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]), window_id))
+        c.execute("UPDATE windows SET entrants=?,points=?,games=?,sessions=?,final=1"
+                  " WHERE window_id=?",
+                  (lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]),
+                   json.dumps(lb.get("sessions", [])), window_id))
 
 
 def save_snapshot(window_id, lb, ts=None):
@@ -45,6 +54,8 @@ def _w(r):
     d = dict(r)
     d["points"] = json.loads(d["points"]) if d["points"] else []
     d["games"] = json.loads(d["games"]) if d["games"] else []
+    d["sessions"] = json.loads(d["sessions"]) if d.get("sessions") else []
+    d["meta"] = json.loads(d["meta"]) if d.get("meta") else {}
     return d
 
 

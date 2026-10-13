@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 
-from . import config
+from . import config, rules
 
 
 def parse_time(s):
@@ -15,6 +15,44 @@ def classify(text):
     region = next((r for r in config.REGIONS
                    if re.search(rf"(^|[^a-z]){r.lower()}([^a-z]|$)", t)), "ALL")
     return family, region
+
+
+def team_mode(text):
+    t = text.lower()
+    for key, name in (("solo", "solo"), ("duo", "duos"), ("trio", "trios"), ("squad", "squads")):
+        if key in t:
+            return name
+    return "?"
+
+
+def window_meta(raw, ev, w):
+    """Game count, scoring rules, advancement cutoffs and type of one window."""
+    tmpl = next((t for t in raw.get("templates", [])
+                 if t.get("eventTemplateId") == w.get("eventTemplateId")), {})
+    locs = w.get("scoreLocations") or []
+    main = next((l for l in locs if l.get("isMainWindowLeaderboard")), locs[0] if locs else {})
+    ld = next((l for l in raw.get("leaderboardDefs", [])
+               if l.get("leaderboardDefId") == main.get("leaderboardDefId")), {})
+    rsid = ld.get("scoringRuleSetId")
+    rs = (raw.get("scoringRuleSets", {}).get(rsid)
+          or raw.get("scoreLocationScoringRuleSets", {}).get(rsid))
+    parsed = rules.parse(rs)
+    advance = []
+    for table in raw.get("payoutTables", {}).get(ev.get("eventId"), []) or []:
+        if table.get("scoringType") != "rank":
+            continue
+        for rk in table.get("ranks", []):
+            tokens = [p["value"] for p in rk.get("payouts", []) if p.get("rewardType") == "token"]
+            if tokens:
+                advance.append([rk["threshold"], tokens[0]])
+    cap = tmpl.get("matchCap")
+    return {
+        "match_cap": cap, "playlist": tmpl.get("playlistId"), "ruleset": rsid,
+        "rules": parsed, "advance": sorted(advance),
+        "round_type": (w.get("metadata") or {}).get("RoundType"),
+        "mode": team_mode(ev.get("eventId", "")),
+        "format": rules.format_key(cap, parsed) if parsed else None,
+    }
 
 
 class Epic:
@@ -40,6 +78,7 @@ class Epic:
                     "window_id": w["eventWindowId"], "event_id": ev["eventId"],
                     "family": fam2, "region": reg if reg != "ALL" else r2,
                     "begin": parse_time(w["beginTime"]), "end": parse_time(w["endTime"]),
+                    "meta": window_meta(raw, ev, w),
                 })
         return out
 
@@ -49,8 +88,8 @@ class Epic:
             page=page, rank=0, appId="Fortnite", showLiveSessions="true")
 
     def leaderboard(self, event_id, window_id, max_rank=1000):
-        """Points and games by rank (index 0 = rank 1), plus entrants estimate."""
-        points, games = [], []
+        """Points, games and per-game [placement, elims, win] by rank (index 0 = rank 1)."""
+        points, games, sessions = [], [], []
         p, total, per = 0, 1, 0
         while p < total and len(points) < max_rank:
             d = self.page(event_id, window_id, p)
@@ -59,7 +98,10 @@ class Epic:
             per = per or len(ents)
             for e in ents:
                 points.append(float(e.get("pointsEarned", e.get("score", 0)) or 0))
-                games.append(len(e.get("sessionHistory") or []))
+                hist = e.get("sessionHistory") or []
+                games.append(len(hist))
+                sessions.append([[(s.get("trackedStats") or {}).get(k, 0) for k in rules.STATS]
+                                 for s in hist])
             p += 1
             if not ents:
                 break
@@ -67,7 +109,8 @@ class Epic:
         if total > p and per:  # truncated: estimate from last page
             last = self.page(event_id, window_id, total - 1)
             entrants = (total - 1) * per + len(last.get("entries", []))
-        return {"points": points, "games": games, "entrants": entrants, "total_pages": total}
+        return {"points": points, "games": games, "sessions": sessions,
+                "entrants": entrants, "total_pages": total}
 
     @staticmethod
     def finished(w, now=None):

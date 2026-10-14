@@ -124,7 +124,8 @@ def classes():
 def class_detail(category):
     ws = sorted(storage.windows(final=True, category=category, light=True), key=lambda w: w["end"])
     ev = [{"window_id": w["window_id"], "name": service.pretty(w.get("event_id") or "", w["window_id"]),
-           "region": w["region"], "end": w["end"], "family": w["family"], "cutoffs": cutoffs(w)} for w in ws]
+           "region": w["region"], "end": w["end"], "family": w["family"], "cutoffs": cutoffs(w),
+           "stage": (w.get("meta") or {}).get("stage"), "games": (w.get("meta") or {}).get("match_cap")} for w in ws]
     table = {}
     for r in STD_RANKS:
         v = sorted(e["cutoffs"][r] for e in ev if r in e["cutoffs"])

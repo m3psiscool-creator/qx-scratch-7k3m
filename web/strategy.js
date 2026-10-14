@@ -248,32 +248,72 @@ function renderSafe() {
 }
 
 // ---------------------------------------------------------------- 6 keep playing?
+// Monte Carlo over the games you still have. Three sources of uncertainty are simulated together:
+//  1. how well you play (a real finisher's games, or your own pace blended with finishers),
+//  2. luck from game to game (games are drawn at random from real results),
+//  3. where the final cutoff lands (drawn from the model's predicted distribution).
+const PRIOR_GAMES = 8;   // how many games of "finisher form" a blend counts before your own results outweigh it
+const gauss = r => { let u = 0; while (!u) u = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r()); };
+const pct1 = v => v < 10 ? nd(v, 1) : nd(v, 0);
+const meanOf = a => a.reduce((s, x) => s + x, 0) / (a.length || 1);
+function simStop(o) {
+  const R = rng(o.seed), S = o.sims, K = o.rem, totals = Array.from({ length: K + 1 }, () => new Float32Array(S)), cuts = new Float32Array(S);
+  const pm = meanOf(o.pooled) || 1;
+  for (let i = 0; i < S; i++) {
+    cuts[i] = o.cut.fixed != null ? o.cut.fixed : Math.expm1(o.cut.mu + o.cut.sd * gauss(R));
+    let t = o.pts; totals[0][i] = t;
+    let draw;
+    if (o.mode === "band" && o.players.length) { const pl = o.players[(R() * o.players.length) | 0]; draw = () => pl[(R() * pl.length) | 0]; }
+    else {
+      const n = o.own ? o.own.n : 1, k = o.mode === "own" ? 0 : PRIOR_GAMES, post = (n * (o.own ? o.own.mean : pm) + k * pm) / (n + k), se = o.sd / Math.sqrt(n + k);
+      const sc = Math.max(0.15, post + se * gauss(R)) / pm;
+      draw = () => Math.round(o.pooled[(R() * o.pooled.length) | 0] * sc);
+    }
+    for (let g = 1; g <= K; g++) { t += draw(); totals[g][i] = t; }
+  }
+  const P = totals.map(a => { let c = 0; for (let i = 0; i < S; i++) if (a[i] >= cuts[i]) c++; return c / S * 100; });
+  const Q = totals.map(a => { const b = Float32Array.from(a).sort(); return [b[Math.floor(S * .1)], b[Math.floor(S * .5)], b[Math.floor(S * .9)]]; });
+  return { P, Q };
+}
 function renderStop() {
   const el = $("#p-stop"); if (!el) return; drop("stop");
   const pr = SS.d.profile, s = SS.d.safety;
   if (!pr || pr.error || !s) { el.innerHTML = `<div class="card empty">${esc(pr && pr.error || "Waiting for data…")}</div>`; return; }
   if (s.error && !SS.aim) { el.innerHTML = `<div class="card empty">${esc(s.error)}</div>`; return; }
+  const own = SS.played > 0 ? { n: SS.played, mean: SS.pts / SS.played } : null;
   const bands = [{ key: "focus", name: `Players around #${pr.rank}`, b: pr.focus }, ...pr.bands.map(b => ({ key: b.from + "-" + b.to, name: `Top #${b.from}–${b.to}`, b }))];
-  const sel = bands.find(x => x.key === SS.like) || bands[0], samp = sel.b.sample;
-  const cap = capOf(), rem = Math.max(0, cap - SS.played), mean = sel.b.pts_per_game;
-  const cuts = SS.aim ? [{ n: "Your aim", v: SS.aim, c: SER(0) }] : s.final ? [{ n: "Final cutoff", v: s.likely, c: SER(0) }] : [{ n: "Likely cutoff", v: s.ladder.find(x => x.conf === 0.5).points, c: SER(0) }, { n: "Comfortable (80%)", v: s.ladder.find(x => x.conf === 0.8).points, c: SER(1) }, { n: "Safe (95%)", v: s.ladder.find(x => x.conf === 0.95).points, c: SER(2) }];
-  const SIMS = 6000, rnd = rng(Math.round(SS.rank * 7 + SS.pts + SS.played * 13)), hit = cuts.map(() => new Array(rem + 1).fill(0));
-  for (let i = 0; i < SIMS; i++) { let t = SS.pts; for (let k = 0; k <= rem; k++) { if (k) t += samp[(rnd() * samp.length) | 0]; cuts.forEach((c, ci) => { if (t >= c.v) hit[ci][k]++; }); } }
-  const P = hit.map(h => h.map(x => x / SIMS * 100));
-  const mi = Math.max(0, cuts.findIndex(c => c.v === aimPoints())), key = mi < 0 ? 0 : mi;
-  const pAll = P[key][rem], p0 = P[key][0], p1 = rem ? P[key][1] : p0;
+  const opts = [...(own ? [{ key: "blend", name: `My pace blended with finishers (${nd(own.mean)} pts/game so far)`, mode: "blend" }, { key: "own", name: `Only my pace so far (${nd(own.mean)} pts/game)`, mode: "own" }] : []), ...bands.map(x => ({ ...x, mode: "band", name: x.name + ` (${nd(x.b.pts_per_game)} pts/game)` }))];
+  const def = own && own.n >= 3 ? "blend" : "focus";
+  const sel = opts.find(x => x.key === SS.like) || opts.find(x => x.key === def) || opts[0];
+  const base = bands.find(x => x.key === "focus").b;                        // the form of finishers near the target
+  const pooledFrom = sel.mode === "band" ? sel.b : base;
+  const cap = capOf(), left = Math.max(0, cap - SS.played);
+  let rem = left, limited = "";
+  if (ACTIVE.includes(SS.w.status)) { const fit = Math.max(0, Math.floor((SS.w.end - Date.now() / 1000) / (25 * 60)) + 1); if (fit < left) { rem = fit; limited = `About ${fit} more game${fit === 1 ? "" : "s"} fit before the window closes (a game takes roughly 25 minutes), so the simulation stops there.`; } }
+  const fixed = SS.aim || (s.final ? s.likely : null);
+  const T = aimPoints(), goalName = SS.aim ? `your aim of ${nf(SS.aim)}` : `a top ${nf(SS.rank)} finish`;
+  const sim = simStop({ pts: SS.pts, rem, mode: sel.mode, players: pooledFrom.players_pts || [], pooled: pooledFrom.sample, own, sd: base.sd || 20, cut: fixed != null ? { fixed } : { mu: s.mu, sd: s.sd }, seed: Math.round(SS.rank * 7 + SS.pts * 3 + SS.played * 13), sims: 6000 });
+  const P = sim.P, Q = sim.Q, p0 = P[0], pAll = P[rem], p1 = rem ? P[1] : p0, marg = P.map((v, k) => k ? v - P[k - 1] : 0);
+  const sure = P.findIndex(v => v >= 95), dim = marg.findIndex((v, k) => k > 0 && v < 1.5);
   let cls, head, body;
-  if (p0 >= 99) { cls = "stop"; head = "You are already above this cutoff"; body = `Your ${nf(SS.pts)} points already beat ${nf(cuts[key].v)}. More games cannot lower your rank, but they add little unless the cutoff moves higher than predicted.`; }
-  else if (rem === 0) { cls = "hard"; head = "No games left"; body = `You have played all ${cap} games. Your ${nf(SS.pts)} points are ${SS.pts >= cuts[key].v ? "above" : "below"} ${nf(cuts[key].v)}.`; }
-  else if (pAll < 3) { cls = "hard"; head = `Very unlikely (${nd(pAll)}%)`; body = `Even playing all ${rem} remaining games like ${sel.name.toLowerCase()}, you reach ${nf(cuts[key].v)} in only ${nd(pAll)}% of simulations. You need ${nf(Math.max(0, cuts[key].v - SS.pts))} more points, but such players earn about ${nf(mean * rem)} in ${rem} games.`; }
-  else if (p1 - p0 < 1 && rem > 1) { cls = "go"; head = `Keep going: ${nd(pAll)}% over ${rem} games`; body = `One more game barely moves the odds (${nd(p0)}% → ${nd(p1)}%); the chance builds over the full set of games.`; }
-  else { cls = "go"; head = `Keep playing: ${nd(pAll)}% chance with ${rem} games left`; body = `The next game alone lifts your chance from ${nd(p0)}% to ${nd(p1)}%. Points never go down, so playing on only costs time.`; }
-  el.innerHTML = `<div class="ctrl"><label style="margin:0">Play like</label><select id="slike" style="width:auto;margin:0">${bands.map(x => `<option value="${x.key}" ${x.key === sel.key ? "selected" : ""}>${esc(x.name)} (${nd(x.b.pts_per_game)} pts/game)</option>`).join("")}</select></div>
-  <div class="verdict ${cls}"><div><div class="big">${head}</div><div>${body}</div></div></div>
-  <div class="kpis">${kpi("Still needed", nf(Math.max(0, cuts[key].v - SS.pts)), "to reach " + nf(cuts[key].v), "hero")}${kpi("Expected in " + rem + " games", nf(mean * rem), nd(mean) + " per game")}${kpi("Spread (1 sd)", "± " + nf(sel.b.sd * Math.sqrt(rem)), "over " + rem + " games")}${kpi("Next game adds", rem ? "+" + nd(p1 - p0) + "%" : "-", "to your chance")}</div>
-  ${chartCard("c-stop", "Chance to reach the cutoff by extra games played", `${SIMS.toLocaleString()} simulated runs, drawing each game from real results`, {})}`;
-  put("stop", mk($("#c-stop"), { type: "line", data: { labels: Array.from({ length: rem + 1 }, (_, k) => k), datasets: cuts.map((c, i) => ({ label: `${c.n} · ${nf(c.v)}`, data: P[i], borderColor: c.c, backgroundColor: c.c, pointRadius: 3, borderWidth: i === key ? 3 : 1.8 })) }, options: { scales: { x: { title: { text: "Extra games played" } }, y: { min: 0, max: 100, title: { text: "Chance of reaching it (%)" }, ticks: { callback: v => v + "%" } } }, plugins: { tooltip: { callbacks: { title: c => c[0].label + " more games", label: c => `${c.dataset.label}: ${c.parsed.y.toFixed(0)}%` } } } } }));
-  $("#c-stop-tbl").innerHTML = table(["Extra games", ...cuts.map(c => c.n)], P[0].map((_, k) => [k, ...P.map(r => nd(r[k], 0) + "%")]), ["n", ...cuts.map(() => "n")]);
-  $("#c-stop-take").innerHTML = take("", `Based on ${SIMS.toLocaleString()} simulated runs. The cutoffs are the predicted <i>final</i> values, so they already allow for other players still playing. It assumes you play about like ${esc(sel.name.toLowerCase())}; pick a different group above if that is too optimistic.`);
+  if (rem === 0) { cls = "hard"; head = left === 0 ? "No games left" : "No time for another game"; body = `Your ${nf(SS.pts)} points give about a <b>${nd(p0, 0)}%</b> chance of ${goalName}.`; }
+  else if (p0 >= 97) { cls = "stop"; head = "You are very likely already in"; body = `Even with no more games you have about <b>${nd(p0, 0)}%</b> to make ${goalName}. More games only protect against a late jump in the cutoff.`; }
+  else if (pAll < 3) { cls = "hard"; head = `Very unlikely: ${nd(pAll)}%`; body = `Playing all ${rem} remaining games, your median finish is about <b>${nf(Q[rem][1])}</b> points, and ${goalName} needs roughly ${nf(T)}. It would take an unusually strong run.`; }
+  else if (sure > 0) { cls = "go"; head = `Play ${sure} more game${sure > 1 ? "s" : ""} to be 95% sure`; body = `Your chance of ${goalName} rises from <b>${pct1(p0)}%</b> now to <b>${nd(P[sure], 0)}%</b> after ${sure} more.${sure < rem ? ` After that, each extra game adds ${nd(marg[sure + 1])}% or less.` : ""}`; }
+  else if (dim > 1 && dim < rem) { cls = "go"; head = `Strong gains up to game ${dim - 1}, then it flattens`; body = `Your chance climbs from ${nd(p0, 0)}% to <b>${nd(P[dim - 1], 0)}%</b> over the next ${dim - 1} game${dim - 1 === 1 ? "" : "s"}; games after that add under 1.5% each. All ${rem}: <b>${nd(pAll, 0)}%</b>.`; }
+  else { cls = "go"; head = `Keep playing: ${nd(pAll, 0)}% with ${rem} game${rem > 1 ? "s" : ""} left`; body = `The next game lifts your chance from <b>${pct1(p0)}%</b> to <b>${pct1(p1)}%</b>. Points never go down, so playing on only costs time.`; }
+  const finalMed = Q[rem][1];
+  el.innerHTML = `<div class="ctrl"><label style="margin:0">Play like</label><select id="slike" style="width:auto;max-width:100%;margin:0">${opts.map(x => `<option value="${x.key}" ${x.key === sel.key ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
+  <div class="verdict ${cls}"><div><div class="big">${head}</div><div>${body}</div></div></div>${limited ? `<p class="small">${limited}</p>` : ""}
+  <div class="kpis">${kpi("Chance with 0 more games", pct1(p0) + "%", nf(SS.pts) + " points now")}${kpi("Chance with all " + rem, nd(pAll, 0) + "%", "of " + goalName, "hero")}${kpi("Next game adds", rem ? "+" + nd(p1 - p0) + "%" : "-", "to your chance")}${kpi("Likely final points", nf(finalMed), "range " + nf(Q[rem][0]) + " – " + nf(Q[rem][2]))}${kpi("Cutoff aimed at", nf(T), fixed != null ? "fixed" : "varies ± " + nd(s.sd_pct) + "%")}</div>
+  ${chartCard("c-stop", `Chance of ${goalName}, by extra games played`, "6,000 simulated runs", {})}
+  <div class="grid g2">${chartCard("c-stop2", "What each extra game adds", "percentage points of chance", { cls: "short", table: false })}${chartCard("c-stop3", "Where your points could end up", "middle 80% of runs", { cls: "short", table: false })}</div>`;
+  const xs = Array.from({ length: rem + 1 }, (_, k) => k);
+  put("stop", mk($("#c-stop"), { type: "line", data: { labels: xs, datasets: [{ label: "Chance", data: P, borderColor: SER(0), backgroundColor: withAlpha(SER(0), .14), fill: true, pointRadius: 3, borderWidth: 3 }] }, options: { scales: { x: { title: { text: "Extra games played" } }, y: { min: 0, max: 100, title: { text: "Chance (%)" }, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, refLines: { lines: [{ axis: "y", value: 95, label: "95% sure", right: true }] }, tooltip: { callbacks: { title: c => c[0].label + " more games", label: c => `${c.parsed.y.toFixed(0)}% chance` } } } } }));
+  put("stop", mk($("#c-stop2"), { type: "bar", data: { labels: xs.slice(1), datasets: [{ label: "Added chance", data: marg.slice(1).map(v => +v.toFixed(1)), backgroundColor: marg.slice(1).map(v => v < 1.5 ? withAlpha(SER(0), .4) : SER(0)) }] }, options: { scales: { x: { title: { text: "Game" } }, y: { title: { text: "Percentage points" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => "Game " + c[0].label, label: c => "+" + c.parsed.y + " points of chance" } } } } }));
+  const cutLines = fixed != null ? [{ axis: "y", value: fixed, label: "cutoff " + nf(fixed), color: cssv("--tx"), right: true }] : [{ axis: "y", value: Math.round(Math.expm1(s.mu)), label: "likely cutoff " + nf(Math.expm1(s.mu)), color: cssv("--tx"), right: true }, { axis: "y", value: s.ladder.find(x => x.conf === 0.95).points, label: "95%: " + nf(s.ladder.find(x => x.conf === 0.95).points), color: cssv("--tx2"), right: true, dash: [2, 4] }];
+  put("stop", mk($("#c-stop3"), { type: "line", data: { labels: xs, datasets: [{ label: "10%", data: Q.map(q => q[0]), borderColor: "transparent", pointRadius: 0, fill: false }, { label: "Middle 80% of runs", data: Q.map(q => q[2]), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .2), pointRadius: 0, fill: "-1" }, { label: "Median", data: Q.map(q => q[1]), borderColor: SER(0), backgroundColor: SER(0), borderWidth: 3, pointRadius: 2 }] }, options: { scales: { x: { title: { text: "Extra games played" } }, y: { title: { text: "Your total points" } } }, plugins: { legend: { labels: { filter: i => i.text !== "10%" } }, refLines: { lines: cutLines }, tooltip: { callbacks: { title: c => c[0].label + " more games", label: c => `${c.dataset.label === "Middle 80% of runs" ? "90th percentile" : c.dataset.label === "10%" ? "10th percentile" : c.dataset.label}: ${nf(c.parsed.y)}` } } } } }));
+  $("#c-stop-tbl").innerHTML = table(["Extra games", "Chance", "Adds", "10%", "Median", "90%"], xs.map(k => [k, nd(P[k], 0) + "%", k ? "+" + nd(marg[k]) : "", nf(Q[k][0]), nf(Q[k][1]), nf(Q[k][2])]), ["n", "n", "n", "n", "n", "n"]);
+  $("#c-stop-take").innerHTML = take("", `Each run picks how well you play, plays your remaining games from real results, and compares your total with a cutoff drawn from the prediction${fixed != null ? "" : ` (±${nd(s.sd_pct)}%)`}. ${sel.mode === "band" ? "Players are real finishers from the selected group, so it includes both strong and weak runs." : sel.mode === "blend" ? `Your ${own.n} games count against ${PRIOR_GAMES} games of finisher form, so a short hot or cold start does not dominate.` : "Only your own games so far set your pace, so a short start can mislead."}`);
   $("#slike").onchange = e => { SS.like = e.target.value; saveSS(); renderStop(); };
 }

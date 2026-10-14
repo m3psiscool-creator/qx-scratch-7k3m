@@ -39,14 +39,14 @@ function setNav(page, tab) {
   const main = { t: tab === "strategy" ? "strategy" : "schedule", player: "players", class: "classes" }[page] || page;
   $$("#nav a, #mnav a[data-p]").forEach(a => a.classList.toggle("on", a.dataset.p === main || (a.dataset.p === "more" && !MOBILE.includes(main) && main !== "home")));
 }
-// theme: auto (follow the system) -> dark -> light
-let THEME = store.get("theme", "auto");
+// theme: dark (default) -> light -> auto (follow the system)
+let THEME = store.get("theme", "dark");
 function applyTheme() {
   if (THEME === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", THEME);
   const dark = THEME === "dark" || (THEME === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
   $("#theme").innerHTML = icon(dark ? "moon" : "sun"); $("#theme").title = "Theme: " + THEME + " (click to change)";
 }
-$("#theme").onclick = () => { THEME = { auto: "dark", dark: "light", light: "auto" }[THEME]; store.set("theme", THEME); applyTheme(); route(); };
+$("#theme").onclick = () => { THEME = { dark: "light", light: "auto", auto: "dark" }[THEME]; store.set("theme", THEME); applyTheme(); route(); };
 applyTheme();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { applyTheme(); if (THEME === "auto") route(); });
 
@@ -426,24 +426,71 @@ async function classes() {
   app.innerHTML = head("Classes", "Each event class is kept separate. History is only ever compared within the same class.") +
     `<div class="evgrid">` + d.map(c => `<a class="ev" href="#/class/${encodeURIComponent(c.category)}"><div class="t">${esc(c.category)}</div><div class="small">${c.events} finished · ${c.upcoming} upcoming</div><div class="kpis" style="margin:0;grid-template-columns:repeat(3,1fr)">${Object.entries(c.median).slice(0, 3).map(([r, v]) => `<div class="kpi"><div class="l">Median #${r}</div><div class="v" style="font-size:1.1rem">${nf(v)}</div></div>`).join("")}</div><div class="go"><span></span><b>Open ›</b></div></a>`).join("") + "</div>";
 }
+const STD = [1, 10, 35, 50, 100, 250, 500, 1000, 2000, 5000, 10000];
+const STAGES = [["open", "Open round (Round 1)"], ["later", "Later rounds"]];
+const med = v => v.length ? (v[(v.length - 1) >> 1] + v[v.length >> 1]) / 2 : null;
+const qt = (v, f) => v[Math.min(v.length - 1, Math.floor(f * v.length))];
+function cutStats(evs) {
+  const t = {};
+  STD.forEach(r => { const v = evs.map(e => e.cutoffs[r]).filter(x => x > 0).sort((a, b) => a - b); if (v.length) t[r] = { n: v.length, min: v[0], p25: qt(v, .25), median: med(v), p75: qt(v, .75), max: v[v.length - 1] }; });
+  return t;
+}
 async function classPage(name) {
   const d = await j("/api/class?name=" + encodeURIComponent(name));
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
-  const t = d.table, ranks = Object.keys(t).map(Number).sort((a, b) => a - b);
-  app.innerHTML = `<div class="crumb"><a href="#/classes">Classes</a> ›</div>` + head(esc(name), `${d.events.length} finished events`) +
-    `<div class="grid g2">${chartCard("cf", "Points needed at each rank", "range across all events of this class", { cls: "tall", table: false })}${chartCard("cc", "Cutoffs across events", "oldest to newest", { cls: "tall", table: false })}</div>
-    <div class="card"><div class="hd"><h2>Points needed to reach each rank</h2></div>${table(["Rank", "Events", "Min", "25%", "Median", "75%", "Max"], ranks.map(r => ["Top " + r.toLocaleString(), t[r].n, nf(t[r].min), nf(t[r].p25), `<b>${nf(t[r].median)}</b>`, nf(t[r].p75), nf(t[r].max)]), ["", "n", "n", "n", "n", "n", "n"])}</div>
-    <div class="card"><div class="hd"><h2>Events</h2></div>${table(["Ended", "Region", "Event", "#1", "#100", "#1000"], d.events.slice().reverse().map(e => [fmt(e.end), e.region, link(e.window_id, e.name), nf(e.cutoffs[1]), nf(e.cutoffs[100]), nf(e.cutoffs[1000])]), ["", "", "", "n", "n", "n"])}</div>`;
-  const P = k => ranks.map(r => ({ x: r, y: t[r][k] }));
-  mk($("#cf"), { type: "line", data: { datasets: [
-    { label: "Min", data: P("min"), borderColor: "transparent", pointRadius: 0, fill: false },
-    { label: "Min – max", data: P("max"), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .12), pointRadius: 0, fill: "-1" },
-    { label: "25%", data: P("p25"), borderColor: "transparent", pointRadius: 0, fill: false },
-    { label: "25 – 75%", data: P("p75"), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .25), pointRadius: 0, fill: "-1" },
-    { label: "Median", data: P("median"), borderColor: SER(0), backgroundColor: SER(0), borderWidth: 3, pointRadius: 3 }] },
-    options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "logarithmic", ticks: { maxRotation: 0, autoSkip: false, callback: v => [1, 10, 35, 100, 500, 1000, 2000, 5000, 10000].includes(v) ? v.toLocaleString() : "" }, title: { text: "Rank (log scale)" } }, y: { title: { text: "Points" } } }, plugins: { legend: { labels: { filter: i => !["Min", "25%"].includes(i.text) } }, tooltip: { callbacks: { title: c => "Top " + nf(c[0].parsed.x), label: c => `${c.dataset.label}: ${nf(c.parsed.y)}` } } } } });
-  mk($("#cc"), { type: "line", data: { labels: d.events.map(e => e.region + " " + new Date(e.end * 1000).toLocaleDateString([], { month: "short", day: "numeric" })),
-    datasets: [1, 100, 1000, 5000].map((r, i) => ({ label: "Top " + r.toLocaleString(), data: d.events.map(e => e.cutoffs[r] ?? null), borderColor: SER(i), backgroundColor: SER(i), pointRadius: 2 })) }, options: { scales: { x: { ticks: { maxTicksLimit: 8 } }, y: { title: { text: "Points" } } } } });
+  const ev = d.events, regs = REGIONS.filter(r => ev.some(e => e.region === r)), stages = STAGES.filter(([k]) => ev.some(e => e.stage === k));
+  let CF = Object.assign({ region: "", stage: "", by: "none" }, store.get("classf", {}));
+  if (CF.region && !regs.includes(CF.region)) CF.region = "";
+  if (CF.stage && !stages.some(s => s[0] === CF.stage)) CF.stage = "";
+  app.innerHTML = `<div class="crumb"><a href="#/classes">Classes</a> ›</div>` + head(esc(name), `${ev.length} finished events. Filter by region and stage, or compare them side by side.`) +
+    `<div class="card"><div class="filters">
+      <div><label>Region</label><select id="cfr"><option value="">All regions</option>${regs.map(r => `<option ${r === CF.region ? "selected" : ""}>${r}</option>`).join("")}</select></div>
+      <div><label>Stage</label><select id="cfs"><option value="">All stages</option>${stages.map(([k, l]) => `<option value="${k}" ${k === CF.stage ? "selected" : ""}>${l}</option>`).join("")}</select></div>
+      <div style="flex:0 0 auto"><label>Compare</label><div class="seg" id="cfb">${[["none", "Range"], ["region", "By region"], ["stage", "By stage"]].map(([k, l]) => `<button data-b="${k}" class="${k === CF.by ? "on" : ""}">${l}</button>`).join("")}</div></div></div></div><div id="cbody"></div>`;
+  const draw = () => {
+    destroyCharts();
+    const evs = ev.filter(e => (!CF.region || e.region === CF.region) && (!CF.stage || e.stage === CF.stage));
+    if (!evs.length) { $("#cbody").innerHTML = '<div class="card empty">No events match these filters.</div>'; return; }
+    const t = cutStats(evs), ranks = Object.keys(t).map(Number).sort((a, b) => a - b), m = r => t[r] ? nf(t[r].median) : "-";
+    const stageName = k => (STAGES.find(s => s[0] === k) || [k, k || "unknown"])[1];
+    const gname = g => CF.by === "stage" ? stageName(g) : g;
+    const groupKey = CF.by === "region" ? (e => e.region) : CF.by === "stage" ? (e => e.stage || "unknown") : null;
+    const order = CF.by === "region" ? REGIONS : STAGES.map(s => s[0]).concat("unknown");
+    const groups = groupKey ? order.map(g => [g, evs.filter(e => groupKey(e) === g)]).filter(([, v]) => v.length) : [];
+    $("#cbody").innerHTML = `<div class="kpis">${kpi("Events", evs.length)}${kpi("Median top 1", m(1))}${kpi("Median top 100", m(100), "", "hero")}${kpi("Median top 1,000", m(1000))}${kpi("Median top 5,000", m(5000))}</div>
+      <div class="grid g2">${chartCard("cf", groupKey ? "Median points at each rank, by " + CF.by : "Points needed at each rank", groupKey ? "one line per " + CF.by : "range across the selected events", { cls: "tall", table: false })}${chartCard("cc", "Cutoffs across events", "oldest to newest", { cls: "tall", table: false })}</div>
+      <div id="ctake"></div>
+      <div class="card"><div class="hd"><h2>Points needed to reach each rank</h2></div>${table(["Rank", "Events", "Min", "25%", "Median", "75%", "Max"], ranks.map(r => ["Top " + r.toLocaleString(), t[r].n, nf(t[r].min), nf(t[r].p25), `<b>${nf(t[r].median)}</b>`, nf(t[r].p75), nf(t[r].max)]), ["", "n", "n", "n", "n", "n", "n"])}</div>
+      <div class="card"><div class="hd"><h2>Events</h2><span class="sub">${evs.length}</span></div>${table(["Ended", "Region", "Stage", "Event", "#1", "#100", "#1000"], evs.slice().reverse().map(e => [fmt(e.end), e.region, stageName(e.stage), link(e.window_id, e.name), nf(e.cutoffs[1]), nf(e.cutoffs[100]), nf(e.cutoffs[1000])]), ["", "", "", "", "n", "n", "n"])}</div>`;
+    const logX = { type: "logarithmic", ticks: { maxRotation: 0, autoSkip: false, callback: v => [1, 10, 100, 500, 1000, 2000, 5000, 10000].includes(v) ? v.toLocaleString() : "" }, title: { text: "Rank (log scale)" } };
+    const tip = { title: c => "Top " + nf(c[0].parsed.x), label: c => `${c.dataset.label}: ${nf(c.parsed.y)}` };
+    if (!groupKey) {
+      const P = k => ranks.map(r => ({ x: r, y: t[r][k] }));
+      mk($("#cf"), { type: "line", data: { datasets: [
+        { label: "Min", data: P("min"), borderColor: "transparent", pointRadius: 0, fill: false },
+        { label: "Min – max", data: P("max"), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .12), pointRadius: 0, fill: "-1" },
+        { label: "25%", data: P("p25"), borderColor: "transparent", pointRadius: 0, fill: false },
+        { label: "25 – 75%", data: P("p75"), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .25), pointRadius: 0, fill: "-1" },
+        { label: "Median", data: P("median"), borderColor: SER(0), backgroundColor: SER(0), borderWidth: 3, pointRadius: 3 }] },
+        options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: logX, y: { title: { text: "Points" } } }, plugins: { legend: { labels: { filter: i => !["Min", "25%"].includes(i.text) } }, tooltip: { callbacks: tip } } } });
+      $("#ctake").innerHTML = "";
+    } else {
+      const gs = groups.map(([g, v]) => [g, cutStats(v), v.length]);
+      mk($("#cf"), { type: "line", data: { datasets: gs.map(([g, st, n]) => ({ label: `${gname(g)} (${n})`, data: ranks.filter(r => st[r] && st[r].n >= 2).map(r => ({ x: r, y: st[r].median })), borderColor: SER(order.indexOf(g)), backgroundColor: SER(order.indexOf(g)), borderWidth: 2.5, pointRadius: 3 })) }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: logX, y: { title: { text: "Median points" } } }, plugins: { tooltip: { callbacks: tip } } } });
+      const at = [100, 1000].map(r => {
+        const v = gs.filter(([, st]) => st[r] && st[r].n >= 2).map(([g, st]) => [g, st[r].median]).sort((a, b) => b[1] - a[1]);
+        return v.length > 1 ? `At top ${r.toLocaleString()}, <b>${esc(gname(v[0][0]))}</b> needs the most (<b>${nf(v[0][1])}</b>) and <b>${esc(gname(v[v.length - 1][0]))}</b> the least (<b>${nf(v[v.length - 1][1])}</b>), a gap of ${pc(v[0][1] / v[v.length - 1][1] - 1)}.` : "";
+      }).filter(Boolean);
+      $("#ctake").innerHTML = at.length ? take("", at.join(" ")) : "";
+    }
+    mk($("#cc"), { type: "line", data: { labels: evs.map(e => e.region + " " + new Date(e.end * 1000).toLocaleDateString([], { month: "short", day: "numeric" })),
+      datasets: [1, 100, 1000, 5000].map((r, i) => ({ label: "Top " + r.toLocaleString(), data: evs.map(e => e.cutoffs[r] ?? null), borderColor: SER(i), backgroundColor: SER(i), pointRadius: 2 })) }, options: { scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } }, y: { title: { text: "Points" } } } } });
+  };
+  const save = () => { store.set("classf", CF); draw(); };
+  $("#cfr").onchange = () => { CF.region = $("#cfr").value; save(); };
+  $("#cfs").onchange = () => { CF.stage = $("#cfs").value; save(); };
+  $$("#cfb button").forEach(b => b.onclick = () => { CF.by = b.dataset.b; $$("#cfb button").forEach(x => x.classList.toggle("on", x === b)); save(); });
+  draw();
 }
 
 // ---------------------------------------------------------------- Players

@@ -144,7 +144,8 @@ def _band_stats(pg, a, b, with_extra=False):
            "split": {"elim": round(sum(x[4] for x in games) / tot, 4), "win": round(sum(x[5] for x in games) / tot, 4)},
            "place_hist": _hist([x[0] for x in games], PLACE_BUCKETS),
            "elim_hist": _hist([x[1] for x in games], ELIM_BUCKETS),
-           "sample": _stride(pts, 300)}
+           "sample": _stride(pts, 300),
+           "players_pts": [[x[3] for x in g] for g in _stride(rows, 80)]}
     out["split"]["place"] = round(max(0.0, 1 - out["split"]["elim"] - out["split"]["win"]), 4)
     if with_extra:
         longest = max(len(g) for g in rows)
@@ -271,7 +272,7 @@ def safety(window_id, rank):
     except Exception:
         drift = None
     return {"window_id": window_id, "rank": rank, "final": False, "current": round(cur), "low": max(0, r["low"]),
-            "likely": r["likely"], "safe": r["safe"], "sd_pct": round(100 * sd, 1), "ladder": ladder, "curve": curve,
+            "likely": r["likely"], "safe": r["safe"], "sd_pct": round(100 * sd, 1), "mu": round(m, 5), "sd": round(sd, 5), "ladder": ladder, "curve": curve,
             "drift": drift, "method": r.get("method"), "progress": (r.get("live") or {}).get("progress"),
             "history_events": (r.get("prior") or {}).get("n") or r.get("history_events")}
 

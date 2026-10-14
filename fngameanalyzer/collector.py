@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import auth, config, storage
 from .epic_api import Epic
 
+SYNC_ERRORS = []
 SYNC_EVERY = 600       # refresh the event list this often (seconds)
 MAX_RANK = 1000
 BACKFILL_PER_POLL = 2  # old finished windows downloaded per pass when time allows
@@ -21,7 +22,8 @@ def sync_windows(e, force=False):
                 if w["region"] in config.TRACKED_REGIONS:
                     storage.upsert_window(w)
                     n += 1
-        except Exception:
+        except Exception as ex:
+            SYNC_ERRORS.append((region, str(ex).split(" -> ")[-1][:200]))
             continue  # one region failing must not block the rest
     storage.kv_set("last_sync", time.time())
     return n
@@ -37,7 +39,7 @@ def _snap(e, w):
                 storage.kv_set("board:" + w["window_id"], {"ts": ts, "players": lb["players"]})
             return ("snapshot", w["window_id"], len(lb["points"]))
     except Exception as ex:  # one bad window must not stop the others
-        return ("error", w["window_id"], str(ex)[:150])
+        return ("error", w["window_id"], str(ex).split(" -> ")[-1][:200])
     return ("empty", w["window_id"], 0)
 
 
@@ -49,7 +51,7 @@ def _final(e, w):
             return ("final", w["window_id"], len(lb["points"]))
         storage.kv_set("empty:" + w["window_id"], time.time())
     except Exception as ex:
-        return ("error", w["window_id"], str(ex)[:150])
+        return ("error", w["window_id"], str(ex).split(" -> ")[-1][:200])
     return ("empty", w["window_id"], 0)
 
 
@@ -71,7 +73,7 @@ def poll_once(e, budget=12.0):
                 storage.set_deep(w["window_id"], deep or {"_": 0})
                 done.append(("deep", w["window_id"], len(deep)))
             except Exception as ex:
-                done.append(("error", w["window_id"], str(ex)[:150]))
+                done.append(("error", w["window_id"], str(ex).split(" -> ")[-1][:200]))
     # the final board is stored only once every in-flight game has had time to finish;
     # older windows we never saw are backfilled newest first
     for w in storage.ended_unfinished(now, config.FINALIZE_AFTER, BACKFILL_PER_POLL):
@@ -152,6 +154,8 @@ def run_tick(duration=50, interval=30, force_sync=False):
         return {"ok": False, "error": str(ex)}
     log = []
     synced = sync_windows(e, force=force_sync)
+    log.extend(("sync-error",) + x for x in SYNC_ERRORS[-3:])
+    SYNC_ERRORS.clear()
     if (storage.kv_get("last_prune") or 0) < time.time() - 6 * 3600:
         storage.prune(3)
         storage.kv_set("last_prune", time.time())

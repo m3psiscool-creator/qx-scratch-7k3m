@@ -23,6 +23,15 @@ def _token(data):
     return r.json()
 
 
+def note(kind, detail=""):
+    """Keep the last few login events so a broken login can be diagnosed from the Status page."""
+    try:
+        log = storage.kv_get("auth_log") or []
+        storage.kv_set("auth_log", ([{"at": time.time(), "kind": kind, "detail": str(detail)[:140]}] + log)[:15])
+    except Exception:
+        pass
+
+
 def _store(tok):
     """Persist a token response (the refresh token rotates on every use)."""
     d = {"account_id": tok["account_id"], "refresh_token": tok["refresh_token"],
@@ -37,6 +46,7 @@ def login(code):
     """Exchange a one-time authorizationCode and keep the rolling refresh token."""
     tok = _token({"grant_type": "authorization_code", "code": code, "token_type": "eg1"})
     _store(tok)
+    note("login", "new login saved")
     return tok["account_id"]
 
 
@@ -85,8 +95,10 @@ class Session:
                                    "refresh_token": d["refresh_token"],
                                    "token_type": "eg1"}))
                 m.update(tok=d["access_token"], exp=d["expires_at"])
+                note("refresh ok")
                 return d["access_token"]
             except RuntimeError as e:
+                note("refresh FAILED", e)
                 raise NotLoggedIn(f"Epic login expired, log in again ({e})")
 
     def get(self, url, **params):
@@ -101,11 +113,14 @@ class Session:
                 continue
             if r.status_code == 401 and attempt < 4:
                 # Epic revoked this access token early: drop it and fetch a fresh one with the refresh token
+                used = r.request.headers.get("Authorization", "")[7:]
                 Session._mem.update(tok=None, exp=0)
-                d = load()
-                if d:
-                    d["expires_at"] = 0
-                    storage.kv_set("auth", d)
+                with storage.locked("auth"):      # never write back a stale copy of the login
+                    d = load()
+                    if d and d.get("access_token") == used:   # only if nobody refreshed it meanwhile
+                        d["expires_at"] = 0
+                        storage.kv_set("auth", d)
+                        note("401", "access token rejected by Epic; refreshing")
                 continue
             if r.status_code in (429, 500, 502, 503, 504) and attempt < 4:
                 time.sleep(2 * (attempt + 1))

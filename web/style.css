@@ -61,3 +61,8 @@ header .bar{padding:8px 16px}
 .result-big{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:10px 0}
 .result-big .kpi .v{font-size:1.6rem}
 @media(max-width:640px){.gsearch{order:5;flex-basis:100%;max-width:none}.result-big{grid-template-columns:1fr}}
+
+/* More menu: the nav used to scroll sideways, which clipped the dropdown */
+.navbar{overflow:visible;flex-wrap:wrap}
+.more .menu{left:0;right:auto;min-width:160px}
+@media(max-width:640px){.more .menu{left:auto;right:0}}

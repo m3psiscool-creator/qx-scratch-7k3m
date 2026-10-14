@@ -37,7 +37,8 @@ def _store(tok):
     d = {"account_id": tok["account_id"], "refresh_token": tok["refresh_token"],
          "access_token": tok["access_token"],
          "expires_at": time.time() + int(tok.get("expires_in", 7200)),
-         "refresh_expires_at": time.time() + int(tok.get("refresh_expires", 28800))}
+         "refresh_expires_at": time.time() + int(tok.get("refresh_expires", 28800)),
+         "saved_at": time.time()}
     storage.kv_set("auth", d)
     return d
 
@@ -64,6 +65,9 @@ def status():
     d = load()
     if not d:
         return {"logged_in": False}
+    bad = storage.kv_get("auth_bad")
+    if bad and bad > d.get("saved_at", 0):
+        return {"logged_in": False, "reason": "Epic rejected the saved login; log in again"}
     return {"logged_in": True, "account_id": d["account_id"],
             "refresh_valid_for_s": max(0, int(d.get("refresh_expires_at", 0) - time.time()))}
 
@@ -99,6 +103,7 @@ class Session:
                 return d["access_token"]
             except RuntimeError as e:
                 note("refresh FAILED", e)
+                storage.kv_set("auth_bad", time.time())   # the Status page then asks for a new login
                 raise NotLoggedIn(f"Epic login expired, log in again ({e})")
 
     def get(self, url, **params):

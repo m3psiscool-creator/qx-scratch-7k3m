@@ -423,6 +423,10 @@ async function status() {
   };
 }
 
+// the "More" menu: close it when a link is chosen, when you click elsewhere, or press Escape
+document.addEventListener("click", e => { const d = $("#more"); if (d && d.open && !e.target.closest("#more") || e.target.closest("#more .menu a")) { if (d) d.open = false; } });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { const d = $("#more"); if (d) d.open = false; } });
+
 // ------------------------------------------------------------------ Router
 function setNav(page) {
   const more = ["classes", "class", "accuracy", "status"].includes(page);

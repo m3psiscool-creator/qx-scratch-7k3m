@@ -28,27 +28,7 @@ def _history(target):
     return storage.windows(final=True, category=classify.of(target))
 
 
-def goal_of(meta):
-    """The rank the event is really about: last place with cosmetics, else last paid place, else the
-    advancement cutoff."""
-    tiers = ((meta or {}).get("rewards") or {}).get("tiers") or []
-    rank = [t for t in tiers if t["kind"] == "rank"]
-    kinds = lambda t: {i["type"] for i in t["items"]}
-    items = [t for t in rank if "item" in kinds(t)]
-    if items:
-        t = max(items, key=lambda x: x["upto"])
-        what = ", ".join(sorted({i["kind"] for i in t["items"] if i["type"] == "item"}))
-        return {"rank": t["upto"], "kind": "cosmetics", "label": f"last place that wins the cosmetics ({what})"}
-    cash = [t for t in rank if "cash" in kinds(t)]
-    if cash:
-        t = max(cash, key=lambda x: x["upto"])
-        usd = [i["usd"] for i in t["items"] if i["type"] == "cash"]
-        return {"rank": t["upto"], "kind": "cash", "label": f"last paid place (${usd[0]:,})" if usd else "last paid place"}
-    adv = [t for t in rank if "advance" in kinds(t)]
-    if adv:
-        t = min(adv, key=lambda x: x["upto"])
-        return {"rank": t["upto"], "kind": "advance", "label": "cutoff to advance"}
-    return None
+goal_of = classify.goal_of
 
 
 def window_info(w):
@@ -64,6 +44,9 @@ def window_info(w):
         "name": pretty(w.get("event_id") or "", w["window_id"]),
         "begin": w["begin"], "end": w["end"], "final": w["final"], "status": status,
         "category": classify.of(w), "goal": goal_of(m),
+        "reward_flags": (m.get("rewards") or {}).get("flags") or {
+            "item": any(i["type"] == "item" for t in (m.get("rewards") or {}).get("tiers", []) for i in t["items"]),
+            "advance": any(i["type"] == "advance" for t in (m.get("rewards") or {}).get("tiers", []) for i in t["items"])},
         "rewards": (m.get("rewards") or {}).get("tiers", []), "cash_total": (m.get("rewards") or {}).get("cash_total", 0),
         "payout_at": (m.get("rewards") or {}).get("payout_at"), "payout_rule": (m.get("rewards") or {}).get("payout_rule"),
         "match_cap": m.get("match_cap"), "mode": m.get("mode"), "game_type": m.get("game_type"),

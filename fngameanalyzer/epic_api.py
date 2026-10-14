@@ -94,7 +94,9 @@ def reward_info(raw, ev, w, ld):
     payout_at = base + mins * 60 if mins is not None else None
     advance = sorted([t["upto"], next(i["label"] for i in t["items"] if i["type"] == "advance")]
                      for t in tiers if t["kind"] == "rank" and any(i["type"] == "advance" for i in t["items"]))
-    return {"tiers": tiers, "cash_total": cash, "payout_at": payout_at,
+    flags = {"item": any(i["type"] == "item" for t in tiers for i in t["items"]),
+             "advance": any(i["type"] == "advance" for t in tiers for i in t["items"])}
+    return {"tiers": tiers, "cash_total": cash, "payout_at": payout_at, "flags": flags,
             "payout_rule": date or (f"window end + {mins} min" if mins is not None else None)}, advance
 
 
@@ -121,6 +123,7 @@ def window_meta(raw, ev, w):
     return {
         "match_cap": cap, "playlist": playlist, "ruleset": rsid,
         "rules": parsed, "advance": advance, "rewards": rewards,
+        "goal": eventclass.goal_of({"rewards": rewards}),
         "round_type": (w.get("metadata") or {}).get("RoundType"),
         "mode": mode, "game_type": gtype, "lobby": config.LOBBY.get((gtype, mode)),
         "category": eventclass.category(ev.get("eventId", ""), w["eventWindowId"], playlist, gtype, mode),

@@ -180,4 +180,5 @@ def run_tick(duration=50, interval=30, force_sync=False):
         log.append(("error", "extras", str(ex)[:120]))
     out = {"ok": True, "synced": synced, "log": log[-12:], "seconds": round(time.time() - t0, 1)}
     storage.kv_set("last_tick", {"at": time.time(), "synced": synced, "log": log[-12:]})
+    storage.egress_flush()
     return out

@@ -219,3 +219,11 @@ def player_rows():
                     "region": w["region"], "end": w["end"], "entrants": w.get("entrants"),
                     "meta": w["meta"], "prow": rows})
     return out
+
+
+def egress_flush():
+    pass
+
+
+def egress_month():
+    return 0

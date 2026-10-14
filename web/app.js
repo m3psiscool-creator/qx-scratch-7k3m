@@ -181,11 +181,11 @@ async function boardLoad() {
 }
 
 function rewardSummary(w) {
-  const items = (w.rewards || []).flatMap(t => t.items);
+  const f = w.reward_flags || {};
   const parts = [];
   if (w.cash_total) parts.push(`<b>$${nf(w.cash_total)}</b>`);
-  if (items.some(i => i.type === "item")) parts.push("cosmetics");
-  if (items.some(i => i.type === "advance")) parts.push("advance");
+  if (f.item) parts.push("cosmetics");
+  if (f.advance) parts.push("advance");
   return parts.join(" · ") || "<span class=mut>-</span>";
 }
 // ------------------------------------------------------------------ Schedule
@@ -302,7 +302,7 @@ async function status() {
    <div class="kpi"><div class="l">Events stored</div><div class="v">${c.final ?? "-"} / ${c.windows ?? "-"}</div></div>
    <div class="kpi"><div class="l">Database</div><div class="v">${c.db_mb ?? "-"} MB</div></div></div>
   <div class="card"><h2>Details</h2><p class="small">Regions tracked: ${esc((s.regions || []).join(", "))}. Windows: ${esc(JSON.stringify(s.windows_by_status))}.<br>
-   Snapshots ${c.snapshots} · series points ${c.series} · stored predictions ${c.predictions} · player names ${c.names} · events still needing deep thresholds ${c.deep_missing}.</p>
+   Data read out of the database this month ≈ <b>${s.egress_mb_month} MB</b> (free plan allows 5,000 MB). Snapshots ${c.snapshots} · series points ${c.series} · stored predictions ${c.predictions} · player names ${c.names} · events still needing deep thresholds ${c.deep_missing}.</p>
    <h3>Last collector pass</h3><pre class="small" style="white-space:pre-wrap">${esc((s.last_tick || []).map(x => x.join(" ")).join("\n"))}</pre></div>
   ${s.login.logged_in ? "" : `<div class="card"><b>Epic login needed</b><p class="small">Log in to Epic in this browser, open <a href="${esc(a.login_url)}" target="_blank">this link</a>, copy the authorizationCode and paste it here.</p>
    <input id="code" placeholder="authorizationCode"><input id="key" type="password" placeholder="Admin key" style="margin-top:6px"><button id="lg" style="margin-top:8px">Save login</button> <span id="lm" class="small"></span></div>`}

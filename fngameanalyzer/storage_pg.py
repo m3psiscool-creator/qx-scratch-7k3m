@@ -35,13 +35,34 @@ ALTERS = ["ALTER TABLE windows ADD COLUMN IF NOT EXISTS deep TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS prow TEXT",
           "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS deep TEXT"]
 _ready = False
-_cache = {"t": 0, "rows": None}
 _lock = threading.Lock()
+_EG = {"bytes": 0}      # bytes read out of the database by this process (approximate)
+
+
+def _count(rows):
+    n = 0
+    for r in rows:
+        for v in r:
+            n += len(v) if isinstance(v, str) else (8 if v is not None else 0)
+    _EG["bytes"] += n
+
+
+class _CC(psycopg.Cursor):
+    def fetchall(self):
+        rows = super().fetchall()
+        _count(rows)
+        return rows
+
+    def fetchone(self):
+        r = super().fetchone()
+        if r:
+            _count([r])
+        return r
 
 
 def db():
     global _ready
-    c = psycopg.connect(URL, autocommit=True, prepare_threshold=None)
+    c = psycopg.connect(URL, autocommit=True, prepare_threshold=None, cursor_factory=_CC)
     if not _ready:
         c.execute(SCHEMA)
         for a in ALTERS:
@@ -77,6 +98,7 @@ def upsert_window(w):
                        category=excluded.category""",
                   (w["window_id"], w["event_id"], w["family"], w["region"], w["begin"], w["end"],
                    json.dumps(w.get("meta") or {}), classify.of(w)))
+    _WL["rows"] = None   # the event list is re-read (once) after a sync
 
 
 def _player_rows(lb):
@@ -99,6 +121,7 @@ def save_final(window_id, lb):
                   (lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]),
                    json.dumps(lb.get("sessions", [])), json.dumps(lb.get("players", [])),
                    json.dumps(lb.get("deep", {})), json.dumps(_player_rows(lb)), window_id))
+    _after_final(window_id)
 
 
 def _series_point(lb):
@@ -151,14 +174,22 @@ def deep_missing(limit=1):
     return [{"window_id": r[0], "event_id": r[1]} for r in rows]
 
 
+_WL = {"t": 0, "rows": None}
+LIST_TTL = 300
+# the event list without the heavy parts of meta (scoring rules and reward tiers)
+SLIM = ("(jsonb_set(COALESCE(meta,'{}')::jsonb - 'rules', '{rewards}', "
+        "COALESCE(COALESCE(meta,'{}')::jsonb->'rewards','{}'::jsonb) - 'tiers'))::text")
+
+
 def window_list():
-    """Windows without the big columns."""
+    """Every window, slim rows, cached 5 minutes (read by every collector pass and page)."""
+    if _WL["rows"] is not None and time.time() - _WL["t"] < LIST_TTL:
+        return _WL["rows"]
     with db() as c:
-        return [_row(r, False) for r in c.execute(
-            f"SELECT {COLS} FROM windows ORDER BY end_ts DESC").fetchall()]
-
-
-_wcache = {}
+        rows = c.execute(f"SELECT window_id,event_id,family,region,begin_ts,end_ts,entrants,final,{SLIM} "
+                         "FROM windows ORDER BY end_ts DESC").fetchall()
+    _WL.update(t=time.time(), rows=[_row(r, False) for r in rows])
+    return _WL["rows"]
 
 
 def _row_light(r):
@@ -168,41 +199,100 @@ def _row_light(r):
     return d
 
 
-def windows(final=None, category=None, light=False):
-    """Windows. `category` limits the heavy columns to one event class; `light` skips sessions and
-    players. Finished windows are cached for 10 minutes (they only ever get added)."""
-    key = (final, category, light)
-    hit = _wcache.get(key)
-    if final is True and hit and time.time() - hit[0] < 600:
+_LIGHT = {}          # category ("" = all) -> (time, finished windows without sessions/players)
+_HEAVY = {}          # window_id -> {"sessions", "players"} of the most recent finished windows
+_GW = {}             # window_id -> finished window (immutable once final)
+LIGHT_TTL = 3600
+HEAVY_RECENT = 14    # the model only replays the newest events of a class game by game
+_PR = {"t": 0, "rows": None}
+
+
+def _light_rows(category):
+    key = category or ""
+    hit = _LIGHT.get(key)
+    if hit and time.time() - hit[0] < LIGHT_TTL:
         return hit[1]
-    cols = COLS + (",points,games,deep" if light else ",points,games,sessions,players,deep")
-    where = []
-    if final is not None:
-        where.append(f"final={int(final)}")
+    q = f"SELECT {COLS},points,games,deep FROM windows WHERE final=1" + (" AND category=%s" if category else "") + \
+        " ORDER BY end_ts DESC"
+    with db() as c:
+        rows = [_row_light(r) for r in c.execute(q, (category,) if category else ()).fetchall()]
+    _LIGHT[key] = (time.time(), rows)
+    return rows
+
+
+def _heavy(ids):
+    need = [i for i in ids if i not in _HEAVY]
+    if need:
+        with db() as c:
+            for wid, sess, pl in c.execute("SELECT window_id,sessions,players FROM windows WHERE window_id = ANY(%s)",
+                                           (need,)).fetchall():
+                _HEAVY[wid] = {"sessions": _j(sess, []), "players": _j(pl, [])}
+        while len(_HEAVY) > 40:
+            _HEAVY.pop(next(iter(_HEAVY)))
+    return {i: _HEAVY.get(i) for i in ids}
+
+
+def _after_final(window_id):
+    """A window just finished: update this process's caches in place instead of re-reading them."""
+    for w in _WL["rows"] or []:
+        if w["window_id"] == window_id:
+            w["final"] = 1
+    with db() as c:
+        r = c.execute(f"SELECT {COLS},points,games,deep,category FROM windows WHERE window_id=%s", (window_id,)).fetchone()
+    if not r:
+        return
+    light, cat = _row_light(r), r[12]
+    for key, (ts, rows) in list(_LIGHT.items()):
+        if key in ("", cat):
+            rows = [w for w in rows if w["window_id"] != window_id] + [light]
+            _LIGHT[key] = (ts, sorted(rows, key=lambda w: -w["end"]))
+    _GW.pop(window_id, None)
+    _PR["rows"] = None
+
+
+def windows(final=None, category=None, light=False):
+    """Finished windows (final=True): slim rows for all of them, plus sessions/players for only the
+    newest HEAVY_RECENT. Cached, and updated in place when a window finishes."""
+    if final is True:
+        rows = _light_rows(category)
+        if light:
+            return rows
+        heavy = _heavy([w["window_id"] for w in rows[:HEAVY_RECENT]])
+        return [({**w, **heavy[w["window_id"]]} if i < HEAVY_RECENT and heavy.get(w["window_id"])
+                 else {**w, "sessions": [], "players": []}) for i, w in enumerate(rows)]
+    where = [] if final is None else [f"final={int(final)}"]
     if category:
         where.append("category=%s")
-    q = f"SELECT {cols} FROM windows" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY end_ts DESC"
+    q = f"SELECT {FULL} FROM windows" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY end_ts DESC"
     with db() as c:
-        rows = c.execute(q, (category,) if category else ()).fetchall()
-    out = [(_row_light if light else _row)(r) for r in rows]
-    if final is True:
-        _wcache[key] = (time.time(), out)
-    return out
+        return [_row(r) for r in c.execute(q, (category,) if category else ()).fetchall()]
 
 
 def player_rows():
-    """Compact per-event player results (for the player pages) without the heavy columns."""
+    """Compact per-event player results (for the player pages), cached for an hour."""
+    if _PR["rows"] is not None and time.time() - _PR["t"] < LIGHT_TTL:
+        return _PR["rows"]
     with db() as c:
         rows = c.execute("SELECT window_id,event_id,family,region,end_ts,entrants,meta,prow FROM windows "
                          "WHERE final=1 AND prow IS NOT NULL ORDER BY end_ts DESC").fetchall()
-    return [{"window_id": r[0], "event_id": r[1], "family": r[2], "region": r[3], "end": r[4],
-             "entrants": r[5], "meta": _j(r[6], {}), "prow": _j(r[7], [])} for r in rows]
+    out = [{"window_id": r[0], "event_id": r[1], "family": r[2], "region": r[3], "end": r[4],
+            "entrants": r[5], "meta": _j(r[6], {}), "prow": _j(r[7], [])} for r in rows]
+    _PR.update(t=time.time(), rows=out)
+    return out
 
 
 def get_window(window_id):
+    hit = _GW.get(window_id)
+    if hit:
+        return hit
     with db() as c:
         r = c.execute(f"SELECT {FULL} FROM windows WHERE window_id=%s", (window_id,)).fetchone()
-    return _row(r) if r else None
+    w = _row(r) if r else None
+    if w and w["final"]:
+        if len(_GW) > 20:
+            _GW.pop(next(iter(_GW)))
+        _GW[window_id] = w
+    return w
 
 
 def snapshots(window_id, last=None, light=False):
@@ -298,3 +388,17 @@ def counts():
                 "names": c.execute("SELECT count(*) FROM names").fetchone()[0],
                 "deep_missing": c.execute("SELECT count(*) FROM windows WHERE final=1 AND (deep IS NULL OR deep='' OR deep='{}')").fetchone()[0],
                 "db_mb": round(c.execute("SELECT pg_database_size(current_database())").fetchone()[0] / 1e6, 1)}
+
+
+def egress_flush():
+    """Add this process's bytes-read counter to this month's total (kept in the database)."""
+    n = _EG["bytes"]
+    if n < 300_000:
+        return
+    _EG["bytes"] = 0
+    key = "egress:" + time.strftime("%Y-%m")
+    kv_set(key, (kv_get(key) or 0) + n)
+
+
+def egress_month():
+    return kv_get("egress:" + time.strftime("%Y-%m")) or 0

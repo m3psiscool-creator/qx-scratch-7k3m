@@ -11,6 +11,16 @@ from fngameanalyzer import auth, collector, config, insights, service, storage
 app = FastAPI()
 
 
+@app.middleware("http")
+async def meter(request, call_next):
+    resp = await call_next(request)
+    try:
+        storage.egress_flush()   # keeps a running total of data read from the database
+    except Exception:
+        pass
+    return resp
+
+
 def _is_admin(key):
     want = os.environ.get("ADMIN_KEY", "")
     return bool(want) and hmac.compare_digest(str(key or ""), want)

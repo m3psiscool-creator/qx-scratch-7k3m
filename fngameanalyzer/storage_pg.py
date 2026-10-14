@@ -519,3 +519,74 @@ def recent_top_accounts(windows=20, per=120):
 
 def egress_bytes():
     return _EG["bytes"]
+
+
+_PR_ROWS = """
+  SELECT w.window_id, w.entrants, w.category, e.value AS r
+  FROM windows w, LATERAL jsonb_array_elements(w.prow::jsonb) AS e(value)
+  WHERE w.final = 1 AND w.prow IS NOT NULL"""
+
+
+def top_players_sql(limit=50, category=None, min_events=3):
+    """Strongest players (average finishing share of the field). Computed inside the database,
+    only the answer comes back."""
+    q = f"""WITH rows AS ({_PR_ROWS}{" AND w.category = %s" if category else ""})
+            SELECT r->>0, count(*), avg((r->>1)::float * 100 / LEAST(COALESCE(entrants, 10000), 10000)),
+                   min((r->>1)::int)
+            FROM rows GROUP BY 1 HAVING count(*) >= %s ORDER BY 3 LIMIT %s"""
+    args = ((category,) if category else ()) + (min_events, limit)
+    with db() as c:
+        return [{"id": r[0], "events": r[1], "avg_top_pct": round(r[2], 2), "best": r[3]}
+                for r in c.execute(q, args).fetchall()]
+
+
+def player_events(account_id):
+    """Every top-1000 finish of one player, read straight out of the stored player rows."""
+    with db() as c:
+        rows = c.execute(
+            """SELECT w.window_id, w.event_id, w.family, w.region, w.end_ts, w.entrants, w.category,
+                      jsonb_path_query(w.prow::jsonb, 'strict $[*] ? (@[0] == $a)', jsonb_build_object('a', %s::text))::text
+               FROM windows w
+               WHERE w.final = 1 AND w.prow IS NOT NULL
+                 AND w.prow::jsonb @> jsonb_build_array(jsonb_build_array(%s::text))
+               ORDER BY w.end_ts DESC""", (account_id, account_id)).fetchall()
+    out = []
+    for wid, eid, fam, reg, end, ent, cat, r in rows:
+        a, rank, pts, games, wins, elims, avg = json.loads(r)
+        out.append({"window_id": wid, "event_id": eid, "family": fam, "region": reg, "end": end,
+                    "category": cat, "rank": rank, "points": pts, "games": games, "wins": wins,
+                    "elims": elims, "avg_place": avg,
+                    "pct": round(100 * rank / min(ent or 10000, 10000), 2)})
+    return out
+
+
+def player_event_counts(ids):
+    if not ids:
+        return {}
+    with db() as c:
+        rows = c.execute(f"""WITH rows AS ({_PR_ROWS}) SELECT r->>0, count(*) FROM rows
+                             WHERE r->>0 = ANY(%s) GROUP BY 1""", (list(ids),)).fetchall()
+    return dict(rows)
+
+
+def player_form_sql(ids, category):
+    """Past events, best and median finish of these players within one event class."""
+    if not ids:
+        return {}
+    with db() as c:
+        rows = c.execute(f"""WITH rows AS ({_PR_ROWS} AND w.category = %s)
+                             SELECT r->>0, count(*), min((r->>1)::int),
+                                    percentile_cont(0.5) WITHIN GROUP (ORDER BY (r->>1)::int)
+                             FROM rows WHERE r->>0 = ANY(%s) GROUP BY 1""", (category, list(ids))).fetchall()
+    return {a: {"events": n, "best": b, "median": m} for a, n, b, m in rows}
+
+
+def status_counts():
+    now = time.time()
+    with db() as c:
+        r = c.execute("""SELECT count(*) FILTER (WHERE final = 1),
+                                count(*) FILTER (WHERE final = 0 AND begin_ts <= %s AND end_ts >= %s),
+                                count(*) FILTER (WHERE final = 0 AND begin_ts > %s),
+                                count(*) FILTER (WHERE final = 0 AND end_ts < %s) FROM windows""",
+                      (now, now, now, now)).fetchone()
+    return {"finished": r[0], "live": r[1], "upcoming": r[2], "not collected yet": r[3]}

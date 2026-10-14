@@ -227,10 +227,6 @@ def egress_month():
     return 0
 
 
-# Must stay last: on the hosted site every function above is replaced by its Postgres version.
-if (_os.environ.get("FNGA_DB_URL") or _os.environ.get("NEON2_POSTGRES_URL")
-        or _os.environ.get("POSTGRES_URL") or _os.environ.get("DATABASE_URL")):
-    from .storage_pg import *  # noqa: F401,F403,E402
 
 
 def live_windows(now, after):
@@ -260,3 +256,70 @@ def recent_top_accounts(windows=20, per=120):
 
 def egress_bytes():
     return 0
+
+
+def _flat_player_rows():
+    for w in player_rows():
+        ent = min(w.get("entrants") or 10000, 10000)
+        from . import classify
+        for a, rank, pts, games, wins, elims, avg in w["prow"]:
+            yield w, classify.of(w), a, rank, pts, games, wins, elims, avg, round(100 * rank / ent, 2)
+
+
+def top_players_sql(limit=50, category=None, min_events=3):
+    import statistics
+    by = {}
+    for w, cat, a, rank, *_rest, pct in _flat_player_rows():
+        if category in (None, "", cat):
+            by.setdefault(a, []).append((pct, rank))
+    out = [{"id": a, "events": len(v), "avg_top_pct": round(statistics.mean(p for p, _ in v), 2),
+            "best": min(r for _, r in v)} for a, v in by.items() if len(v) >= min_events]
+    return sorted(out, key=lambda x: x["avg_top_pct"])[:limit]
+
+
+def player_events(account_id):
+    out = []
+    for w, cat, a, rank, pts, games, wins, elims, avg, pct in _flat_player_rows():
+        if a == account_id:
+            out.append({"window_id": w["window_id"], "event_id": w["event_id"], "family": w["family"],
+                        "region": w["region"], "end": w["end"], "category": cat, "rank": rank, "points": pts,
+                        "games": games, "wins": wins, "elims": elims, "avg_place": avg, "pct": pct})
+    return sorted(out, key=lambda x: -x["end"])
+
+
+def player_event_counts(ids):
+    ids, out = set(ids), {}
+    for w, cat, a, *_ in _flat_player_rows():
+        if a in ids:
+            out[a] = out.get(a, 0) + 1
+    return out
+
+
+def player_form_sql(ids, category):
+    import statistics
+    ids, by = set(ids), {}
+    for w, cat, a, rank, *_ in _flat_player_rows():
+        if a in ids and cat == category:
+            by.setdefault(a, []).append(rank)
+    return {a: {"events": len(v), "best": min(v), "median": statistics.median(v)} for a, v in by.items()}
+
+
+def status_counts():
+    import time as _t
+    now, out = _t.time(), {"finished": 0, "live": 0, "upcoming": 0, "not collected yet": 0}
+    for w in window_list():
+        if w["final"]:
+            out["finished"] += 1
+        elif w["begin"] <= now <= w["end"]:
+            out["live"] += 1
+        elif w["begin"] > now:
+            out["upcoming"] += 1
+        elif w["end"] < now:
+            out["not collected yet"] += 1
+    return out
+
+
+# Must stay last: on the hosted site every function above is replaced by its Postgres version.
+if (_os.environ.get("FNGA_DB_URL") or _os.environ.get("NEON2_POSTGRES_URL")
+        or _os.environ.get("POSTGRES_URL") or _os.environ.get("DATABASE_URL")):
+    from .storage_pg import *  # noqa: F401,F403,E402

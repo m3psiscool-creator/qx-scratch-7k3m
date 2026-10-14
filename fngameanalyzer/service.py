@@ -162,8 +162,7 @@ def live_view(window_id, n=25):
             storage.names_set({k: v for k, v in names.items() if k in missing})
         except Exception:
             pass  # names are a nicety
-    cat = classify.of(w)
-    form = player_form(ids, storage.windows(final=True, category=cat), w["family"])
+    form = storage.player_form_sql(ids, classify.of(w))
     return {"snapshot": {"age_s": round(time.time() - s["ts"]), "entrants": s["entrants"]},
             "top": [{"rank": t["rank"], "points": t["points"], "games": t["games"],
                      "players": [{"id": a, "name": names.get(a, a[:8]), **form.get(a, {})}

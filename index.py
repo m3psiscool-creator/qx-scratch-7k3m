@@ -23,6 +23,8 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
 async def meter(request, call_next):
     resp = await call_next(request)
     ttl = CACHE_TTL.get(request.url.path)
+    if request.url.path.startswith("/api/status"):
+        resp.headers["Cache-Control"] = "no-store"
     if ttl and request.method == "GET" and resp.status_code == 200 and "x-admin-key" not in request.headers:
         resp.headers["Cache-Control"] = f"public, s-maxage={ttl}, stale-while-revalidate={ttl * 3}"
     try:

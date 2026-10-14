@@ -135,27 +135,8 @@ def class_detail(category):
 
 
 # ---------------------------------------------------------------- players
-def _index():
-    rows = storage.player_rows()
-    key = (len(rows), max((w["end"] for w in rows), default=0))
-    if _idx["key"] == key:
-        return _idx["data"]
-    data = {}
-    for w in rows:
-        ent = min(w.get("entrants") or 10000, 10000)
-        cat = classify.of(w)
-        name = service.pretty(w.get("event_id") or "", w["window_id"])
-        for a, rank, points, games, wins, elims, avg in w["prow"]:
-            data.setdefault(a, []).append({
-                "window_id": w["window_id"], "name": name, "category": cat, "family": w["family"],
-                "region": w["region"], "end": w["end"], "rank": rank, "points": points, "games": games,
-                "pct": round(100 * rank / ent, 2), "wins": wins, "elims": elims, "avg_place": avg})
-    _idx.update(key=key, data=data)
-    return data
-
-
 def player(account_id):
-    rows = sorted(_index().get(account_id, []), key=lambda r: -r["end"])
+    rows = [{**r, "name": service.pretty(r["event_id"], r["window_id"])} for r in storage.player_events(account_id)]
     name = _name_map([account_id]).get(account_id, account_id[:8])
     by = {}
     for r in rows:
@@ -173,21 +154,15 @@ def player(account_id):
 
 def player_search(q):
     hits = storage.names_search(q, 25) if q else []
-    idx = _index()
-    return [{"id": i, "name": n, "events": len(idx.get(i, []))} for i, n in hits]
+    counts = storage.player_event_counts([i for i, _ in hits])
+    return [{"id": i, "name": n, "events": counts.get(i, 0)} for i, n in hits]
 
 
 def top_players(category=None, limit=50):
-    """Players ranked by average finishing percentile (needs >= 3 events in the class)."""
-    out = []
-    for a, rows in _index().items():
-        v = [r for r in rows if category in (None, "", r["category"])]
-        if len(v) >= 3:
-            out.append((statistics.mean(r["pct"] for r in v), a, v))
-    out.sort(key=lambda x: x[0])
-    names = _name_map([a for _, a, _ in out[:limit]])
-    return [{"id": a, "name": names.get(a, a[:8]), "events": len(v), "avg_top_pct": round(p, 2),
-             "best": min(r["rank"] for r in v)} for p, a, v in out[:limit]]
+    """Players ranked by average finishing share of the field (needs >= 3 events), computed in SQL."""
+    rows = storage.top_players_sql(limit, category)
+    names = _name_map([r["id"] for r in rows])
+    return [{**r, "name": names.get(r["id"], r["id"][:8])} for r in rows]
 
 
 # ---------------------------------------------------------------- FNCS tracker
@@ -245,10 +220,7 @@ def status():
     s = auth.status()
     tick = storage.kv_get("last_tick")
     c = storage.counts()
-    wl = service.list_windows()
-    by = {}
-    for w in wl:
-        by[w["status"]] = by.get(w["status"], 0) + 1
+    by = storage.status_counts()
     return {"login": s, "last_tick_age_s": round(time.time() - tick["at"]) if tick else None,
             "last_tick": (tick or {}).get("log", []), "counts": c,
             "egress_mb_month": round(storage.egress_month() / 1e6, 1),

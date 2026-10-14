@@ -4,23 +4,33 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FN Game Analyzer</title>
 <link rel="stylesheet" href="/style.css">
-<header><div class="bar">
-  <div class="logo">FN <b>Game Analyzer</b></div>
-  <nav id="nav">
+<header>
+  <div class="bar">
+    <a class="logo" href="#/">FN <b>Game Analyzer</b></a>
+    <div class="gsearch">
+      <input id="gs" type="search" placeholder="Find a tournament… (name, region, class)" autocomplete="off">
+      <div id="gsr" class="gsr" hidden></div>
+    </div>
+    <label class="small rg">My region
+      <select id="rg"><option value="">All</option>
+        <option>NAC</option><option>NAW</option><option>EU</option><option>BR</option><option>ASIA</option><option>ME</option><option>OCE</option></select></label>
+    <span id="clock" class="small"></span>
+  </div>
+  <nav id="nav" class="bar navbar">
     <a href="#/" data-p="home">Home</a>
     <a href="#/schedule" data-p="schedule">Schedule</a>
     <a href="#/archive" data-p="archive">Archive</a>
-    <a href="#/classes" data-p="classes">Classes</a>
     <a href="#/players" data-p="players">Players</a>
     <a href="#/fncs" data-p="fncs">FNCS</a>
-    <a href="#/accuracy" data-p="accuracy">Accuracy</a>
-    <a href="#/status" data-p="status">Status</a>
+    <details class="more" id="more"><summary data-p="more">More ▾</summary>
+      <div class="menu">
+        <a href="#/classes" data-p="classes">Classes</a>
+        <a href="#/accuracy" data-p="accuracy">Accuracy</a>
+        <a href="#/status" data-p="status">Status</a>
+      </div>
+    </details>
   </nav>
-  <label class="small" style="display:flex;align-items:center;gap:6px;margin:0">My region
-    <select id="rg" style="width:auto;margin:0;padding:4px 8px"><option value="">All</option>
-      <option>NAC</option><option>NAW</option><option>EU</option><option>BR</option><option>ASIA</option><option>ME</option><option>OCE</option></select></label>
-  <span id="clock" class="small"></span>
-</div></header>
+</header>
 <main id="app"><div class="card">Loading…</div></main>
 <footer>Unofficial. Data from Epic's public tournament endpoints. Predictions are estimates, not guarantees. See the Accuracy page for how well they have done.</footer>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>

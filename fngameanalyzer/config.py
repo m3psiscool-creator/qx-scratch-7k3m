@@ -23,7 +23,7 @@ FAMILIES = {
     "CASHCUP": ["cashcup", "cash_cup"],
 }
 # Epic's own tournamentType -> our family. Anything else (Ranked, Victory, Workshop...) is ignored.
-TOURNAMENT_TYPES = {"CashCup": "CASHCUP", "FNCS": "FNCS", "ShopCup": "SKINCUP"}
+TOURNAMENT_TYPES = {"CashCup": "CASHCUP", "FNCS": "FNCS", "ShopCup": "SKINCUP", "VictoryCup": "VICTORYCUP"}
 REGIONS =["NAC", "NAE", "NAW", "EU", "BR", "ASIA", "OCE", "ME"]
 # Teams per lobby by (game type, mode). None = unknown (Reload solo is 24 or 40): the model then
 # uses the highest placement seen in past games of the same playlist.

@@ -99,6 +99,14 @@ class Session:
                 if attempt == 4:
                     raise
                 continue
+            if r.status_code == 401 and attempt < 4:
+                # Epic revoked this access token early: drop it and fetch a fresh one with the refresh token
+                Session._mem.update(tok=None, exp=0)
+                d = load()
+                if d:
+                    d["expires_at"] = 0
+                    storage.kv_set("auth", d)
+                continue
             if r.status_code in (429, 500, 502, 503, 504) and attempt < 4:
                 time.sleep(2 * (attempt + 1))
                 continue

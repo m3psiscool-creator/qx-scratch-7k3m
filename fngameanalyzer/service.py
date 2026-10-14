@@ -15,7 +15,7 @@ def pretty(event_id, window_id):
     name = re.sub(r"_(NAC|NAW|EU|BR|ASIA|ME|OCE)$", "", name)
     name = name.replace("_", " ")
     name = re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", " ", name)
-    name = re.sub(r"(\w+) ", r"", name)   # 'Reload Reload Solo' -> 'Reload Solo'
+    name = re.sub(r"\b(\w+) \1\b", r"\1", name)   # collapse repeated words
 
     rest = window_id.replace(event_id.replace("epicgames_", ""), "")
     extra = re.findall(r"(Round\d|Day\d|Heat\d|Event\d+|Final)", window_id)

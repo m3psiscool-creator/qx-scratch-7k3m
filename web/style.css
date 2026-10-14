@@ -68,7 +68,7 @@ small,.small{font-size:.82rem;color:var(--mut)}
 .nav a.on{background:var(--ac-soft);color:var(--ac)}
 .side .foot{margin-top:auto;padding:12px;font-size:.76rem;color:var(--mut)}
 .col{min-width:0;display:flex;flex-direction:column}
-.top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;padding:10px 24px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;padding:10px 24px;background:var(--bg);border-bottom:1px solid var(--line)}
 .top .logo{display:none;padding:0}
 .gsearch{position:relative;flex:1;max-width:560px}
 .gsearch svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;stroke:var(--mut);fill:none;stroke-width:2;pointer-events:none}

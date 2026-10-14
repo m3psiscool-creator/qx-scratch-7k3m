@@ -37,7 +37,7 @@ async function tabStrategy(w, open) {
   </div>
   ${sec(1, "s-plan", "Your plan", "How many points to aim for, and the ways to get there")}<div id="p-plan">${skel(2, 160)}</div>
   ${sec(2, "s-scoring", "What the scoring rewards", "Points per placement and per elimination in this event")}<div id="p-scoring">${skel(1, 160)}</div>
-  ${sec(3, "s-fin", "What finishers actually did", "Per-game numbers of real players, from the closest finished event of this class")}<div id="p-fin">${skel(2, 200)}</div>
+  ${sec(3, "s-fin", "What finishers actually did", "Per-game numbers of real players, from the closest finished event of this gamemode")}<div id="p-fin">${skel(2, 200)}</div>
   ${sec(4, "s-pace", "Pace tracker", "Where you should be after each game")}<div id="p-pace">${skel(1, 260)}</div>
   ${sec(5, "s-safe", "Safety margin", "How much cushion each level of certainty costs")}<div id="p-safe">${skel(1, 260)}</div>
   ${sec(6, "s-stop", "Keep playing or stop?", "Your chance of reaching the cutoff as you play more games")}<div id="p-stop">${skel(1, 260)}</div>`;
@@ -50,6 +50,7 @@ async function tabStrategy(w, open) {
   $$(".anch a").forEach(a => a.onclick = e => { e.preventDefault(); $("#" + a.dataset.a).scrollIntoView({ behavior: "smooth" }); });
   // data that does not depend on the rank
   j("/api/scoring?window=" + encodeURIComponent(w.window_id)).then(s => { SS.d.scoring = s; renderScoring(); renderPersonal(); });
+  j("/api/tempo?window=" + encodeURIComponent(w.window_id)).then(t => { SS.d.tempo = t; renderPersonal(); });
   await loadRank();
   if (open) every(120000, () => loadRank(true));
 }
@@ -58,10 +59,12 @@ async function loadRank(quiet) {
   const w = SS.w, id = encodeURIComponent(w.window_id), r = SS.rank, mine = ++SS.tok || (SS.tok = 1);
   if (!quiet) ["plan", "fin", "pace", "safe", "stop"].forEach(k => { const e = $("#p-" + k); if (e && !SS.d.safety) e.innerHTML = skel(1, 200); });
   // each part draws as soon as its data arrives: the safety estimate is the slow one
-  const pProf = j(`/api/profile?window=${id}&rank=${Math.min(r, 1000)}`).then(x => { if (SS.tok === mine) { SS.d.profile = x; renderFin(); renderPersonal(); } });
+  const pProf = quiet && SS.d.profile ? Promise.resolve() : j(`/api/profile?window=${id}&rank=${Math.min(r, 1000)}`).then(x => { if (SS.tok === mine) { SS.d.profile = x; renderFin(); renderPersonal(); } });
   const safe = await j(`/api/safety?window=${id}&rank=${r}`);
   if (SS.tok !== mine) return;
-  SS.d.safety = safe; renderPersonal();
+  const sig = JSON.stringify([r, safe.likely, safe.low, safe.safe, safe.current, safe.error]);
+  if (quiet && sig === SS.sig) return;   // nothing moved: leave the charts alone instead of redrawing them
+  SS.sig = sig; SS.d.safety = safe; renderPersonal();
   const target = safe && !safe.error ? safe.likely : 0;
   const pace = r <= 1000 ? await j(`/api/pace?window=${id}&rank=${r}${target ? "&target=" + target : ""}`) : { error: "Pace curves need a rank inside the stored top 1,000." };
   await pProf;
@@ -81,36 +84,60 @@ function aimPoints(conf) {
 const capOf = () => SS.w.match_cap || (SS.d.pace && SS.d.pace.cap) || 12;
 const confLabel = c => (CONFS.find(x => x[0] === c) || [0, Math.round(c * 100) + "%"])[1];
 
+// ---------------------------------------------------------------- time: how many games really fit
+// Game lengths come from /api/tempo: minutes per game (queue + time alive) at each finishing placement.
+// Surviving longer scores more per game but leaves room for fewer games, so the plan prices both.
+const gMin = p => { const t = SS.d.tempo; return !t || t.error ? null : lerp(t.by_place, clamp(p, 1, t.by_place.length) - 1); };
+function timeLeftMin() {
+  const w = SS.w, now = Date.now() / 1000, start = w.status === "finished" || w.status === "upcoming" ? w.begin : clamp(now, w.begin, w.end);   // a finished or not yet started event counts as its full window
+  let left = (w.end - start) / 60;
+  if (w.status === "upcoming" && SS.played > 0) { const g = gMin(typicalPlace()); left -= SS.played * (g || 0); }   // "what if I had played N games": they already used their time
+  return Math.max(0, left);
+}
+// games you can start in the time left if you finish around placement p (a game may start right before the window closes)
+const gamesFit = (p, left) => { const T = gMin(p); return T ? Math.min(left, Math.ceil(timeLeftMin() / T)) : left; };
+const invElims = (sc, v) => { if (v <= 0) return 0; const top = sc.elim.length - 1; if (v > ptsAtElims(sc, top)) return null; for (let e = 0; e <= top; e += 0.05) if (ptsAtElims(sc, e) >= v) return e; return null; };
+function typicalPlace() { const f = SS.d.profile && !SS.d.profile.error ? SS.d.profile.focus : null; return f ? f.avg_place : 10; }
+// where you would finish at your current points-per-game, given the games that fit
+function projFinal() {
+  const cap = capOf(), remCap = Math.max(0, cap - SS.played), games = SS.played + gamesFit(typicalPlace(), remCap);
+  return SS.played > 0 ? { games, pts: SS.pts + SS.pts / SS.played * (games - SS.played) } : null;
+}
+
 // ---------------------------------------------------------------- 1 plan
 function renderPlan() {
   const el = $("#p-plan"); if (!el) return; drop("plan");
-  const sc = SS.d.scoring, pr = SS.d.profile, s = SS.d.safety;
+  const sc = SS.d.scoring, pr = SS.d.profile, s = SS.d.safety, tp = SS.d.tempo && !SS.d.tempo.error ? SS.d.tempo : null;
   if (!sc || !pr || !s) return;
   if (sc.error) { el.innerHTML = `<div class="card empty">${esc(sc.error)}</div>`; return; }
-  const T = aimPoints(), cap = capOf(), rem = Math.max(0, cap - SS.played), need = T == null ? null : Math.max(0, T - SS.pts), ppg = need == null ? null : rem ? need / rem : (need > 0 ? Infinity : 0);
-  const f = pr && !pr.error ? pr.focus : null;
+  const T = aimPoints(), cap = capOf(), remCap = Math.max(0, cap - SS.played), need = T == null ? null : Math.max(0, T - SS.pts);
+  const f = pr && !pr.error ? pr.focus : null, typ = typicalPlace(), Gt = gamesFit(typ, remCap);
+  const ppgAt = (n, g) => n == null ? null : g ? n / g : (n > 0 ? Infinity : 0), ppg = ppgAt(need, Gt);
+  const fmtMin = m => m == null ? "" : Math.round(m) + " min";
   let head = "";
   if (s.error && !SS.aim) head = `<div class="card flat"><b>No cutoff estimate yet.</b> <span class="mut">${esc(s.error)}</span><br><small>Type a number in "Aim for" above to plan against your own target.</small></div>`;
   const diff = f && ppg != null && isFinite(ppg) ? ppg / f.pts_per_game : null;
-  const verdict = diff == null ? "" : diff <= 0.85 ? take("good", `You need <b>${nd(ppg)} points a game</b>, below the <b>${nd(f.pts_per_game)}</b> that players around #${pr.rank} averaged. A steady, safe style is enough.`)
-    : diff <= 1.1 ? take("", `You need <b>${nd(ppg)} points a game</b>, about what players around #${pr.rank} averaged (<b>${nd(f.pts_per_game)}</b>). Play like a typical finisher.`)
-      : take("warn", `You need <b>${nd(ppg)} points a game</b>, <b>${Math.round((diff - 1) * 100)}% more</b> than players around #${pr.rank} averaged (${nd(f.pts_per_game)}). That takes a win or several deep runs with elims.`);
+  const timeNote = tp && Gt < remCap ? take("warn", `<b>The format has ${remCap} games but only about ${Gt} fit in the time.</b> Surviving to around place ${nd(typ, 0)} takes about <b>${fmtMin(gMin(typ))}</b> a game, and the window leaves ${fmtMin(timeLeftMin())}. Dying early is faster (a bottom-half finish is about ${fmtMin(gMin(Math.max(typ, (tp.lobby || 30) * 0.75)))}), so aggression buys extra games but fewer placement points. The plan below counts only games that fit.`) : "";
+  const verdict = diff == null ? "" : diff <= 0.85 ? take("good", `You need <b>${nd(ppg)} points a game</b> over ~${Gt} games, below the <b>${nd(f.pts_per_game)}</b> that players around #${pr.rank} averaged. A steady, safe style is enough.`)
+    : diff <= 1.1 ? take("", `You need <b>${nd(ppg)} points a game</b> over ~${Gt} games, about what players around #${pr.rank} averaged (<b>${nd(f.pts_per_game)}</b>). Play like a typical finisher.`)
+      : take("warn", `You need <b>${nd(ppg)} points a game</b> over ~${Gt} games, <b>${Math.round((diff - 1) * 100)}% more</b> than players around #${pr.rank} averaged (${nd(f.pts_per_game)}). That takes a win or several deep runs with elims.`);
   const kp = `<div class="kpis">
     ${kpi("Points to aim for", T == null ? "-" : nf(T), SS.aim ? "your own target" : s.final ? "final cutoff" : confLabel(SS.conf).toLowerCase() + " · now " + nf(s.current), "hero")}
-    ${kpi("Games left", rem + " <small>of " + cap + "</small>", SS.played ? SS.played + " played" : "none played yet")}
+    ${kpi("Games that fit", Gt + " <small>of " + remCap + "</small>", tp ? `about ${fmtMin(gMin(typ))} each at place ${nd(typ, 0)} · ${fmtMin(timeLeftMin())} left` : (SS.played ? SS.played + " played" : "format limit; game lengths unknown"), Gt < remCap ? "bad" : "")}
     ${kpi("Points still needed", need == null ? "-" : nf(need), SS.pts ? "you have " + nf(SS.pts) : "start of event")}
     ${kpi("Needed per game", ppg == null ? "-" : isFinite(ppg) ? nd(ppg) : "∞", f ? "finishers: " + nd(f.pts_per_game) : "")}
     ${kpi("Typical finisher", f ? "place " + nd(f.avg_place) : "-", f ? nd(f.elims_per_game) + " elims · wins " + pc(f.win_rate) : "")}</div>`;
   if (!sc.per_elim && sc.placement.length < 3) {
-    el.innerHTML = head + kp + verdict + `<div class="card"><p>${sc.placement.length === 1 ? "Only a win scores in this event, so the plan is simply: win as many games as you can." : "Eliminations do not score here, so only placement matters."} ${esc(sc.text)}</p></div>`; return;
+    el.innerHTML = head + kp + timeNote + verdict + `<div class="card"><p>${sc.placement.length === 1 ? "Only a win scores in this event, so the plan is simply: win as many games as you can." : "Eliminations do not score here, so only placement matters."} ${esc(sc.text)}</p></div>`; return;
   }
-  // frontier: average elims per game -> the average placement you must reach
-  const maxE = Math.min(Math.max(sc.elim_cap || 8, 3), 12), xs = Array.from({ length: maxE * 4 + 1 }, (_, i) => i / 4);
-  const line = (conf, i) => {
+  const lobby = Math.min(tp ? tp.lobby : sc.placement.length + 1, 45), pGrid = Array.from({ length: lobby * 2 - 1 }, (_, i) => 1 + i * 0.5);
+  const maxE = Math.min(Math.max(sc.elim_cap || 8, 3), 12);
+  // frontier: for each average placement, the eliminations per game you would need, given the games that fit at that placement
+  const line = conf => {
     const t = SS.aim && conf === SS.conf ? SS.aim : (s.ladder || []).find(x => x.conf === conf)?.points ?? (s.final ? s.likely : null);
     if (t == null) return null;
-    const pg = rem ? Math.max(0, t - SS.pts) / rem : 0;
-    return { conf, data: xs.map(e => { const p = placeForPts(sc, pg - ptsAtElims(sc, e)); return p == null ? { x: e, y: null } : { x: e, y: Math.min(p, sc.placement.length + 1) }; }) };
+    const n = Math.max(0, t - SS.pts);
+    return { conf, data: pGrid.map(p => { const G = gamesFit(p, remCap), g = ppgAt(n, G), e = isFinite(g) ? invElims(sc, g - ptsAtPlace(sc, p)) : null; return { x: e == null ? null : Math.min(e, maxE), y: p, games: G, ppg: g, over: e != null && e > maxE }; }).filter(d => d.x != null) };
   };
   const lines = (SS.aim ? [line(SS.conf)] : [0.5, 0.8, 0.95].map(line)).filter(Boolean);
   const cols = [SER(2), SER(0), SER(3)];
@@ -120,31 +147,40 @@ function renderPlan() {
   const fp = f ? f.avg_place : null, fe = f ? f.elims_per_game : null;
   const near = (arr, v) => arr.reduce((b, x) => Math.abs(x - v) < Math.abs(b - v) ? x : b, arr[0]);
   const cell = (p, e) => ptsAtPlace(sc, p) + ptsAtElims(sc, e);
-  const heat = `<div class="scroll"><div class="heat" style="grid-template-columns:90px repeat(${heatE.length},1fr)"><div class="h">Place ↓ · Elims →</div>${heatE.map(e => `<div class="h">${e}</div>`).join("")}` +
-    heatP.map(p => `<div class="h" style="text-align:right;padding-right:8px">${p === 1 ? "1st (win)" : "top " + p}</div>` + heatE.map(e => {
-      const v = cell(p, e), ok = ppg != null && v >= ppg, k = ppg ? clamp((v / ppg - 1) / 0.6, 0, 1) : 0, isF = f && p === near(heatP, fp) && e === near(heatE, fe);
-      return `<div class="${ok ? "yes" : ""} ${isF ? "need" : ""}" style="${ok ? `background:color-mix(in srgb,var(--s1) ${Math.round(45 + k * 55)}%,var(--sf2))` : ""}" title="Average place ${p}, ${e} elims: ${nf(v)} points a game, ${nf(v * rem)} over ${rem} games">${nf(v)}</div>`;
-    }).join("")).join("") + `</div></div>`;
+  const heat = `<div class="scroll"><div class="heat" style="grid-template-columns:120px repeat(${heatE.length},1fr)"><div class="h">Place · games that fit ↓ &nbsp; Elims →</div>${heatE.map(e => `<div class="h">${e}</div>`).join("")}` +
+    heatP.map(p => { const G = gamesFit(p, remCap), need1 = ppgAt(need, G); return `<div class="h" style="text-align:right;padding-right:8px">${p === 1 ? "win" : "top " + p} · ${G}g</div>` + heatE.map(e => {
+      const v = cell(p, e), ok = need1 != null && v >= need1, k = need1 ? clamp((v / need1 - 1) / 0.6, 0, 1) : 0, isF = f && p === near(heatP, fp) && e === near(heatE, fe);
+      return `<div class="${ok ? "yes" : ""} ${isF ? "need" : ""}" style="${ok ? `background:color-mix(in srgb,var(--s1) ${Math.round(45 + k * 55)}%,var(--sf2))` : ""}" title="Average place ${p}, ${e} elims: ${nf(v)} points a game. About ${G} games fit, so ${nf(v * G)} points; you need ${need1 == null ? "?" : nf(need1)} a game">${nf(v)}</div>`;
+    }).join(""); }).join("") + `</div></div>`;
+  // the worst average placement that still reaches the target with a given elim average (games priced at that placement)
   const recs = [1, 3, 6].filter(e => e <= Math.max(3, sc.elim_cap || 6)).map(e => {
-    const p = ppg == null || !isFinite(ppg) ? null : placeForPts(sc, ppg - ptsAtElims(sc, e));
-    const txt = ppg == null ? "-" : p == null ? "Not possible" : p > sc.placement.length ? "Any placement" : "Top " + Math.max(1, Math.round(p));
-    return `<div class="recipe"><b>Average ${e} elim${e > 1 ? "s" : ""} a game</b><div class="big">${txt}</div><small>${p == null ? "even a win every game falls short" : "average finish needed"}</small></div>`;
+    let best = null;
+    if (need != null) for (const p of pGrid) { const G = gamesFit(p, remCap), g = ppgAt(need, G); if (isFinite(g) && cell(p, e) >= g) best = p; }
+    const G = best ? gamesFit(best, remCap) : null;
+    const txt = need == null ? "-" : need === 0 ? "Any placement" : best == null ? "Not possible" : "Top " + Math.max(1, Math.round(best));
+    return `<div class="recipe"><b>Average ${e} elim${e > 1 ? "s" : ""} a game</b><div class="big">${txt}</div><small>${best == null ? "not enough even with a win every game" : need === 0 ? "" : `average finish needed · about ${G} games fit`}</small></div>`;
   }).join("");
-  el.innerHTML = head + kp + verdict + `
+  el.innerHTML = head + kp + timeNote + verdict + `
   <div class="grid g3" style="margin-top:16px">${recs}</div>
-  ${chartCard("c-front", "Trade-off: elims against placement", "Reach any point above or on a line to hit that certainty", { cls: "tall" })}
-  <div class="card"><div class="hd"><h2>Points per game by playstyle</h2><span class="sub">blue = enough to reach ${T == null ? "your target" : nf(T)} · outlined = typical finisher</span></div>${heat}</div>`;
+  ${chartCard("c-front", "Trade-off: elims against placement", "Reach any point on or beyond a line to hit that certainty", { cls: "tall" })}
+  ${tp ? `<div class="grid g2">${chartCard("c-tm", "How long a game takes", "minutes, including the wait for the lobby", { cls: "short", table: false })}${chartCard("c-gf", "Games that fit in the time", `${fmtMin(timeLeftMin())} left; format allows ${remCap}`, { cls: "short", table: false })}</div>` : ""}
+  <div class="card"><div class="hd"><h2>Points per game by playstyle</h2><span class="sub">blue = enough to reach ${T == null ? "your target" : nf(T)} in the games that fit · outlined = typical finisher</span></div>${heat}</div>`;
   if (ds.length) {
-    const c = put("plan", mk($("#c-front"), {
+    put("plan", mk($("#c-front"), {
       type: "scatter", data: { datasets: ds },
       options: {
         interaction: { mode: "nearest", intersect: true },
-        scales: { x: { type: "linear", min: 0, max: maxE, title: { text: "Average eliminations per game" } }, y: { type: "linear", reverse: true, min: 1, max: Math.min(sc.placement.length + 1, 30), title: { text: "Average placement (1 = best)" }, ticks: { stepSize: 5 } } },
-        plugins: { tooltip: { callbacks: { title: () => "", label: c => c.raw.pts != null ? `A finisher: place ${nd(c.raw.y)}, ${nd(c.raw.x)} elims, ${nd(c.raw.pts)} pts/game` : `${c.dataset.label}: ${nd(c.raw.x)} elims → average place ${nd(c.raw.y)}` } } },
+        scales: { x: { type: "linear", min: 0, max: maxE, title: { text: "Average eliminations per game needed" } }, y: { type: "linear", reverse: true, min: 1, max: lobby, title: { text: "Average placement (1 = best)" }, ticks: { stepSize: 5 } } },
+        plugins: { tooltip: { callbacks: { title: () => "", label: c => c.raw.pts != null ? `A finisher: place ${nd(c.raw.y)}, ${nd(c.raw.x)} elims, ${nd(c.raw.pts)} pts/game` : `${c.dataset.label}: place ${nd(c.raw.y)} with ${nd(c.raw.x)}${c.raw.over ? "+" : ""} elims; about ${c.raw.games} games fit, so ${nd(c.raw.ppg)} points a game` } } },
       }
     }));
-    $("#c-front-tbl").innerHTML = table(["Elims / game", ...lines.map(l => confLabel(l.conf))], [0, 1, 2, 3, 4, 6, 8].filter(e => e <= maxE).map(e => [e, ...lines.map(l => { const p = l.data.find(d => d.x === e)?.y; return p == null ? "not possible" : p > sc.placement.length ? "any" : "place " + nd(p); })]), ["n", "n", "n", "n"]);
-    $("#c-front-take").innerHTML = take("", "Each line shows the <b>average placement you must reach</b> for a given number of eliminations per game. Higher on the chart is better placement. Dots are real players who finished near your rank, so you can see which style they used. This treats an average game, so a single win-heavy run can beat it.");
+    $("#c-front-tbl").innerHTML = table(["Average placement", "Games that fit", ...lines.map(l => confLabel(l.conf) + " (elims)")], [1, 3, 5, 8, 10, 15, 20, 25].filter(p => p <= lobby).map(p => [p, gamesFit(p, remCap), ...lines.map(l => { const d = l.data.find(x => x.y === p); return d ? nd(d.x) + (d.over ? "+" : "") : "not possible"; })]), ["n", "n", ...lines.map(() => "n")]);
+    $("#c-front-take").innerHTML = take("", "For every average placement, the line shows the <b>eliminations per game you would need</b>. It bends because surviving longer costs minutes: you play fewer games, so each one has to score more. Dots are real players who finished near your rank.");
+  }
+  if (tp && $("#c-tm")) {
+    const lb = Array.from({ length: Math.min(tp.lobby, 45) }, (_, i) => i + 1);
+    put("plan", mk($("#c-tm"), { type: "line", data: { labels: lb, datasets: [{ label: "Minutes per game", data: lb.map(p => tp.by_place[p - 1]), borderColor: SER(0), backgroundColor: withAlpha(SER(0), .14), fill: true, pointRadius: 0 }] }, options: { scales: { x: { title: { text: "Finishing placement" }, ticks: { maxTicksLimit: 10 } }, y: { beginAtZero: true, title: { text: "Minutes" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => "Place " + c[0].label, label: c => nd(c.parsed.y) + " min per game" } } } } }));
+    put("plan", mk($("#c-gf"), { type: "line", data: { labels: lb, datasets: [{ label: "Games that fit", data: lb.map(p => gamesFit(p, remCap)), borderColor: SER(1), backgroundColor: SER(1), stepped: true, pointRadius: 0, borderWidth: 3 }] }, options: { scales: { x: { title: { text: "Average placement" }, ticks: { maxTicksLimit: 10 } }, y: { beginAtZero: true, suggestedMax: remCap + 1, ticks: { stepSize: 1 }, title: { text: "Games" } } }, plugins: { legend: { display: false }, refLines: { lines: [{ axis: "y", value: remCap, label: "format: " + remCap, color: cssv("--tx2"), right: true }] }, tooltip: { callbacks: { title: c => "Average place " + c[0].label, label: c => c.parsed.y + " games fit" } } } } }));
   }
 }
 
@@ -206,7 +242,7 @@ function renderPace() {
   const cap = p.cap, n = p.mid.length, T = aimPoints();
   const expAt = g => g <= 0 ? 0 : g <= n ? lerp([0, ...p.mid], g) : p.mid[n - 1] * g / n;
   const perGame = p.mid[n - 1] / n, played = SS.played, exp = expAt(played), diff = SS.pts - exp;
-  const mine = played > 0 ? SS.pts / played : null, proj = mine != null ? SS.pts + mine * (cap - played) : null;
+  const pf = projFinal(), projN = pf ? pf.games : cap, proj = pf ? pf.pts : null, timeCut = projN < cap ? ` (only about ${projN - played} more games fit in the time)` : "";
   const xs = Array.from({ length: n + 1 }, (_, i) => i);
   const dsr = (a) => xs.map(i => ({ x: i, y: i ? a[i - 1] : 0 }));
   const ds = [
@@ -216,11 +252,11 @@ function renderPace() {
   ];
   if (played > 0) {
     ds.push({ label: "You so far", data: [{ x: 0, y: 0 }, { x: played, y: SS.pts }], borderColor: SER(1), backgroundColor: SER(1), borderWidth: 3, pointRadius: [0, 6], order: 1 });
-    if (played < cap) ds.push({ label: "You at this rate", data: [{ x: played, y: SS.pts }, { x: cap, y: proj }], borderColor: SER(1), borderDash: [6, 5], borderWidth: 2, pointRadius: [0, 4], order: 1 });
+    if (played < projN) ds.push({ label: "You at this rate", data: [{ x: played, y: SS.pts }, { x: projN, y: proj }], borderColor: SER(1), borderDash: [6, 5], borderWidth: 2, pointRadius: [0, 4], order: 1 });
   }
   const status = played <= 0 ? take("", `Fill in <b>Games I have played</b> and <b>My points so far</b> above to see where you stand. A typical finisher near #${p.rank} has <b>${nf(expAt(1))}</b> after one game and <b>${nf(p.final_est)}</b> at the end.`)
-    : diff >= 0 ? take("good", `You are <b>${nf(diff)} points ahead</b> of a typical finisher near #${p.rank} after ${played} games (≈ ${nd(diff / perGame)} games' worth). At your rate you finish near <b>${nf(proj)}</b>${T ? ` against a target of ${nf(T)}` : ""}.`)
-      : take(Math.abs(diff) > 1.5 * perGame ? "bad" : "warn", `You are <b>${nf(-diff)} points behind</b> a typical finisher near #${p.rank} after ${played} games (≈ ${nd(-diff / perGame)} games' worth). At your rate you finish near <b>${nf(proj)}</b>${T ? ` against a target of ${nf(T)}` : ""}.`);
+    : diff >= 0 ? take("good", `You are <b>${nf(diff)} points ahead</b> of a typical finisher near #${p.rank} after ${played} games (≈ ${nd(diff / perGame)} games' worth). At your rate you finish near <b>${nf(proj)}</b>${timeCut}${T ? ` against a target of ${nf(T)}` : ""}.`)
+      : take(Math.abs(diff) > 1.5 * perGame ? "bad" : "warn", `You are <b>${nf(-diff)} points behind</b> a typical finisher near #${p.rank} after ${played} games (≈ ${nd(-diff / perGame)} games' worth). At your rate you finish near <b>${nf(proj)}</b>${timeCut}${T ? ` against a target of ${nf(T)}` : ""}.`);
   el.innerHTML = chartCard("c-pace", `Points after each game for finishers near #${p.rank}`, `${p.players} players · ranks ${p.band[0]}–${p.band[1]}${p.scaled ? " · scaled to the predicted cutoff" : ""}`, { cls: "tall" });
   put("pace", mk($("#c-pace"), { type: "line", data: { datasets: ds }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "linear", min: 0, max: cap, ticks: { stepSize: 1 }, title: { text: "Games played" } }, y: { beginAtZero: true, title: { text: "Total points" } } }, plugins: { legend: { labels: { filter: i => i.text !== "Slower quarter" } }, tooltip: { callbacks: { title: c => "After game " + c[0].parsed.x, label: c => `${c.dataset.label}: ${nf(c.parsed.y)}` } }, refLines: { lines: T ? [{ axis: "y", value: T, label: "Aim: " + nf(T), color: cssv("--tx"), right: true }] : [] } } } }));
   $("#c-pace-tbl").innerHTML = table(["After game", "Slower quarter", "Typical", "Faster quarter"], p.mid.map((m, i) => [i + 1, nf(p.lo[i]), nf(m), nf(p.hi[i])]), ["n", "n", "n", "n"]);
@@ -240,7 +276,7 @@ function renderSafe() {
   ${chartCard("c-safe", `Chance that a score is enough for top ${nf(s.rank)}`, `predicted ${nf(s.low)} – ${nf(s.safe)}`, { cls: "" })}`;
   const refs = [{ axis: "x", value: g(0.5), label: "50%", color: cssv("--tx2"), row: 0 }, { axis: "x", value: g(0.8), label: "80%", color: cssv("--tx2"), row: 1 }, { axis: "x", value: g(0.95), label: "95%", color: cssv("--tx2"), row: 2 }];
   if (s.current) refs.push({ axis: "x", value: s.current, label: "now " + nf(s.current), color: SER(1), row: 3 });
-  if (SS.pts && SS.played) { const cap = capOf(), pr = SS.pts + SS.pts / SS.played * (cap - SS.played); refs.push({ axis: "x", value: pr, label: "you ≈ " + nf(pr), color: SER(2), row: 4 }); }
+  const pf = projFinal(); if (pf) refs.push({ axis: "x", value: pf.pts, label: "you ≈ " + nf(pf.pts), color: SER(2), row: 4 });
   put("safe", mk($("#c-safe"), { type: "line", data: { datasets: [{ label: "Chance the cutoff is at or below this score", data: s.curve.map(c => ({ x: c[0], y: c[1] * 100 })), borderColor: SER(0), backgroundColor: withAlpha(SER(0), .14), fill: true, pointRadius: 0 }] }, options: { scales: { x: { type: "linear", title: { text: "Your final points" }, min: s.curve[0][0], max: s.curve[s.curve.length - 1][0] }, y: { min: 0, max: 100, title: { text: "Chance it is enough (%)" }, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => nf(c[0].parsed.x) + " points", label: c => `${c.parsed.y.toFixed(0)}% chance this is enough` } }, refLines: { lines: refs } } } }));
   $("#c-safe-tbl").innerHTML = table(["Certainty", "Points"], L.map(l => [Math.round(l.conf * 100) + "%", nf(l.points)]), ["", "n"]);
   const extra = g(0.95) - g(0.5);
@@ -248,32 +284,40 @@ function renderSafe() {
 }
 
 // ---------------------------------------------------------------- 6 keep playing?
-// Monte Carlo over the games you still have. Three sources of uncertainty are simulated together:
+// Monte Carlo over the games you still have. Four things are simulated together:
 //  1. how well you play (a real finisher's games, or your own pace blended with finishers),
 //  2. luck from game to game (games are drawn at random from real results),
-//  3. where the final cutoff lands (drawn from the model's predicted distribution).
+//  3. how long each game takes (from where it ended: deep runs last ~17 min, early deaths far less), which
+//     decides how many games fit before the window closes,
+//  4. where the final cutoff lands (drawn from the model's predicted distribution).
 const PRIOR_GAMES = 8;   // how many games of "finisher form" a blend counts before your own results outweigh it
 const gauss = r => { let u = 0; while (!u) u = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * r()); };
 const pct1 = v => v < 10 ? nd(v, 1) : nd(v, 0);
 const meanOf = a => a.reduce((s, x) => s + x, 0) / (a.length || 1);
+// o.pooled / o.players hold [points, placement] pairs; o.budget is the minutes left (Infinity = ignore time)
 function simStop(o) {
-  const R = rng(o.seed), S = o.sims, K = o.rem, totals = Array.from({ length: K + 1 }, () => new Float32Array(S)), cuts = new Float32Array(S);
-  const pm = meanOf(o.pooled) || 1;
+  const R = rng(o.seed), S = o.sims, K = o.rem, totals = Array.from({ length: K + 1 }, () => new Float32Array(S)), cuts = new Float32Array(S), done = new Uint8Array(S);
+  const pm = meanOf(o.pooled.map(x => x[0])) || 1;
   for (let i = 0; i < S; i++) {
     cuts[i] = o.cut.fixed != null ? o.cut.fixed : Math.expm1(o.cut.mu + o.cut.sd * gauss(R));
-    let t = o.pts; totals[0][i] = t;
-    let draw;
+    let draw, t = 0, tot = o.pts, g = 0; totals[0][i] = tot;
     if (o.mode === "band" && o.players.length) { const pl = o.players[(R() * o.players.length) | 0]; draw = () => pl[(R() * pl.length) | 0]; }
     else {
       const n = o.own ? o.own.n : 1, k = o.mode === "own" ? 0 : PRIOR_GAMES, post = (n * (o.own ? o.own.mean : pm) + k * pm) / (n + k), se = o.sd / Math.sqrt(n + k);
       const sc = Math.max(0.15, post + se * gauss(R)) / pm;
-      draw = () => Math.round(o.pooled[(R() * o.pooled.length) | 0] * sc);
+      draw = () => { const x = o.pooled[(R() * o.pooled.length) | 0]; return [Math.round(x[0] * sc), x[1]]; };
     }
-    for (let g = 1; g <= K; g++) { t += draw(); totals[g][i] = t; }
+    for (let k = 1; k <= K; k++) {
+      if (t < o.budget) { const x = draw(); tot += x[0]; t += o.gmin ? o.gmin(x[1]) : 0; g++; }   // a game can start while any time is left
+      totals[k][i] = tot;
+    }
+    done[i] = g;
   }
   const P = totals.map(a => { let c = 0; for (let i = 0; i < S; i++) if (a[i] >= cuts[i]) c++; return c / S * 100; });
   const Q = totals.map(a => { const b = Float32Array.from(a).sort(); return [b[Math.floor(S * .1)], b[Math.floor(S * .5)], b[Math.floor(S * .9)]]; });
-  return { P, Q };
+  const hist = new Array(K + 1).fill(0); done.forEach(g => hist[g]++);
+  const d = Array.from(done).sort((a, b) => a - b);
+  return { P, Q, hist: hist.map(v => v / S * 100), games: [d[Math.floor(S * .1)], d[Math.floor(S * .5)], d[Math.floor(S * .9)]], most: Math.max(...d) };
 }
 function renderStop() {
   const el = $("#p-stop"); if (!el) return; drop("stop");
@@ -287,33 +331,35 @@ function renderStop() {
   const sel = opts.find(x => x.key === SS.like) || opts.find(x => x.key === def) || opts[0];
   const base = bands.find(x => x.key === "focus").b;                        // the form of finishers near the target
   const pooledFrom = sel.mode === "band" ? sel.b : base;
-  const cap = capOf(), left = Math.max(0, cap - SS.played);
-  let rem = left, limited = "";
-  if (ACTIVE.includes(SS.w.status)) { const fit = Math.max(0, Math.floor((SS.w.end - Date.now() / 1000) / (25 * 60)) + 1); if (fit < left) { rem = fit; limited = `About ${fit} more game${fit === 1 ? "" : "s"} fit before the window closes (a game takes roughly 25 minutes), so the simulation stops there.`; } }
+  const cap = capOf(), left = Math.max(0, cap - SS.played), tp = SS.d.tempo && !SS.d.tempo.error ? SS.d.tempo : null;
+  const budget = tp ? timeLeftMin() : Infinity;
   const fixed = SS.aim || (s.final ? s.likely : null);
   const T = aimPoints(), goalName = SS.aim ? `your aim of ${nf(SS.aim)}` : `a top ${nf(SS.rank)} finish`;
-  const sim = simStop({ pts: SS.pts, rem, mode: sel.mode, players: pooledFrom.players_pts || [], pooled: pooledFrom.sample, own, sd: base.sd || 20, cut: fixed != null ? { fixed } : { mu: s.mu, sd: s.sd }, seed: Math.round(SS.rank * 7 + SS.pts * 3 + SS.played * 13), sims: 6000 });
-  const P = sim.P, Q = sim.Q, p0 = P[0], pAll = P[rem], p1 = rem ? P[1] : p0, marg = P.map((v, k) => k ? v - P[k - 1] : 0);
-  const sure = P.findIndex(v => v >= 95), dim = marg.findIndex((v, k) => k > 0 && v < 1.5);
+  const sim = simStop({ pts: SS.pts, rem: left, mode: sel.mode, players: pooledFrom.players_pts || [], pooled: pooledFrom.sample, own, sd: base.sd || 20, cut: fixed != null ? { fixed } : { mu: s.mu, sd: s.sd }, budget, gmin: tp ? (p => gMin(p)) : null, seed: Math.round(SS.rank * 7 + SS.pts * 3 + SS.played * 13), sims: 6000 });
+  const rem = sim.most, P = sim.P.slice(0, rem + 1), Q = sim.Q.slice(0, rem + 1), p0 = P[0], pAll = P[rem], p1 = rem ? P[1] : p0, marg = P.map((v, k) => k ? v - P[k - 1] : 0);
+  const sure = P.findIndex(v => v >= 95), dim = marg.findIndex((v, k) => k > 0 && v < 1.5), med = sim.games[1];
+  const timeLimited = tp && left > 0 && med < left;
   let cls, head, body;
-  if (rem === 0) { cls = "hard"; head = left === 0 ? "No games left" : "No time for another game"; body = `Your ${nf(SS.pts)} points give about a <b>${nd(p0, 0)}%</b> chance of ${goalName}.`; }
+  if (left === 0 || rem === 0) { cls = "hard"; head = left === 0 ? "No games left" : "No time for another game"; body = `Your ${nf(SS.pts)} points give about a <b>${pct1(p0)}%</b> chance of ${goalName}.`; }
   else if (p0 >= 97) { cls = "stop"; head = "You are very likely already in"; body = `Even with no more games you have about <b>${nd(p0, 0)}%</b> to make ${goalName}. More games only protect against a late jump in the cutoff.`; }
-  else if (pAll < 3) { cls = "hard"; head = `Very unlikely: ${nd(pAll)}%`; body = `Playing all ${rem} remaining games, your median finish is about <b>${nf(Q[rem][1])}</b> points, and ${goalName} needs roughly ${nf(T)}. It would take an unusually strong run.`; }
+  else if (pAll < 3) { cls = "hard"; head = `Very unlikely: ${pct1(pAll)}%`; body = `In the time you have (about ${med} more game${med === 1 ? "" : "s"}), your median finish is <b>${nf(Q[rem][1])}</b> points, and ${goalName} needs roughly ${nf(T)}. It would take an unusually strong run.`; }
   else if (sure > 0) { cls = "go"; head = `Play ${sure} more game${sure > 1 ? "s" : ""} to be 95% sure`; body = `Your chance of ${goalName} rises from <b>${pct1(p0)}%</b> now to <b>${nd(P[sure], 0)}%</b> after ${sure} more.${sure < rem ? ` After that, each extra game adds ${nd(marg[sure + 1])}% or less.` : ""}`; }
   else if (dim > 1 && dim < rem) { cls = "go"; head = `Strong gains up to game ${dim - 1}, then it flattens`; body = `Your chance climbs from ${nd(p0, 0)}% to <b>${nd(P[dim - 1], 0)}%</b> over the next ${dim - 1} game${dim - 1 === 1 ? "" : "s"}; games after that add under 1.5% each. All ${rem}: <b>${nd(pAll, 0)}%</b>.`; }
-  else { cls = "go"; head = `Keep playing: ${nd(pAll, 0)}% with ${rem} game${rem > 1 ? "s" : ""} left`; body = `The next game lifts your chance from <b>${pct1(p0)}%</b> to <b>${pct1(p1)}%</b>. Points never go down, so playing on only costs time.`; }
+  else { cls = "go"; head = `Keep playing: ${nd(pAll, 0)}% with about ${rem} game${rem > 1 ? "s" : ""} left`; body = p1 - p0 < 2 && rem > 1 ? `One game alone adds little (${pct1(p0)}% to ${pct1(p1)}%): the chance builds over the whole set of about ${rem}. Points never go down, so playing on only costs time.` : `The next game lifts your chance from <b>${pct1(p0)}%</b> to <b>${pct1(p1)}%</b>. Points never go down, so playing on only costs time.`; }
   const finalMed = Q[rem][1];
   el.innerHTML = `<div class="ctrl"><label style="margin:0">Play like</label><select id="slike" style="width:auto;max-width:100%;margin:0">${opts.map(x => `<option value="${x.key}" ${x.key === sel.key ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
-  <div class="verdict ${cls}"><div><div class="big">${head}</div><div>${body}</div></div></div>${limited ? `<p class="small">${limited}</p>` : ""}
-  <div class="kpis">${kpi("Chance with 0 more games", pct1(p0) + "%", nf(SS.pts) + " points now")}${kpi("Chance with all " + rem, nd(pAll, 0) + "%", "of " + goalName, "hero")}${kpi("Next game adds", rem ? "+" + nd(p1 - p0) + "%" : "-", "to your chance")}${kpi("Likely final points", nf(finalMed), "range " + nf(Q[rem][0]) + " – " + nf(Q[rem][2]))}${kpi("Cutoff aimed at", nf(T), fixed != null ? "fixed" : "varies ± " + nd(s.sd_pct) + "%")}</div>
+  <div class="verdict ${cls}"><div><div class="big">${head}</div><div>${body}</div></div></div>
+  ${timeLimited ? take("warn", `<b>Time, not the format, is your limit.</b> The format allows ${left} more game${left === 1 ? "" : "s"}, but with ${Math.round(budget)} minutes left and games lasting as long as you survive, you will finish about <b>${med}</b> (80% of runs: ${sim.games[0]} to ${sim.games[2]}).`) : ""}
+  <div class="kpis" style="margin-top:12px">${kpi("Chance with 0 more games", pct1(p0) + "%", nf(SS.pts) + " points now")}${kpi("Chance with all you can play", nd(pAll, 0) + "%", "of " + goalName, "hero")}${kpi("Games you will finish", med, `80% of runs: ${sim.games[0]} to ${sim.games[2]}${tp ? "" : " (no timing data)"}`, timeLimited ? "bad" : "")}${kpi("Likely final points", nf(finalMed), "range " + nf(Q[rem][0]) + " – " + nf(Q[rem][2]))}${kpi("Cutoff aimed at", nf(T), fixed != null ? "fixed" : "varies ± " + nd(s.sd_pct) + "%")}</div>
   ${chartCard("c-stop", `Chance of ${goalName}, by extra games played`, "6,000 simulated runs", {})}
-  <div class="grid g2">${chartCard("c-stop2", "What each extra game adds", "percentage points of chance", { cls: "short", table: false })}${chartCard("c-stop3", "Where your points could end up", "middle 80% of runs", { cls: "short", table: false })}</div>`;
+  <div class="grid g3">${chartCard("c-stop2", "What each extra game adds", "percentage points of chance", { cls: "short", table: false })}${chartCard("c-stop3", "Where your points could end up", "middle 80% of runs", { cls: "short", table: false })}${chartCard("c-stop4", "How many games you get in", "share of runs", { cls: "short", table: false })}</div>`;
   const xs = Array.from({ length: rem + 1 }, (_, k) => k);
   put("stop", mk($("#c-stop"), { type: "line", data: { labels: xs, datasets: [{ label: "Chance", data: P, borderColor: SER(0), backgroundColor: withAlpha(SER(0), .14), fill: true, pointRadius: 3, borderWidth: 3 }] }, options: { scales: { x: { title: { text: "Extra games played" } }, y: { min: 0, max: 100, title: { text: "Chance (%)" }, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, refLines: { lines: [{ axis: "y", value: 95, label: "95% sure", right: true }] }, tooltip: { callbacks: { title: c => c[0].label + " more games", label: c => `${c.parsed.y.toFixed(0)}% chance` } } } } }));
   put("stop", mk($("#c-stop2"), { type: "bar", data: { labels: xs.slice(1), datasets: [{ label: "Added chance", data: marg.slice(1).map(v => +v.toFixed(1)), backgroundColor: marg.slice(1).map(v => v < 1.5 ? withAlpha(SER(0), .4) : SER(0)) }] }, options: { scales: { x: { title: { text: "Game" } }, y: { title: { text: "Percentage points" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => "Game " + c[0].label, label: c => "+" + c.parsed.y + " points of chance" } } } } }));
   const cutLines = fixed != null ? [{ axis: "y", value: fixed, label: "cutoff " + nf(fixed), color: cssv("--tx"), right: true }] : [{ axis: "y", value: Math.round(Math.expm1(s.mu)), label: "likely cutoff " + nf(Math.expm1(s.mu)), color: cssv("--tx"), right: true }, { axis: "y", value: s.ladder.find(x => x.conf === 0.95).points, label: "95%: " + nf(s.ladder.find(x => x.conf === 0.95).points), color: cssv("--tx2"), right: true, dash: [2, 4] }];
   put("stop", mk($("#c-stop3"), { type: "line", data: { labels: xs, datasets: [{ label: "10%", data: Q.map(q => q[0]), borderColor: "transparent", pointRadius: 0, fill: false }, { label: "Middle 80% of runs", data: Q.map(q => q[2]), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .2), pointRadius: 0, fill: "-1" }, { label: "Median", data: Q.map(q => q[1]), borderColor: SER(0), backgroundColor: SER(0), borderWidth: 3, pointRadius: 2 }] }, options: { scales: { x: { title: { text: "Extra games played" } }, y: { title: { text: "Your total points" } } }, plugins: { legend: { labels: { filter: i => i.text !== "10%" } }, refLines: { lines: cutLines }, tooltip: { callbacks: { title: c => c[0].label + " more games", label: c => `${c.dataset.label === "Middle 80% of runs" ? "90th percentile" : c.dataset.label === "10%" ? "10th percentile" : c.dataset.label}: ${nf(c.parsed.y)}` } } } } }));
+  put("stop", mk($("#c-stop4"), { type: "bar", data: { labels: xs, datasets: [{ label: "Share of runs", data: sim.hist.slice(0, rem + 1).map(v => +v.toFixed(1)), backgroundColor: SER(1) }] }, options: { scales: { x: { title: { text: "Games finished" } }, y: { title: { text: "% of runs" }, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => c[0].label + " games", label: c => c.parsed.y + "% of runs" } } } } }));
   $("#c-stop-tbl").innerHTML = table(["Extra games", "Chance", "Adds", "10%", "Median", "90%"], xs.map(k => [k, nd(P[k], 0) + "%", k ? "+" + nd(marg[k]) : "", nf(Q[k][0]), nf(Q[k][1]), nf(Q[k][2])]), ["n", "n", "n", "n", "n", "n"]);
-  $("#c-stop-take").innerHTML = take("", `Each run picks how well you play, plays your remaining games from real results, and compares your total with a cutoff drawn from the prediction${fixed != null ? "" : ` (±${nd(s.sd_pct)}%)`}. ${sel.mode === "band" ? "Players are real finishers from the selected group, so it includes both strong and weak runs." : sel.mode === "blend" ? `Your ${own.n} games count against ${PRIOR_GAMES} games of finisher form, so a short hot or cold start does not dominate.` : "Only your own games so far set your pace, so a short start can mislead."}`);
+  $("#c-stop-take").innerHTML = take("", `Each run picks how well you play, plays games from real results (each one lasting as long as that finish really takes), stops when the window closes, and compares your total with a cutoff drawn from the prediction${fixed != null ? "" : ` (±${nd(s.sd_pct)}%)`}. ${sel.mode === "band" ? "Players are real finishers from the selected group, so it includes strong and weak runs." : sel.mode === "blend" ? `Your ${own.n} games count against ${PRIOR_GAMES} games of finisher form, so a short hot or cold start does not dominate.` : "Only your own games so far set your pace, so a short start can mislead."} It assumes you start the next game right away.`);
   $("#slike").onchange = e => { SS.like = e.target.value; saveSS(); renderStop(); };
 }

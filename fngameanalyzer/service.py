@@ -24,7 +24,7 @@ def pretty(event_id, window_id):
 
 
 def _history(target):
-    """Finished events the model may use: the same class, or every class when approximation is on."""
+    """Finished events the model may use: the same gamemode, or every gamemode when approximation is on."""
     if model.approx():
         return storage.windows(final=True)
     return storage.windows(final=True, category=classify.of(target))
@@ -100,12 +100,12 @@ def _run_predict(window_id, top, entrants=None):
         return d
     r = model.predict(target, finished, top, entrants, snap, {})
     if r and not model.approx() and not r["prior"] and not (r.get("live") or {}).get("learned"):
-        r = None   # strict: a class with no history gets no estimate rather than a crude guess
+        r = None   # strict: a gamemode with no history gets no estimate rather than a crude guess
     if not r:
         cat = classify.of(target)
         n = sum(1 for w in finished if classify.of(w) == cat and w["family"] == target["family"])
-        raise ValueError(f"No usable '{cat}' history yet ({n} finished events of that class). "
-                         "Tick 'Allow similar classes' to estimate from the nearest other classes.")
+        raise ValueError(f"No usable '{cat}' history yet ({n} finished events of that gamemode). "
+                         "Tick 'Allow similar gamemodes' to estimate from the nearest other gamemodes.")
     cur = (r.get("live") or {}).get("current")
     if cur:   # a rank's score never falls
         for k in ("low", "likely", "safe"):
@@ -208,7 +208,7 @@ def deep_predict(target, finished, snap, rank):
                     "history_events": len(hist)}
     vals = sorted(v for v in (_interp_deep(w["points"][999], w["deep"], rank) for w in hist) if v)
     if not vals:
-        raise ValueError(f"No stored thresholds around rank {rank} for class '{cat}' yet")
+        raise ValueError(f"No stored thresholds around rank {rank} for gamemode '{cat}' yet")
     q = lambda f: vals[min(len(vals) - 1, int(f * len(vals)))]
     return {"rank": rank, "low": round(q(0.1)), "likely": round(statistics.median(vals)),
             "safe": round(q(0.9)), "current": None, "history_events": len(vals),
@@ -286,7 +286,7 @@ def bubble_view(window_id, goal=None, approx=False):
     finally:
         model._ctx.approx = False
     if not res:
-        raise ValueError(f"No usable '{classify.of(target)}' history yet for a simulation. Tick 'Allow similar classes' to estimate from the nearest classes.")
+        raise ValueError(f"No usable '{classify.of(target)}' history yet for a simulation. Tick 'Allow similar gamemodes' to estimate from the nearest gamemodes.")
     prob = res["prob"]
     pts, games = snap["points"], snap["games"]
     rows = [i for i in range(len(pts)) if 0.02 <= prob[i] <= 0.985 or abs(i + 1 - goal) <= 3][:80]

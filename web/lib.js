@@ -11,6 +11,9 @@ const fmtDay = t => new Date(t * 1000).toLocaleDateString([], { weekday: "long",
 const hm = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const ago = s => s == null ? "-" : s < 90 ? s + "s ago" : s < 5400 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago";
 const dur = s => { s = Math.max(0, Math.round(s)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + "d " : "") + (h || d ? h + "h " : "") + m + "m " + (s % 60) + "s" };
+// readable gamemode name from the internal key ("reload zb duo" -> "Reload Zero Build Duo")
+const GM = { reload: "Reload", br: "Battle Royale", zb: "Zero Build", solo: "Solo", duo: "Duo", trio: "Trio", squads: "Squads", mobile: "Mobile" };
+const gm = c => String(c || "").split(" ").map(x => GM[x] || x).join(" ");
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
@@ -44,7 +47,15 @@ const SER = i => cssv("--s" + ((((i % 8) + 8) % 8) + 1));
 const RAMP = n => Array.from({ length: n }, (_, i) => cssv("--r" + (1 + Math.round(i * 6 / Math.max(1, n - 1)))));
 let charts = [];
 const destroyCharts = () => { charts.forEach(c => { try { c.destroy(); } catch (e) { } }); charts = []; };
-const withAlpha = (c, a) => { const d = document.createElement("canvas").getContext("2d"); d.fillStyle = c; const v = d.fillStyle; if (v[0] === "#") { const n = parseInt(v.slice(1), 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${a})`; } return v.replace(/rgba?\(([^)]+)\)/, (_, p) => `rgba(${p.split(",").slice(0, 3).join(",")},${a})`); };
+// colour + alpha without creating a canvas (every throw-away canvas context counts against the browser's limit and can blank real charts)
+const _al = {};
+const withAlpha = (c, a) => {
+  const k = c + "|" + a; if (_al[k]) return _al[k];
+  let m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c.trim()), r, g, b;
+  if (m) { let h = m[1]; if (h.length === 3) h = h.split("").map(x => x + x).join(""); const n = parseInt(h, 16); r = n >> 16; g = n >> 8 & 255; b = n & 255; }
+  else { m = /rgba?\(([^)]+)\)/.exec(c); if (!m) return c; [r, g, b] = m[1].split(",").map(x => parseFloat(x)); }
+  return _al[k] = `rgba(${r},${g},${b},${a})`;
+};
 
 if (window.Chart) {
   // vertical hover line + reference lines (axis 'x'|'y', value, label)
@@ -84,7 +95,8 @@ function themeChart() {
 }
 // mk(canvas, config) -> Chart with the site look. config.options is merged over the defaults.
 function mk(canvas, cfg) {
-  if (!canvas || !window.Chart) return null;
+  if (!canvas || !window.Chart || !canvas.isConnected) return null;
+  const prev = Chart.getChart(canvas); if (prev) prev.destroy();   // never two charts on one canvas
   themeChart();
   const grid = cssv("--grid"), mut = cssv("--mut");
   const axis = { grid: { color: grid, drawTicks: false }, border: { color: cssv("--axis") }, ticks: { color: mut, padding: 6, callback: v => typeof v === "number" ? v.toLocaleString() : v } };
@@ -119,3 +131,12 @@ const kpi = (l, v, d, c) => `<div class="kpi ${c || ""}"><div class="l">${l}</di
 const skel = (n = 1, h = 120) => Array.from({ length: n }, () => `<div class="skel" style="height:${h}px;margin:0 0 16px"></div>`).join("");
 // deterministic random numbers so a simulation does not flicker between renders
 function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// Browsers can throw away canvas contents of a hidden tab or after a graphics reset (the chart turns black).
+// Redraw every chart whenever the page comes back, and rebuild the page if a canvas context was really lost.
+const redrawCharts = () => charts.forEach(c => { try { c.resize(); c.update("none"); } catch (e) { } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { redrawCharts(); setTimeout(redrawCharts, 400); } });
+window.addEventListener("focus", () => setTimeout(redrawCharts, 100));
+window.addEventListener("pageshow", () => setTimeout(redrawCharts, 100));
+let _lostAt = 0;
+document.addEventListener("contextlost", e => { if (e.target && e.target.tagName === "CANVAS" && Date.now() - _lostAt > 5000) { _lostAt = Date.now(); setTimeout(() => { if (typeof route === "function") route(); }, 150); } }, true);

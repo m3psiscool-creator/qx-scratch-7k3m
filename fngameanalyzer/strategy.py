@@ -1,5 +1,6 @@
 """Strategy analytics: what each placement/elim is worth, what finishers actually did, pace curves,
 safety margins and the rank ladder. Everything is derived from data the collector already stores."""
+import bisect
 import math
 import statistics
 from statistics import NormalDist
@@ -38,7 +39,7 @@ def _rules_of(target, refs=()):
 
 # ---------------------------------------------------------------- reference events
 def _refs(target, n=1):
-    """Finished events of the same class with per-game history, closest first. A finished target is its own reference."""
+    """Finished events of the same gamemode with per-game history, closest first. A finished target is its own reference."""
     out = []
     if target["final"] and len(target.get("sessions") or []) >= 300:
         out.append(target)
@@ -144,8 +145,8 @@ def _band_stats(pg, a, b, with_extra=False):
            "split": {"elim": round(sum(x[4] for x in games) / tot, 4), "win": round(sum(x[5] for x in games) / tot, 4)},
            "place_hist": _hist([x[0] for x in games], PLACE_BUCKETS),
            "elim_hist": _hist([x[1] for x in games], ELIM_BUCKETS),
-           "sample": _stride(pts, 300),
-           "players_pts": [[x[3] for x in g] for g in _stride(rows, 80)]}
+           "sample": _stride([[x[3], x[0]] for x in games], 300),
+           "players_pts": [[[x[3], x[0]] for x in g] for g in _stride(rows, 80)]}
     out["split"]["place"] = round(max(0.0, 1 - out["split"]["elim"] - out["split"]["win"]), 4)
     if with_extra:
         longest = max(len(g) for g in rows)
@@ -173,18 +174,18 @@ def profile(window_id, rank=None):
     rank = max(1, min(asked, 1000))
     refs = _refs(t, 1)
     if not refs:
-        raise ValueError("No finished event of this class has per-game history yet, so there is nothing to compare with.")
+        raise ValueError("No finished event of this gamemode has per-game history yet, so there is nothing to compare with.")
     ref = refs[0]
     rl, _ = _rules_of(t, refs)
     if not rl:
-        raise ValueError("No scoring rules available for this class.")
+        raise ValueError("No scoring rules available for this gamemode.")
     pg = _games(ref, rl, (t.get("meta") or {}).get("lobby"))
     a, b = _focus(rank)
     bands = [s for s in (_band_stats(pg, x, y) for x, y in BANDS) if s]
     focus = _band_stats(pg, a, b, with_extra=True)
     same = ref["window_id"] == t["window_id"]
     note = ("This event's own finishers." if same else
-            f"{service.pretty(ref.get('event_id') or '', ref['window_id'])} ({ref['region']}), the closest finished event of this class, re-scored under this event's rules.")
+            f"{service.pretty(ref.get('event_id') or '', ref['window_id'])} ({ref['region']}), the closest finished event of this gamemode, re-scored under this event's rules.")
     return {"window_id": window_id, "rank": rank, "asked": asked, "clamped": asked != rank, "ref": _ref_info(ref),
             "own": same, "note": note, "bands": bands, "focus": focus, "place_buckets": [b[0] for b in PLACE_BUCKETS],
             "elim_buckets": [b[0] for b in ELIM_BUCKETS]}
@@ -202,10 +203,10 @@ def pace(window_id, rank, target_points=None):
     rank = max(1, min(int(rank), 1000))
     refs = _refs(t, 2)
     if not refs:
-        raise ValueError("No finished event of this class has per-game history yet.")
+        raise ValueError("No finished event of this gamemode has per-game history yet.")
     rl, _ = _rules_of(t, refs)
     if not rl:
-        raise ValueError("No scoring rules available for this class.")
+        raise ValueError("No scoring rules available for this gamemode.")
     a, b = max(1, int(rank * 0.9)), min(1000, int(rank * 1.1) + 1)
     if b - a < 16:
         a, b = max(1, rank - 8), min(1000, rank + 8)
@@ -297,3 +298,50 @@ def ladder(window_id):
             preds.setdefault(str(p["rank"]), {k: p[k] for k in ("low", "likely", "safe")})
     return {"window_id": window_id, "ranks": LADDER_RANKS, "now": cur, "source": th.get("source"),
             "history": hist_out, "events": len(hist), "predicted": preds, "category": cat}
+
+
+# ---------------------------------------------------------------- tempo: how long a game takes at each placement
+def tempo(window_id):
+    """Minutes one game takes (queue + time alive) for each finishing placement, from real player histories.
+
+    A player's stored game time is when they were eliminated. The gap between two consecutive stored times
+    therefore equals the wait for the next lobby plus how long they survived in that next game, and it depends
+    on the placement of the NEXT game (about 18 min for a top-4 finish, about 4 min for dying early), not the previous."""
+    t = _target(window_id)
+    refs = _refs(t, 2)
+    if not refs:
+        raise ValueError("No finished event of this gamemode has per-game timing yet.")
+    meta = t.get("meta") or {}
+    lobbies = [model.observed_lobby(r) or 0 for r in refs]
+    lobby = int(meta.get("lobby") or lobbies[0] or 0)
+    if not lobby:
+        raise ValueError("Lobby size unknown.")
+    samples = []   # (placement as a share of the lobby, minutes)
+    for ref, rl in zip(refs, lobbies):
+        if not rl:
+            continue
+        for sess in ref["sessions"]:
+            gs = sorted((g for g in sess if g and len(g) > 3 and g[3]), key=lambda g: g[3])
+            for a, b in zip(gs, gs[1:]):
+                d = (b[3] - a[3]) / 60
+                if 1 <= d <= 45:           # longer gaps are breaks, not games
+                    samples.append((b[0] / rl, d))
+    if len(samples) < 500:
+        raise ValueError("Not enough per-game timing near this gamemode yet.")
+    samples.sort()
+    qs = [x[0] for x in samples]
+    out = []
+    for p in range(1, lobby + 1):
+        q, w = p / lobby, 0.03
+        while True:
+            lo, hi = bisect.bisect_left(qs, q - w), bisect.bisect_right(qs, q + w)
+            if hi - lo >= 40 or w >= 0.3:
+                break
+            w += 0.02
+        vals = [samples[i][1] for i in range(lo, hi)] or [samples[-1][1]]
+        out.append(round(statistics.median(vals), 1))
+    # survival can only get shorter as you place worse: remove noise in the curve
+    for i in range(len(out) - 2, -1, -1):
+        out[i] = max(out[i], out[i + 1])
+    return {"window_id": window_id, "lobby": lobby, "by_place": out, "samples": len(samples),
+            "overall": round(statistics.median(d for _, d in samples), 1), "refs": [_ref_info(r) for r in refs]}

@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS windows(
  window_id TEXT PRIMARY KEY, event_id TEXT, family TEXT, region TEXT,
  begin_ts DOUBLE PRECISION, end_ts DOUBLE PRECISION, entrants INTEGER,
  points TEXT, games TEXT, sessions TEXT, players TEXT, meta TEXT, final INTEGER DEFAULT 0,
- category TEXT, prow TEXT);
+ category TEXT, prow TEXT, timed TEXT);
 CREATE TABLE IF NOT EXISTS snapshots(
  id SERIAL PRIMARY KEY, window_id TEXT, ts DOUBLE PRECISION,
  entrants INTEGER, points TEXT, games TEXT, top TEXT);
@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS names(account_id TEXT PRIMARY KEY, name TEXT);
 ALTERS = ["ALTER TABLE windows ADD COLUMN IF NOT EXISTS deep TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS category TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS prow TEXT",
+          "ALTER TABLE windows ADD COLUMN IF NOT EXISTS timed TEXT",
           "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS deep TEXT"]
 _ready = False
 _lock = threading.Lock()
@@ -120,14 +121,50 @@ def _player_rows(lb):
     return rows
 
 
+def timed_from(sessions, rule_list, begin):
+    """Per player a flat list [seconds since window start, points of that game, ...]: the only part of
+    the game history the live simulation needs, about a third of the size of the raw sessions."""
+    from . import rules
+    out = []
+    for sess in sessions:
+        row = []
+        for g in sess:
+            if len(g) > 3 and g[3]:
+                row += [int(g[3] - begin), rules.game_points(rule_list, rules.session_stats(g))]
+        out.append(row)
+    return out
+
+
 def save_final(window_id, lb):
     with db() as c:
-        c.execute("UPDATE windows SET entrants=%s,points=%s,games=%s,sessions=%s,players=%s,deep=%s,prow=%s,final=1"
+        r = c.execute("SELECT begin_ts, meta FROM windows WHERE window_id=%s", (window_id,)).fetchone()
+        rule_list = (_j(r[1], {}) if r else {}).get("rules") or []
+        timed = timed_from(lb.get("sessions", []), rule_list, r[0]) if r else []
+        c.execute("UPDATE windows SET entrants=%s,points=%s,games=%s,sessions=%s,players=%s,deep=%s,prow=%s,timed=%s,final=1"
                   " WHERE window_id=%s",
                   (lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]),
                    json.dumps(lb.get("sessions", [])), json.dumps(lb.get("players", [])),
-                   json.dumps(lb.get("deep", {})), json.dumps(_player_rows(lb)), window_id))
+                   json.dumps(lb.get("deep", {})), json.dumps(_player_rows(lb)), json.dumps(timed, separators=(",", ":")),
+                   window_id))
     _after_final(window_id)
+
+
+def timed_missing(limit=1):
+    with db() as c:
+        return [r[0] for r in c.execute("SELECT window_id FROM windows WHERE final=1 AND "
+                                        "(timed IS NULL OR timed='') ORDER BY end_ts DESC LIMIT %s", (limit,)).fetchall()]
+
+
+def fill_timed(window_id):
+    """One-off: compute the compact timed points for a window saved before that column existed."""
+    with db() as c:
+        r = c.execute("SELECT begin_ts, meta, sessions FROM windows WHERE window_id=%s", (window_id,)).fetchone()
+        if not r:
+            return
+        timed = timed_from(_j(r[2], []), (_j(r[1], {})).get("rules") or [], r[0])
+        c.execute("UPDATE windows SET timed=%s WHERE window_id=%s",
+                  (json.dumps(timed, separators=(",", ":")), window_id))
+    _HEAVY.pop(window_id, None)
 
 
 def _series_point(lb):
@@ -180,6 +217,23 @@ def deep_missing(limit=1):
     return [{"window_id": r[0], "event_id": r[1]} for r in rows]
 
 
+def live_windows(now, after):
+    """Unfinished windows that have started and are not yet past end + `after` (tiny query)."""
+    with db() as c:
+        rows = c.execute(f"SELECT window_id,event_id,family,region,begin_ts,end_ts,entrants,final,{SLIM} FROM windows "
+                         "WHERE final=0 AND begin_ts<=%s AND end_ts>=%s", (now, now - after)).fetchall()
+    return [_row(r, False) for r in rows]
+
+
+def ended_unfinished(now, after, limit=8):
+    """Unfinished windows that ended more than `after` seconds ago, newest first (backfill queue)."""
+    with db() as c:
+        rows = c.execute(f"SELECT window_id,event_id,family,region,begin_ts,end_ts,entrants,final,{SLIM} FROM windows "
+                         "WHERE final=0 AND end_ts<%s AND NOT EXISTS (SELECT 1 FROM kv WHERE kv.k = 'empty:' || windows.window_id) "
+                         "ORDER BY end_ts DESC LIMIT %s", (now - after, limit)).fetchall()
+    return [_row(r, False) for r in rows]
+
+
 _WL = {"t": 0, "rows": None}
 LIST_TTL = 600
 # the event list without the heavy parts of meta (scoring rules and reward tiers)
@@ -209,17 +263,17 @@ _LIGHT = {}          # category ("" = all) -> (time, finished windows without se
 _HEAVY = {}          # window_id -> {"sessions", "players"} of the most recent finished windows
 _GW = {}             # window_id -> finished window (immutable once final)
 LIGHT_TTL = 3600
-HEAVY_RECENT = 14    # the model only replays the newest events of a class game by game
+HEAVY_RECENT = 10    # the model only replays the newest events of a class game by game
 _PR = {"t": 0, "rows": None}
 
 
-def _light_rows(category):
-    key = category or ""
+def _light_rows(category, limit=None):
+    key = (category or "", limit)
     hit = _LIGHT.get(key)
     if hit and time.time() - hit[0] < LIGHT_TTL:
         return hit[1]
     q = f"SELECT {COLS},points,games,deep FROM windows WHERE final=1" + (" AND category=%s" if category else "") + \
-        " ORDER BY end_ts DESC"
+        " ORDER BY end_ts DESC" + (f" LIMIT {int(limit)}" if limit else "")
     with db() as c:
         rows = [_row_light(r) for r in c.execute(q, (category,) if category else ()).fetchall()]
     _LIGHT[key] = (time.time(), rows)
@@ -227,15 +281,36 @@ def _light_rows(category):
 
 
 def _heavy(ids):
+    """The compact timed points of these windows (a third of the raw sessions)."""
     need = [i for i in ids if i not in _HEAVY]
+    if need:
+        with db() as c:
+            for wid, timed in c.execute("SELECT window_id,timed FROM windows WHERE window_id = ANY(%s)",
+                                        (need,)).fetchall():
+                _HEAVY[wid] = {"timed": _j(timed, None)}
+        while len(_HEAVY) > 40:
+            _HEAVY.pop(next(iter(_HEAVY)))
+    return {i: _HEAVY.get(i) for i in ids}
+
+
+_SESS = {}
+
+
+def attach_sessions(ws):
+    """Load the raw per-game history (placements, eliminations) for these windows. Only needed when a
+    class has no same-format history and old games must be re-scored under new rules."""
+    need = [w["window_id"] for w in ws if w["window_id"] not in _SESS and not w.get("sessions")]
     if need:
         with db() as c:
             for wid, sess, pl in c.execute("SELECT window_id,sessions,players FROM windows WHERE window_id = ANY(%s)",
                                            (need,)).fetchall():
-                _HEAVY[wid] = {"sessions": _j(sess, []), "players": _j(pl, [])}
-        while len(_HEAVY) > 40:
-            _HEAVY.pop(next(iter(_HEAVY)))
-    return {i: _HEAVY.get(i) for i in ids}
+                _SESS[wid] = {"sessions": _j(sess, []), "players": _j(pl, [])}
+        while len(_SESS) > 12:
+            _SESS.pop(next(iter(_SESS)))
+    for w in ws:
+        if w["window_id"] in _SESS:
+            w.update(_SESS[w["window_id"]])
+    return ws
 
 
 def _after_final(window_id):
@@ -243,29 +318,33 @@ def _after_final(window_id):
     for w in _WL["rows"] or []:
         if w["window_id"] == window_id:
             w["final"] = 1
+    _PR["rows"] = None
+    if not _LIGHT:
+        return
     with db() as c:
         r = c.execute(f"SELECT {COLS},points,games,deep,category FROM windows WHERE window_id=%s", (window_id,)).fetchone()
     if not r:
         return
     light, cat = _row_light(r), r[12]
     for key, (ts, rows) in list(_LIGHT.items()):
-        if key in ("", cat):
+        if key[0] in ("", cat):
             rows = [w for w in rows if w["window_id"] != window_id] + [light]
-            _LIGHT[key] = (ts, sorted(rows, key=lambda w: -w["end"]))
+            rows = sorted(rows, key=lambda w: -w["end"])
+            _LIGHT[key] = (ts, rows[:key[1]] if key[1] else rows)
     _GW.pop(window_id, None)
-    _PR["rows"] = None
 
 
 def windows(final=None, category=None, light=False):
     """Finished windows (final=True): slim rows for all of them, plus sessions/players for only the
     newest HEAVY_RECENT. Cached, and updated in place when a window finishes."""
     if final is True:
-        rows = _light_rows(category)
         if light:
-            return rows
+            return _light_rows(category)
+        rows = _light_rows(category, 30 if category else 60)
         heavy = _heavy([w["window_id"] for w in rows[:HEAVY_RECENT]])
-        return [({**w, **heavy[w["window_id"]]} if i < HEAVY_RECENT and heavy.get(w["window_id"])
-                 else {**w, "sessions": [], "players": []}) for i, w in enumerate(rows)]
+        return [({**w, **heavy[w["window_id"]], "sessions": [], "players": []}
+                 if i < HEAVY_RECENT and heavy.get(w["window_id"]) and heavy[w["window_id"]].get("timed") is not None
+                 else {**w, "sessions": [], "players": [], "timed": None}) for i, w in enumerate(rows)]
     where = [] if final is None else [f"final={int(final)}"]
     if category:
         where.append("category=%s")
@@ -427,3 +506,16 @@ def egress_flush():
 
 def egress_month():
     return kv_get("egress:" + time.strftime("%Y-%m")) or 0
+
+
+def recent_top_accounts(windows=20, per=120):
+    """Accounts of the best finishers of the newest events (for name lookups), read slice-by-slice in SQL."""
+    with db() as c:
+        rows = c.execute("SELECT jsonb_path_query_array(prow::jsonb, %s)::text FROM windows "
+                         "WHERE final=1 AND prow IS NOT NULL ORDER BY end_ts DESC LIMIT %s",
+                         (f"$[0 to {int(per)}]", windows)).fetchall()
+    return [x[0] for r in rows for x in json.loads(r[0])]
+
+
+def egress_bytes():
+    return _EG["bytes"]

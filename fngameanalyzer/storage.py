@@ -231,3 +231,32 @@ def egress_month():
 if (_os.environ.get("FNGA_DB_URL") or _os.environ.get("NEON2_POSTGRES_URL")
         or _os.environ.get("POSTGRES_URL") or _os.environ.get("DATABASE_URL")):
     from .storage_pg import *  # noqa: F401,F403,E402
+
+
+def live_windows(now, after):
+    return [w for w in window_list() if not w["final"] and w["begin"] <= now and w["end"] >= now - after]
+
+
+def ended_unfinished(now, after, limit=8):
+    out = [w for w in window_list() if not w["final"] and w["end"] < now - after]
+    return sorted(out, key=lambda w: -w["end"])[:limit]
+
+
+def attach_sessions(ws):
+    return ws
+
+
+def timed_missing(limit=1):
+    return []
+
+
+def fill_timed(window_id):
+    pass
+
+
+def recent_top_accounts(windows=20, per=120):
+    return []
+
+
+def egress_bytes():
+    return 0

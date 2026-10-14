@@ -287,7 +287,7 @@ def bubble(target, snap, finished, goal, players=None, approx=False):
     cap = (target.get("meta") or {}).get("match_cap")
     P, g = np.asarray(snap["points"], float), np.asarray(snap["games"], int)
     m_eff, used = (None, 0)
-    if players and len(players) == len(P):
+    if False and players and len(players) == len(P):   # off: back-test gain was negligible and it needs raw sessions
         hist = history_ratios(target, finished)
         if hist:
             m_eff, used = skill_rates(P, g, players, hist)

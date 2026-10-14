@@ -126,6 +126,10 @@ _timed_cache = {}
 
 def _timed_games(w):
     """Per player: list of (end time, points) per game, scored with the window's own rules."""
+    if w["window_id"] not in _timed_cache and w.get("timed") is not None:
+        b = w["begin"]    # stored compactly as [seconds since the window started, points, ...]
+        _timed_cache[w["window_id"]] = [[(b + row[i], row[i + 1]) for i in range(0, len(row), 2)]
+                                        for row in w["timed"]]
     if w["window_id"] not in _timed_cache:
         rl = (w.get("meta") or {}).get("rules") or []
         _timed_cache[w["window_id"]] = [
@@ -144,16 +148,22 @@ def shape_pool(target, finished, limit=12):
     meta = target.get("meta") or {}
     dur = target["end"] - target["begin"]
     pool = [w for w in finished
-            if w["window_id"] != target["window_id"] and len(w.get("sessions") or []) >= 300
+            if w["window_id"] != target["window_id"] and _has_timed(w)
             and (w.get("meta") or {}).get("match_cap") == meta.get("match_cap")
-            and abs((w["end"] - w["begin"]) - dur) <= 0.25 * dur
-            and any(len(g) > 3 and g[3] for g in w["sessions"][0][:1])]
+            and abs((w["end"] - w["begin"]) - dur) <= 0.25 * dur]
     pool = [w for w in pool if _timing_ok(w)]
     cat = classify.of(target)
     same = [w for w in pool if classify.of(w) == cat]
     if approx() and len(same) < 3:   # explicitly allowed: nearest classes by game type, then any
         same = [w for w in pool if w["meta"].get("game_type") == meta.get("game_type")] or pool
     return sorted(same, key=lambda w: w["end"], reverse=True)[:limit]
+
+
+def _has_timed(w):
+    """The window carries game-by-game timing (compact timed points, or raw sessions with end times)."""
+    if w.get("timed") is not None:
+        return len(w["timed"]) >= 300 and any(row for row in w["timed"][:20])
+    return len(w.get("sessions") or []) >= 300 and any(len(g) > 3 and g[3] for g in w["sessions"][0][:1])
 
 
 def _timing_ok(w):
@@ -287,9 +297,11 @@ def calibration(target, finished, rank):
     tests = [w for w in finished
              if classify.of(w) == classify.of(target)
              and w["meta"].get("stage") == meta.get("stage")
-             and w["meta"].get("rules") and len(w["sessions"]) >= 900
-             and len(w["sessions"]) >= rank]
+             and w["meta"].get("rules") and len(w["points"]) >= 900
+             and len(w["points"]) >= rank]
     tests = sorted(tests, key=lambda w: w["end"], reverse=True)[:6]
+    from . import storage
+    tests = storage.attach_sessions(tests)
     deltas = []
     for t in tests:
         others = [w for w in finished if w["window_id"] != t["window_id"]]
@@ -313,10 +325,9 @@ def rescored_prior(target, finished, rank, entrants=None, calibrate=True):
     if not rule_list or not cap:
         return None
     cands = [w for w in finished
-             if w["sessions"] and len(w["sessions"]) >= MIN_PLAYERS
-             and classify.of(w) == classify.of(target)]
+             if len(w.get("points") or []) >= MIN_PLAYERS and classify.of(w) == classify.of(target)]
     if not cands and approx():   # explicitly allowed: other classes with the same team size
-        cands = [w for w in finished if w["sessions"] and len(w["sessions"]) >= MIN_PLAYERS
+        cands = [w for w in finished if len(w.get("points") or []) >= MIN_PLAYERS
                  and (w.get("meta") or {}).get("mode") == meta.get("mode")]
     # Prefer the same game type (Reload/BR) and the same stage (open first round vs later round),
     # then widen. Placements are rescaled to the target lobby size, so widening is safe.
@@ -324,6 +335,8 @@ def rescored_prior(target, finished, rank, entrants=None, calibrate=True):
     same_stage = [w for w in same_type if w["meta"].get("stage") == meta.get("stage")]
     pool = next((c for c in (same_stage, same_type, cands) if c), [])
     pool = sorted(pool, key=lambda w: w["end"], reverse=True)[:RESCORE_WINDOWS]
+    from . import storage
+    pool = [w for w in storage.attach_sessions(pool) if len(w.get("sessions") or []) >= MIN_PLAYERS]
     if not pool:
         return None
     if not entrants:

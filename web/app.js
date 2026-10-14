@@ -38,9 +38,9 @@ async function home() {
   const d = await j("/api/home" + (REGION ? "?region=" + REGION : ""));
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
   const live = d.live.map(w => {
-    const rows = Object.keys(w.now).map(r => {
+    const rows = Object.keys(w.now).map(Number).sort((a, b) => a - b).map(r => {
       const p = w.preds[r];
-      return [`Top ${r}`, nf(w.now[r]), p ? `<b>${nf(p.likely)}</b> <small>${nf(p.low)}–${nf(p.safe)}</small>` : "<small>calculating…</small>"];
+      return [(w.goal && w.goal.rank === r) ? `<b>★ Top ${r}</b> <small>goal</small>` : `Top ${r}`, nf(w.now[r]), p ? `<b>${nf(p.likely)}</b> <small>${nf(p.low)}–${nf(p.safe)}</small>` : "<small>calculating…</small>"];
     });
     return `<div class="card"><div class="row" style="align-items:center"><div style="flex:3"><h2>${link(w.window_id, w.name)}</h2>
       <span class="pill">${esc(w.region)}</span> <span class="pill">${esc(w.category)}</span> <span class="pill">${TYPE[w.family]}</span> ${pill(w.status)}</div>
@@ -81,7 +81,7 @@ async function tournament(id) {
   TW = w; TPAGE = 0; TQ = "";
   const adv = (w.advance || []).map(a => `Top ${a[0]} advance (${esc(a[1])})`).join(" · ");
   const first = (w.advance && w.advance[0]) ? w.advance[0][0] : 100;
-  TTOP = TTOP || first;
+  TTOP = w.goal ? w.goal.rank : first;
   const presets = [1, 10, 35, 50, 100, 250, 500, 1000, 2000, 3000, 5000, 7500, 10000];
   app.innerHTML = `
   <div class="card"><div class="row" style="align-items:center"><div style="flex:3"><h1 style="margin:0">${esc(w.name)}</h1>
@@ -96,6 +96,7 @@ async function tournament(id) {
     <p class="small">${esc(w.scoring || "")}</p><p class="small">${adv}</p></div>
   ${rewardsCard(w)}
   <div class="card"><h2>Rank calculator</h2>
+    ${w.goal ? `<p style="margin:0 0 8px"><span class="pill live">MAIN GOAL</span> <b>Top ${w.goal.rank.toLocaleString()}</b> <small>${esc(w.goal.label)}</small> <button class="sec chip" id="goalbtn">Show it</button></p>` : ""}
     <div class="row"><div><label>Top X (1 – 10,000)</label><input id="x" type="number" min="1" max="10000" value="${TTOP}"></div>
     <div><label>Entrants (optional)</label><input id="e" type="number" min="1" placeholder="auto"></div>
     <div style="flex:0"><button id="go">Predict</button></div></div>
@@ -106,6 +107,7 @@ async function tournament(id) {
   <div class="grid g2"><div class="card"><h2>Thresholds</h2><div id="th"></div></div>
   <div class="card"><h2>Leaderboard</h2><div class="row"><div><input id="q" placeholder="Search player name"></div><div style="flex:0"><button class="sec" id="qb">Search</button></div></div><div id="bd"></div></div></div>`;
   $("#go").onclick = () => predict();
+  if (w.goal) $("#goalbtn").onclick = () => { $("#x").value = w.goal.rank; predict() };
   document.querySelectorAll("[data-r]").forEach(b => b.onclick = () => { $("#x").value = b.dataset.r; predict() });
   $("#qb").onclick = () => { TQ = $("#q").value.trim(); TPAGE = 0; boardLoad() };
   $("#q").onkeydown = e => { if (e.key === "Enter") $("#qb").click() };

@@ -53,7 +53,8 @@ def home(region=""):
         out.append({**w, "progress": min(1, max(0, (now - w["begin"]) / (w["end"] - w["begin"]))),
                     "age_s": round(now - snap["ts"]) if snap else None,
                     "entrants": snap["entrants"] if snap else None, "top": top,
-                    "now": {r: snap["points"][r - 1] for r in PRED_RANKS if snap and r <= len(snap["points"])},
+                    "now": {r: snap["points"][r - 1] for r in sorted(set(PRED_RANKS) | ({w["goal"]["rank"]} if w.get("goal") else set()))
+                            if snap and r <= len(snap["points"])},
                     "preds": {str(r): {k: p[k] for k in ("low", "likely", "safe")} for r, p in preds.items()}})
     up = [w for w in infos if w["status"] == "upcoming"]
     up.sort(key=lambda w: w["begin"])

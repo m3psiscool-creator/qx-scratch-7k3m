@@ -99,7 +99,9 @@ def store_predictions(budget):
     for w in storage.window_list():
         if w["final"] or not (w["begin"] + 600 <= now <= w["end"] + config.POST_END_GRACE):
             continue
-        ranks = sorted(set(insights.PRED_RANKS) | {r for r, _ in (w["meta"].get("advance") or [])})
+        goal = service.goal_of(w["meta"])
+        ranks = sorted(set(insights.PRED_RANKS) | {r for r, _ in (w["meta"].get("advance") or [])}
+                       | ({goal["rank"]} if goal and goal["rank"] <= 1000 else set()))
         for r in ranks:
             if time.time() - t0 > budget:
                 break

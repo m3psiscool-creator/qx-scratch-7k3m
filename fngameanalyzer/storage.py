@@ -200,8 +200,6 @@ def counts():
 
 import os as _os  # noqa: E402
 
-if _os.environ.get("POSTGRES_URL") or _os.environ.get("DATABASE_URL"):
-    from .storage_pg import *  # noqa: F401,F403,E402  (hosted: use Postgres instead)
 
 
 def player_rows():
@@ -227,3 +225,9 @@ def egress_flush():
 
 def egress_month():
     return 0
+
+
+# Must stay last: on the hosted site every function above is replaced by its Postgres version.
+if (_os.environ.get("FNGA_DB_URL") or _os.environ.get("NEON2_POSTGRES_URL")
+        or _os.environ.get("POSTGRES_URL") or _os.environ.get("DATABASE_URL")):
+    from .storage_pg import *  # noqa: F401,F403,E402

@@ -7,7 +7,8 @@ import time
 
 import psycopg
 
-URL = os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL")
+URL = (os.environ.get("FNGA_DB_URL") or os.environ.get("NEON2_POSTGRES_URL")
+       or os.environ.get("POSTGRES_URL") or os.environ.get("DATABASE_URL"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS windows(

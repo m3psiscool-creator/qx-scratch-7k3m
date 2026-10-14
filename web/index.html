@@ -1,38 +1,41 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>FN Game Analyzer</title>
+<meta name="description" content="Predicts the points needed for any rank in Fortnite FNCS, Cash Cup and Skin Cup windows, and turns them into a strategy.">
 <link rel="stylesheet" href="/style.css">
-<header>
-  <div class="bar">
-    <a class="logo" href="#/">FN <b>Game Analyzer</b></a>
-    <div class="gsearch">
-      <input id="gs" type="search" placeholder="Find a tournament… (name, region, class)" autocomplete="off">
-      <div id="gsr" class="gsr" hidden></div>
-    </div>
-    <label class="small rg">My region
-      <select id="rg"><option value="">All</option>
-        <option>NAC</option><option>NAW</option><option>EU</option><option>BR</option><option>ASIA</option><option>ME</option><option>OCE</option></select></label>
-    <span id="clock" class="small"></span>
-  </div>
-  <nav id="nav" class="bar navbar">
-    <a href="#/" data-p="home">Home</a>
-    <a href="#/schedule" data-p="schedule">Schedule</a>
-    <a href="#/archive" data-p="archive">Archive</a>
-    <a href="#/players" data-p="players">Players</a>
-    <a href="#/fncs" data-p="fncs">FNCS</a>
-    <details class="more" id="more"><summary data-p="more">More ▾</summary>
-      <div class="menu">
-        <a href="#/classes" data-p="classes">Classes</a>
-        <a href="#/accuracy" data-p="accuracy">Accuracy</a>
-        <a href="#/status" data-p="status">Status</a>
+<div class="shell">
+  <aside class="side">
+    <a class="logo" href="#/">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--ac)"/><path d="M7 22l6-7 4 4 8-10" fill="none" stroke="var(--ac-tx)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="25" cy="9" r="2.2" fill="var(--ac-tx)"/></svg>
+      <span>FN <b>Game Analyzer</b></span>
+    </a>
+    <nav class="nav" id="nav" aria-label="Main"></nav>
+    <div class="foot">Unofficial. Data from Epic's public tournament endpoints.</div>
+  </aside>
+  <div class="col">
+    <header class="top">
+      <a class="logo" href="#/"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--ac)"/><path d="M7 22l6-7 4 4 8-10" fill="none" stroke="var(--ac-tx)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+      <div class="gsearch">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <input id="gs" type="search" placeholder="Find a tournament…  name, region, class" autocomplete="off" aria-label="Find a tournament">
+        <div id="gsr" class="gsr" hidden></div>
       </div>
-    </details>
-  </nav>
-</header>
-<main id="app"><div class="card">Loading…</div></main>
-<footer>Unofficial. Data from Epic's public tournament endpoints. Predictions are estimates, not guarantees. See the Accuracy page for how well they have done.</footer>
+      <span class="sp"></span>
+      <label class="rgsel"><span>Region</span>
+        <select id="rg" aria-label="My region"><option value="">All</option>
+          <option>NAC</option><option>NAW</option><option>EU</option><option>BR</option><option>ASIA</option><option>ME</option><option>OCE</option></select></label>
+      <span id="clock" class="small"></span>
+      <button class="iconbtn" id="theme" title="Switch theme" aria-label="Switch theme"></button>
+    </header>
+    <main id="app"><div class="card">Loading…</div></main>
+    <footer>Predictions are estimates, not guarantees. The Accuracy page shows how well they have done.</footer>
+  </div>
+</div>
+<nav class="mnav" id="mnav" aria-label="Main"></nav>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="/lib.js"></script>
+<script src="/strategy.js"></script>
 <script src="/app.js"></script>
 </html>

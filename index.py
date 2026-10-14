@@ -6,7 +6,7 @@ import time
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from fngameanalyzer import auth, collector, config, insights, service, storage
+from fngameanalyzer import auth, collector, config, insights, service, storage, strategy
 
 app = FastAPI()
 
@@ -16,7 +16,8 @@ app = FastAPI()
 CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/live": 15, "/api/windows": 60,
              "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
              "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
-             "/api/accuracy": 300, "/api/players": 300, "/api/player": 300}
+             "/api/accuracy": 300, "/api/players": 300, "/api/player": 300,
+             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120}
 
 
 @app.middleware("http")
@@ -59,6 +60,16 @@ def home_page():
 @app.get("/app.js")
 def app_js():
     return _file("app.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/lib.js")
+def lib_js():
+    return _file("lib.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/strategy.js")
+def strategy_js():
+    return _file("strategy.js", "application/javascript; charset=utf-8")
 
 
 @app.get("/style.css")
@@ -131,6 +142,31 @@ def api_window(window: str):
             raise ValueError("Unknown window")
         return {**service.window_info(w), "siblings": service.siblings(window)}
     return _api(f)
+
+
+@app.get("/api/scoring")
+def api_scoring(window: str):
+    return _api(strategy.scoring, window)
+
+
+@app.get("/api/profile")
+def api_profile(window: str, rank: int = 0):
+    return _api(strategy.profile, window, rank or None)
+
+
+@app.get("/api/pace")
+def api_pace(window: str, rank: int, target: float = 0):
+    return _api(strategy.pace, window, rank, target or None)
+
+
+@app.get("/api/safety")
+def api_safety(window: str, rank: int):
+    return _api(strategy.safety, window, rank)
+
+
+@app.get("/api/ladder")
+def api_ladder(window: str):
+    return _api(strategy.ladder, window)
 
 
 @app.get("/api/status")

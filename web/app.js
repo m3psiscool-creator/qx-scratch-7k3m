@@ -1,54 +1,70 @@
 "use strict";
-const $ = (s, r = document) => r.querySelector(s);
+// Pages, navigation and the router. Helpers live in lib.js, the Strategy tab in strategy.js.
 const app = $("#app");
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const nf = x => (x == null || isNaN(x)) ? "-" : Math.round(x).toLocaleString();
-const fmt = t => new Date(t * 1000).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-const fmtDay = t => new Date(t * 1000).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-const hm = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-const ago = s => s == null ? "-" : s < 90 ? s + "s ago" : s < 5400 ? Math.round(s / 60) + " min ago" : Math.round(s / 3600) + " h ago";
-const dur = s => { s = Math.max(0, Math.round(s)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return (d ? d + "d " : "") + (h || d ? h + "h " : "") + m + "m " + (s % 60) + "s" };
 const TYPE = { FNCS: "FNCS", CASHCUP: "Cash cup", SKINCUP: "Skin cup", VICTORYCUP: "Victory cup" };
-const LIVE = ["live", "games finishing", "ended (collecting)"];
 const ACTIVE = ["live", "games finishing"];
 const REGIONS = ["NAC", "NAW", "EU", "BR", "ASIA", "ME", "OCE"];
-let timers = [], charts = [];
-const store = {
-  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } },
-};
+const DOT = { live: "#2ecc71", "games finishing": "#2ecc71", "ended (collecting)": "#f5a623", upcoming: "#f5a623", finished: "#9aa3b4", "not collected yet": "#9aa3b4" };
+let timers = [];
 let REGION = store.get("region", "");
 let FILT = store.get("filt", { q: "", type: "", cls: "", status: "", fav: false });
 let FAVS = new Set(store.get("favs", []));
-const DOT = { live: "#2ecc71", "games finishing": "#2ecc71", "ended (collecting)": "#f5a623", upcoming: "#f5a623", finished: "#9aa3b4", "not collected yet": "#9aa3b4" };
+
+function every(ms, fn) { timers.push(setInterval(fn, ms)); }
+function clearAll() { timers.forEach(clearInterval); timers = []; destroyCharts(); }
+const pill = s => `<span class="pill ${ACTIVE.includes(s) ? "live" : s === "upcoming" ? "up" : ""}">${esc(s)}</span>`;
+const link = (id, text, tab) => `<a href="#/t/${encodeURIComponent(id)}${tab ? "/" + tab : ""}">${esc(text)}</a>`;
+function countdowns() { $$("[data-cd]").forEach(el => { el.textContent = dur(el.dataset.cd - Date.now() / 1000); }); }
+setInterval(() => { countdowns(); const c = $("#clock"); if (c) c.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }); }, 1000);
+
+// ---------------------------------------------------------------- shell: navigation, theme, region
+const NAV = [
+  { g: "", items: [["home", "Home", "home", "#/"]] },
+  { g: "Plan", items: [["strategy", "Strategy", "target", "#/strategy"], ["schedule", "Schedule", "cal", "#/schedule"], ["fncs", "FNCS", "trophy", "#/fncs"]] },
+  { g: "Research", items: [["archive", "Archive", "archive", "#/archive"], ["classes", "Classes", "layers", "#/classes"], ["players", "Players", "user", "#/players"]] },
+  { g: "Site", items: [["accuracy", "Accuracy", "gauge", "#/accuracy"], ["status", "Status", "gear", "#/status"]] },
+];
+const MOBILE = ["home", "strategy", "schedule", "archive"];
+const flat = NAV.flatMap(g => g.items);
+$("#nav").innerHTML = NAV.map(g => (g.g ? `<div class="navgrp">${g.g}</div>` : "") + g.items.map(([k, l, i, h]) => `<a href="${h}" data-p="${k}">${icon(i)}<span>${l}</span></a>`).join("")).join("");
+$("#mnav").innerHTML = MOBILE.map(k => { const [, l, i, h] = flat.find(x => x[0] === k); return `<a href="${h}" data-p="${k}">${icon(i)}<span>${l}</span></a>`; }).join("") + `<a href="javascript:void 0" id="morebtn" data-p="more">${icon("more")}<span>More</span></a>`;
+$("#morebtn").onclick = e => {
+  e.stopPropagation(); const old = $(".more-pop"); if (old) return old.remove();
+  const d = document.createElement("div"); d.className = "more-pop";
+  d.innerHTML = flat.filter(x => !MOBILE.includes(x[0])).map(([k, l, i, h]) => `<a href="${h}">${icon(i)}${l}</a>`).join("");
+  document.body.appendChild(d);
+};
+document.addEventListener("click", e => { const p = $(".more-pop"); if (p) p.remove(); });
+function setNav(page, tab) {
+  const main = { t: tab === "strategy" ? "strategy" : "schedule", player: "players", class: "classes" }[page] || page;
+  $$("#nav a, #mnav a[data-p]").forEach(a => a.classList.toggle("on", a.dataset.p === main || (a.dataset.p === "more" && !MOBILE.includes(main) && main !== "home")));
+}
+// theme: auto (follow the system) -> dark -> light
+let THEME = store.get("theme", "auto");
+function applyTheme() {
+  if (THEME === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", THEME);
+  const dark = THEME === "dark" || (THEME === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  $("#theme").innerHTML = icon(dark ? "moon" : "sun"); $("#theme").title = "Theme: " + THEME + " (click to change)";
+}
+$("#theme").onclick = () => { THEME = { auto: "dark", dark: "light", light: "auto" }[THEME]; store.set("theme", THEME); applyTheme(); route(); };
+applyTheme();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { applyTheme(); if (THEME === "auto") route(); });
 
 const rgSel = $("#rg");
-if (rgSel) { rgSel.value = REGION; rgSel.onchange = () => setRegion(rgSel.value); }
-function setRegion(r) { REGION = r; store.set("region", r); if (rgSel) rgSel.value = r; route(); }
+rgSel.value = REGION; rgSel.onchange = () => setRegion(rgSel.value);
+function setRegion(r) { REGION = r; store.set("region", r); rgSel.value = r; route(); }
 
-async function j(url, opt) { const r = await fetch(url, opt); return r.json(); }
-const pill = s => `<span class="pill ${ACTIVE.includes(s) ? "live" : s === "upcoming" ? "up" : "fin"}">${esc(s)}</span>`;
-const link = (id, text, tab) => `<a href="#/t/${encodeURIComponent(id)}${tab ? "/" + tab : ""}">${esc(text)}</a>`;
-function every(ms, fn) { timers.push(setInterval(fn, ms)); }
-function clearAll() { timers.forEach(clearInterval); timers = []; charts.forEach(c => c.destroy()); charts = []; }
-function table(head, rows, cls = []) {
-  return `<div class="scroll"><table><tr>${head.map((h, i) => `<th class="${cls[i] || ""}">${h}</th>`).join("")}</tr>` +
-    rows.map(r => `<tr>${r.map((c, i) => `<td class="${cls[i] || ""}">${c}</td>`).join("")}</tr>`).join("") + "</table></div>";
-}
-function countdowns() { document.querySelectorAll("[data-cd]").forEach(el => { el.textContent = dur(el.dataset.cd - Date.now() / 1000) }); }
-setInterval(() => { countdowns(); $("#clock").textContent = new Date().toLocaleTimeString() }, 1000);
-
-// ------------------------------------------------------------------ favourites (an event is starred in every region)
+// ---------------------------------------------------------------- favourites (an event is starred in every region)
 const evKey = id => id.replace(/_(NAC|NAW|EU|BR|ASIA|ME|OCE)$/, "");
 const isFav = id => FAVS.has(evKey(id));
 const star = id => `<a href="javascript:void 0" class="star ${isFav(id) ? "on" : ""}" data-fav="${esc(evKey(id))}" title="Favourite this event in every region">${isFav(id) ? "★" : "☆"}</a>`;
 document.addEventListener("click", e => {
   const s = e.target.closest("[data-fav]"); if (!s) return;
   const k = s.dataset.fav; FAVS.has(k) ? FAVS.delete(k) : FAVS.add(k); store.set("favs", [...FAVS]);
-  document.querySelectorAll("[data-fav]").forEach(el => { if (el.dataset.fav === k) { const on = FAVS.has(k); el.classList.toggle("on", on); el.textContent = on ? "★" : "☆"; } });
+  $$("[data-fav]").forEach(el => { if (el.dataset.fav === k) { const on = FAVS.has(k); el.classList.toggle("on", on); el.textContent = on ? "★" : "☆"; } });
 });
 
-// ------------------------------------------------------------------ one search box for every tournament
+// ---------------------------------------------------------------- one search box for every tournament
 let ALLW = null, ALLW_AT = 0;
 async function allWindows() {
   if (!ALLW || Date.now() - ALLW_AT > 300000) { const d = await j("/api/windows"); if (Array.isArray(d)) { ALLW = d; ALLW_AT = Date.now(); } }
@@ -69,23 +85,21 @@ async function gsRender() {
   gsr.innerHTML = l.length ? l.map(w => `<a href="#/t/${encodeURIComponent(w.window_id)}">${isFav(w.window_id) ? "★ " : ""}<b>${esc(w.name)}</b> <small>${w.region} · ${esc(w.category)} · ${TYPE[w.family]} · ${w.status === "upcoming" ? "starts " + fmt(w.begin) : w.status === "finished" ? "finished " + fmt(w.end) : esc(w.status)}</small></a>`).join("") : '<a class="mut">No tournament matches.</a>';
   gsr.hidden = false;
 }
-if (gs) {
-  let t; gs.addEventListener("input", () => { clearTimeout(t); t = setTimeout(gsRender, 120); });
-  gs.addEventListener("focus", gsRender);
-  gs.addEventListener("keydown", e => {
-    const items = [...gsr.querySelectorAll("a[href]")];
-    if (e.key === "ArrowDown") { gsSel = Math.min(items.length - 1, gsSel + 1); }
-    else if (e.key === "ArrowUp") { gsSel = Math.max(0, gsSel - 1); }
-    else if (e.key === "Enter") { (items[Math.max(0, gsSel)] || {}).click?.(); return; }
-    else if (e.key === "Escape") { gsr.hidden = true; return; }
-    else return;
-    items.forEach((a, i) => a.classList.toggle("sel", i === gsSel)); e.preventDefault();
-  });
-  document.addEventListener("click", e => { if (!e.target.closest(".gsearch")) gsr.hidden = true; });
-  gsr.addEventListener("click", () => { gsr.hidden = true; gs.value = ""; });
-}
+let gst; gs.addEventListener("input", () => { clearTimeout(gst); gst = setTimeout(gsRender, 120); });
+gs.addEventListener("focus", gsRender);
+gs.addEventListener("keydown", e => {
+  const items = $$("a[href]", gsr);
+  if (e.key === "ArrowDown") gsSel = Math.min(items.length - 1, gsSel + 1);
+  else if (e.key === "ArrowUp") gsSel = Math.max(0, gsSel - 1);
+  else if (e.key === "Enter") { (items[Math.max(0, gsSel)] || {}).click?.(); return; }
+  else if (e.key === "Escape") { gsr.hidden = true; return; }
+  else return;
+  items.forEach((a, i) => a.classList.toggle("sel", i === gsSel)); e.preventDefault();
+});
+document.addEventListener("click", e => { if (!e.target.closest(".gsearch")) gsr.hidden = true; });
+gsr.addEventListener("click", () => { gsr.hidden = true; gs.value = ""; });
 
-// ------------------------------------------------------------------ the shared filter bar (Schedule, Archive)
+// ---------------------------------------------------------------- shared filter bar (Schedule, Archive)
 function filterBar(rows, opts) {
   const cats = [...new Set(rows.map(w => w.category))].sort();
   return `<div class="card"><div class="filters">
@@ -95,49 +109,83 @@ function filterBar(rows, opts) {
     <div><label>Class</label><select id="fc"><option value="">All</option>${cats.map(c => `<option ${c === FILT.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
     ${opts.status ? `<div><label>Status</label><select id="fs"><option value="">All</option><option value="live" ${FILT.status === "live" ? "selected" : ""}>Live now</option><option value="upcoming" ${FILT.status === "upcoming" ? "selected" : ""}>Upcoming</option></select></div>` : ""}
     <label class="chk"><input id="ff" type="checkbox" ${FILT.fav ? "checked" : ""}> ★ Favourites</label>
-    ${opts.csv ? '<div style="flex:0"><button class="sec" id="csv">CSV</button></div>' : ""}</div></div>`;
+    ${opts.csv ? '<div style="flex:0"><button class="sec" id="csv">Export CSV</button></div>' : ""}</div></div>`;
 }
 function bindFilters(redraw) {
   const read = () => { FILT = { q: $("#fq").value, type: $("#ft").value, cls: $("#fc").value, status: $("#fs") ? $("#fs").value : "", fav: $("#ff").checked }; store.set("filt", FILT); };
   ["fq", "ft", "fc", "fs", "ff"].forEach(id => { const el = $("#" + id); if (el) el[id === "fq" ? "oninput" : "onchange"] = () => { read(); redraw(); }; });
-  $("#fr").onchange = () => { REGION = $("#fr").value; store.set("region", REGION); if (rgSel) rgSel.value = REGION; redraw(); };
+  $("#fr").onchange = () => { REGION = $("#fr").value; store.set("region", REGION); rgSel.value = REGION; redraw(); };
 }
 const applyFilters = rows => rows.filter(w => (!REGION || w.region === REGION) && (!FILT.type || w.family === FILT.type) && (!FILT.cls || w.category === FILT.cls) &&
   (!FILT.fav || isFav(w.window_id)) && (!FILT.q || matches(w, FILT.q)) && (!FILT.status || (FILT.status === "live" ? ACTIVE.includes(w.status) : w.status === FILT.status)));
 
-// ------------------------------------------------------------------ Home
-async function home() {
-  const d = await j("/api/home" + (REGION ? "?region=" + REGION : ""));
-  if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
-  const live = d.live.map(w => {
-    const rows = Object.keys(w.now).map(Number).sort((a, b) => a - b).map(r => {
-      const p = w.preds[r];
-      return [(w.goal && w.goal.rank === r) ? `<b>★ Top ${r}</b> <small>goal</small>` : `Top ${r}`, nf(w.now[r]), p ? `<b>${nf(p.likely)}</b> <small>${nf(p.low)}–${nf(p.safe)}</small>` : "<small>calculating…</small>"];
-    });
-    return `<div class="card"><div class="row" style="align-items:center"><div style="flex:3"><h2>${star(w.window_id)}${link(w.window_id, w.name)}</h2>
-      <span class="pill">${esc(w.region)}</span> <span class="pill">${esc(w.category)}</span> <span class="pill">${TYPE[w.family]}</span> ${pill(w.status)}</div>
-      <div class="small" style="flex:2;text-align:right">board updated ${ago(w.age_s)}<br>${w.entrants ? nf(w.entrants) + " entrants" : ""}</div></div>
-      <div class="prog"><i style="width:${Math.min(100, w.progress * 100)}%"></i></div>
-      <div class="small">${Math.round(w.progress * 100)}% of the window · ends ${fmt(w.end)}</div>
-      <div class="grid g2"><div><h3>Leaders</h3>${table(["#", "Player", "Pts", "Games"], w.top.map(t => [t.rank, esc(t.players.join(" + ")), nf(t.points), t.games]), ["", "", "n", "n"])}</div>
-      <div><h3>Cutoffs: now → predicted final</h3>${table(["Rank", "Now", "Predicted"], rows, ["", "n", "n"])}</div></div>
-      <p style="margin:6px 0 0"><a href="#/t/${encodeURIComponent(w.window_id)}/predictions">Open predictions ›</a></p></div>`;
-  }).join("") || `<div class="card mut">Nothing is live right now${REGION ? " in " + REGION : ""}.</div>`;
-  const favs = FAVS.size ? (await allWindows()).filter(w => isFav(w.window_id) && (!REGION || w.region === REGION) && w.status !== "not collected yet").sort((a, b) => rank(a) - rank(b)).slice(0, 8) : [];
-  const favCard = FAVS.size ? `<div class="card"><h2>★ Your favourites</h2>${favs.length ? table(["", "When", "Region", "Tournament"], favs.map(w => [pill(w.status), w.status === "upcoming" ? fmt(w.begin) : fmt(w.end), w.region, star(w.window_id) + link(w.window_id, w.name)])) : '<p class="mut">Nothing scheduled right now for your favourites.</p>'}</div>` : "";
-  const up = table(["Starts", "In", "Region", "Tournament"], d.upcoming.map(w => [fmt(w.begin), `<span data-cd="${w.begin}"></span>`, w.region, star(w.window_id) + link(w.window_id, w.name)]));
-  const fin = table(["Ended", "Region", "Tournament"], d.finished.map(w => [fmt(w.end), w.region, star(w.window_id) + link(w.window_id, w.name)]));
-  app.innerHTML = `<h1>Live now${REGION ? " · " + REGION : ""}</h1>${live}${favCard}<div class="grid g2"><div class="card"><h2>Starting soon</h2>${up}</div><div class="card"><h2>Just finished</h2>${fin}</div></div>`;
-  countdowns();
+const head = (title, sub, right) => `<div class="ph"><div><h1>${title}</h1>${sub ? `<p>${sub}</p>` : ""}</div>${right || ""}</div>`;
+const goalText = w => w.goal ? `Top ${nf(w.goal.rank)} · ${w.goal.kind}` : "no single goal";
+// a clickable event card: opens the strategy page of that event
+function evCard(w) {
+  const when = w.status === "upcoming" ? `starts in <span class="cd" data-cd="${w.begin}"></span>` : w.status === "finished" ? "finished " + fmt(w.end) : esc(w.status);
+  return `<a class="ev" href="#/t/${encodeURIComponent(w.window_id)}/strategy"><div class="meta"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(w.category)}</span><span class="pill">${TYPE[w.family]}</span>${ACTIVE.includes(w.status) ? pill(w.status) : ""}</div>
+    <div class="t">${isFav(w.window_id) ? "★ " : ""}${esc(w.name)}</div><div class="small">${when} · ${w.match_cap || "?"} games</div>
+    <div class="go"><span>${esc(goalText(w))}</span><b>Plan strategy ›</b></div></a>`;
 }
 
-// ------------------------------------------------------------------ Tournament (4 tabs)
+// ---------------------------------------------------------------- Home
+async function home() {
+  destroyCharts();
+  const d = await j("/api/home" + (REGION ? "?region=" + REGION : ""));
+  if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
+  const live = d.live.map((w, i) => {
+    const goal = w.goal ? w.goal.rank : null, pr = goal ? w.preds[goal] : null, ranks = Object.keys(w.now).map(Number).sort((a, b) => a - b);
+    const rows = ranks.map(r => { const p = w.preds[r]; return [(goal === r) ? `<b>★ Top ${r}</b>` : `Top ${r}`, nf(w.now[r]), p ? `<b>${nf(p.likely)}</b> <small>${nf(p.low)}–${nf(p.safe)}</small>` : "<small>calculating…</small>"]; });
+    return `<div class="card"><div class="hd"><h2>${star(w.window_id)}${link(w.window_id, w.name)}</h2><span class="sub">board updated ${ago(w.age_s)}${w.entrants ? " · " + nf(w.entrants) + " entrants" : ""}</span></div>
+      <div class="meta chips"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(w.category)}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div>
+      <div class="prog"><i style="width:${Math.min(100, w.progress * 100)}%"></i></div>
+      <div class="small">${Math.round(w.progress * 100)}% of the window · ends ${fmt(w.end)}</div>
+      ${goal ? `<div class="kpis" style="margin-top:14px">${kpi("Goal: top " + nf(goal), nf(w.now[goal]), "points right now")}${kpi("Predicted final", pr ? nf(pr.likely) : "…", pr ? "range " + nf(pr.low) + " – " + nf(pr.safe) : "calculating", "hero")}<div class="kpi"><div class="l">Goal cutoff, recent trend</div><div class="cv spark"><canvas id="sp${i}"></canvas></div></div></div>` : ""}
+      <div class="grid g2"><div><h3>Leaders</h3>${table(["#", "Player", "Pts", "G"], w.top.map(t => [t.rank, esc(t.players.join(" + ")), nf(t.points), t.games]), ["", "", "n", "n"])}</div>
+      <div><h3>Cutoffs: now → predicted final</h3>${table(["Rank", "Now", "Predicted"], rows, ["", "n", "n"])}</div></div>
+      <div class="chips" style="margin-top:12px"><a class="btn" href="#/t/${encodeURIComponent(w.window_id)}/strategy">Strategy ›</a><a class="btn sec" href="#/t/${encodeURIComponent(w.window_id)}/predictions">Predictions</a></div></div>`;
+  }).join("");
+  const favs = FAVS.size ? (await allWindows()).filter(w => isFav(w.window_id) && (!REGION || w.region === REGION) && w.status !== "not collected yet").sort((a, b) => rank(a) - rank(b)).slice(0, 6) : [];
+  const nextUp = (d.upcoming || []).slice(0, 6);
+  app.innerHTML = head("Live now" + (REGION ? " · " + REGION : ""), "Live leaderboards, predicted final cutoffs, and a strategy page for every event.") +
+    (live || `<div class="card flat"><b>Nothing is live right now${REGION ? " in " + REGION : ""}.</b> <span class="mut">Plan ahead with the next events below.</span></div>`) +
+    (favs.length ? `<h3 style="margin-top:22px">★ Your favourites</h3><div class="evgrid" style="margin-bottom:20px">${favs.map(evCard).join("")}</div>` : "") +
+    `<h3 style="margin-top:22px">Starting soon</h3><div class="evgrid">${nextUp.map(evCard).join("") || '<div class="card flat mut">No upcoming events.</div>'}</div>
+    <div class="card" style="margin-top:20px"><div class="hd"><h2>Just finished</h2></div>${table(["Ended", "Region", "Tournament", ""], d.finished.map(w => [fmt(w.end), w.region, star(w.window_id) + link(w.window_id, w.name), link(w.window_id, "Results ›", "predictions")]))}</div>`;
+  countdowns();
+  d.live.forEach(async (w, i) => {
+    const goal = w.goal ? w.goal.rank : null; if (!goal || !$("#sp" + i)) return;
+    const s = await j("/api/series?window=" + encodeURIComponent(w.window_id)), rows = (s.points || []);
+    if (rows.length < 2 || !$("#sp" + i)) return;
+    const keys = Object.keys(rows[rows.length - 1].p).map(Number), key = String(keys.reduce((b, k) => Math.abs(k - goal) < Math.abs(b - goal) ? k : b, keys[0]));
+    const pts = rows.filter(r => r.p[key] != null).map(r => ({ x: r.ts, y: r.p[key] }));
+    mk($("#sp" + i), { type: "line", data: { datasets: [{ data: pts, borderColor: SER(0), backgroundColor: withAlpha(SER(0), .15), fill: true, borderWidth: 2 }] }, options: { interaction: { mode: null }, scales: { x: { type: "linear", display: false }, y: { display: false } }, plugins: { legend: { display: false }, tooltip: { enabled: false } } } });
+  });
+}
+
+// ---------------------------------------------------------------- Strategy hub
+async function strategyHub() {
+  const all = (await allWindows()).filter(w => ["live", "games finishing", "upcoming"].includes(w.status) && (!REGION || w.region === REGION));
+  const sorted = all.sort((a, b) => rank(a) - rank(b));
+  const groups = [["Live now", sorted.filter(w => ACTIVE.includes(w.status))], ["Your favourites", sorted.filter(w => w.status === "upcoming" && isFav(w.window_id))], ["Coming up", sorted.filter(w => w.status === "upcoming" && !isFav(w.window_id)).slice(0, 36)]];
+  app.innerHTML = head("Strategy", "Pick an event to get a plan: the points to aim for, what the scoring rewards, what finishers did, pace, safety margin and whether to keep playing.") +
+    `<div class="card"><div class="hd"><h2>How it works</h2></div><div class="grid g3">
+      <div class="recipe"><b>1 · Target</b><div>Choose a rank. We predict the cutoff and how sure each level of certainty is.</div></div>
+      <div class="recipe"><b>2 · Playstyle</b><div>See how many elims and which placements add up to that cutoff, and what finishers did.</div></div>
+      <div class="recipe"><b>3 · Track</b><div>Enter your points as you play. Pace and keep-playing odds update at once.</div></div></div></div>` +
+    groups.filter(g => g[1].length).map(([t, ws]) => `<h3 style="margin-top:22px">${t}</h3><div class="evgrid">${ws.map(evCard).join("")}</div>`).join("") +
+    (all.length ? "" : `<div class="card empty">No live or upcoming events${REGION ? " in " + REGION : ""}. <a href="#/archive">Browse the archive</a> to study past events.</div>`);
+  countdowns(); every(1000, countdowns);
+}
+
+// ---------------------------------------------------------------- Tournament
 function regionChips(w, tab) {
   const sib = w.siblings || [];
   if (sib.length < 2) return "";
-  return `<div class="tabs" style="margin-top:10px"><span class="small" style="align-self:center">Same event in:</span>` + sib.map(o => {
+  return `<div class="chips" style="margin-top:12px"><small>Same event in</small>` + sib.map(o => {
     const on = o.window_id === w.window_id;
-    return `<a class="pill" href="#/t/${encodeURIComponent(o.window_id)}/${tab}" style="${on ? "background:var(--ac);color:#fff" : ""};padding:5px 12px;font-size:.85rem" title="${esc(o.status)} · ${fmt(o.begin)}"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${DOT[o.status] || "#999"};margin-right:6px"></span>${esc(o.region)}</a>`;
+    return `<a class="pill ${on ? "ac" : ""}" href="#/t/${encodeURIComponent(o.window_id)}/${tab}" title="${esc(o.status)} · ${fmt(o.begin)}"><span style="width:7px;height:7px;border-radius:50%;background:${DOT[o.status] || "#999"}"></span>${esc(o.region)}</a>`;
   }).join("") + `</div>`;
 }
 function payoutText(w) {
@@ -148,7 +196,7 @@ function rewardsCard(w) {
   const t = w.rewards || [];
   const where = x => x.kind === "rank" ? (x.from === x.upto ? `Place ${x.upto}` : `Places ${x.from}–${x.upto}`) : x.kind === "value" ? `${nf(x.upto)}+ points` : x.kind === "percentile" ? `Top ${x.upto}%` : esc(x.kind);
   const body = t.length ? table(["Who", "Reward"], t.map(x => [where(x), x.items.map(i => `${i.type === "cash" ? "<b>" + esc(i.label) + "</b>" : esc(i.label)}`).join("<br>")])) : '<p class="mut">Epic lists no rewards for this window.</p>';
-  return `<div class="card"><h2>Rewards</h2><p>Paid out: ${payoutText(w)}</p>${w.cash_total ? `<p>Total cash prize pool: <b>$${nf(w.cash_total)}</b></p>` : ""}${body}<p class="small">Item names come from Epic's internal IDs, so they can look run together. Payout time is Epic's published rule (${esc(w.payout_rule || "n/a")}).</p></div>`;
+  return `<div class="card"><div class="hd"><h2>Rewards</h2></div><p>Paid out: ${payoutText(w)}</p>${w.cash_total ? `<p>Total cash prize pool: <b>$${nf(w.cash_total)}</b></p>` : ""}${body}<p class="small">Item names come from Epic's internal IDs, so they can look run together. Payout time is Epic's published rule (${esc(w.payout_rule || "n/a")}).</p></div>`;
 }
 function rewardSummary(w) {
   const f = w.reward_flags || {}, parts = [];
@@ -158,7 +206,7 @@ function rewardSummary(w) {
   return parts.join(" · ") || "<span class=mut>-</span>";
 }
 let TW = null, TPAGE = 0, TQ = "", TTOP = null;
-const TABS = [["overview", "Overview"], ["predictions", "Predictions"], ["leaderboard", "Leaderboard"], ["rewards", "Rewards"]];
+const TABS = [["overview", "Overview"], ["strategy", "Strategy"], ["predictions", "Predictions"], ["leaderboard", "Leaderboard"], ["rewards", "Rewards"]];
 async function tournament(id, tab) {
   tab = TABS.some(t => t[0] === tab) ? tab : "overview";
   const w = await j("/api/window?window=" + encodeURIComponent(id));
@@ -166,35 +214,33 @@ async function tournament(id, tab) {
   TW = w; TPAGE = 0; TQ = "";
   TTOP = w.goal ? w.goal.rank : (w.advance && w.advance[0] ? w.advance[0][0] : 100);
   app.innerHTML = `
-  <div class="card"><div class="row" style="align-items:center"><div style="flex:3"><h1 style="margin:0">${star(w.window_id)}${esc(w.name)}</h1>
-    <span class="pill">${esc(w.region)}</span> <span class="pill">${esc(w.category)}</span> <span class="pill">${TYPE[w.family]}</span> ${pill(w.status)}</div>
-    <div class="small" style="flex:2;text-align:right" id="cd"></div></div>${regionChips(w, tab)}</div>
-  <div class="tabbar">${TABS.map(([k, label]) => `<a href="#/t/${encodeURIComponent(w.window_id)}/${k}" class="${k === tab ? "on" : ""}">${label}</a>`).join("")}</div>
+  <div class="crumb"><a href="#/schedule">Schedule</a> › ${esc(w.region)}</div>
+  <div class="card"><div class="hd" style="margin:0"><div><h1 style="font-size:1.45rem">${star(w.window_id)}${esc(w.name)}</h1>
+    <div class="chips" style="margin-top:8px"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(w.category)}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div></div>
+    <div class="small" style="text-align:right" id="cd"></div></div>${regionChips(w, tab)}</div>
+  <div class="tabbar">${TABS.map(([k, label]) => `<a href="#/t/${encodeURIComponent(w.window_id)}/${k}" class="${k === tab ? "on" : ""}">${label}${k === "strategy" ? '<span class="new">NEW</span>' : ""}</a>`).join("")}</div>
   <div id="panel"></div>`;
-  const tick = () => { const t = w.begin - Date.now() / 1000, e = w.end - Date.now() / 1000; $("#cd") && ($("#cd").innerHTML = t > 0 ? `starts in <b>${dur(t)}</b>` : e > 0 ? `ends in <b>${dur(e)}</b>` : ""); };
+  const tick = () => { const t = w.begin - Date.now() / 1000, e = w.end - Date.now() / 1000; $("#cd") && ($("#cd").innerHTML = t > 0 ? `starts in <b class="cd">${dur(t)}</b>` : e > 0 ? `games can start for <b class="cd">${dur(e)}</b>` : ""); };
   tick(); every(1000, tick);
   const open = w.status === "upcoming" || ACTIVE.includes(w.status);
   if (tab === "overview") await tabOverview(w, open);
+  else if (tab === "strategy") await tabStrategy(w, open);
   else if (tab === "predictions") await tabPredictions(w, open);
   else if (tab === "leaderboard") await tabLeaderboard(w, open);
   else $("#panel").innerHTML = rewardsCard(w);
 }
 async function tabOverview(w, open) {
   const adv = (w.advance || []).map(a => `Top ${a[0]}: ${esc(a[1].replace(/^Advance: /, ""))}`).join(" · ");
-  const goal = w.goal;
+  const goal = w.goal, wid = encodeURIComponent(w.window_id);
   $("#panel").innerHTML = `
-  <div class="grid g4">
-    <div class="kpi"><div class="l">Starts</div><div class="v" style="font-size:1rem">${fmt(w.begin)}</div></div>
-    <div class="kpi"><div class="l">Games can start until</div><div class="v" style="font-size:1rem">${fmt(w.end)}</div></div>
-    <div class="kpi"><div class="l">Format</div><div class="v" style="font-size:1rem">${w.match_cap || "?"} games · ${w.lobby ? w.lobby + (w.mode === "solo" ? " players" : " teams") : "lobby ?"}</div></div>
-    <div class="kpi"><div class="l">Rewards paid</div><div class="v" style="font-size:1rem">${w.payout_at ? fmt(w.payout_at) : "n/a"}</div></div></div>
-  ${goal ? `<div class="card"><p style="margin:0 0 6px"><span class="pill live">MAIN GOAL</span> <b>Top ${nf(goal.rank)}</b> <small>${esc(goal.label)}</small></p>
+  <div class="kpis">${kpi("Starts", fmt(w.begin).replace(/,/g, ""))}${kpi("Games can start until", fmt(w.end).replace(/,/g, ""))}${kpi("Format", (w.match_cap || "?") + " games", w.lobby ? w.lobby + (w.mode === "solo" ? " players" : " teams") + " per lobby" : "lobby size unknown")}${kpi("Rewards paid", w.payout_at ? fmt(w.payout_at).replace(/,/g, "") : "n/a")}</div>
+  ${goal ? `<div class="card"><div class="hd"><h2><span class="pill live" style="margin-right:8px">MAIN GOAL</span>Top ${nf(goal.rank)}</h2><span class="sub">${esc(goal.label)}</span></div>
     <div id="ovpred"><p class="mut">Calculating…</p></div>
-    <p style="margin:8px 0 0"><a href="#/t/${encodeURIComponent(w.window_id)}/predictions">Try any other rank, see the bubble and the chart ›</a></p></div>` : `<div class="card"><p>No single goal rank for this event. <a href="#/t/${encodeURIComponent(w.window_id)}/predictions">Open the calculator ›</a></p></div>`}
-  <div class="grid g2"><div class="card"><h2>Rewards at a glance</h2><p style="margin:0">${rewardSummary(w)}</p><p class="small">${adv}</p>
-    <p class="small">Paid: ${payoutText(w)}</p><a href="#/t/${encodeURIComponent(w.window_id)}/rewards">All rewards ›</a></div>
-  <div class="card"><h2>Points needed</h2><div id="th"></div></div></div>
-  <div class="card"><details><summary class="small">Scoring rules</summary><p class="small">${esc(w.scoring || "Not published.")}</p><p class="small">Games started before the end still count, and can finish up to about 22 minutes later (the "last queue").</p></details></div>`;
+    <div class="chips" style="margin-top:12px"><a class="btn" href="#/t/${wid}/strategy">Plan my strategy ›</a><a class="btn sec" href="#/t/${wid}/predictions">Try any other rank</a></div></div>` : `<div class="card"><p>No single goal rank for this event. <a href="#/t/${wid}/strategy">Open the strategy tools ›</a></p></div>`}
+  <div class="grid g2"><div class="card"><div class="hd"><h2>Rewards at a glance</h2></div><p style="margin:0">${rewardSummary(w)}</p><p class="small">${adv}</p>
+    <p class="small">Paid: ${payoutText(w)}</p><a href="#/t/${wid}/rewards">All rewards ›</a></div>
+  <div class="card"><div class="hd"><h2>Points needed</h2></div><div id="th"></div></div></div>
+  <div class="card"><details><summary class="small" style="cursor:pointer">Scoring rules</summary><p class="small">${esc(w.scoring || "Not published.")}</p><p class="small">Games started before the end still count, and can finish up to about 22 minutes later (the "last queue").</p></details></div>`;
   if (goal) await predictInto($("#ovpred"), goal.rank, { compact: true });
   await thresholds(true);
   if (open) every(120000, () => { if (goal) predictInto($("#ovpred"), goal.rank, { compact: true, quiet: true }); thresholds(true); });
@@ -202,28 +248,27 @@ async function tabOverview(w, open) {
 async function tabPredictions(w, open) {
   const presets = [1, 10, 35, 50, 100, 250, 500, 1000, 2000, 3000, 5000, 7500, 10000];
   $("#panel").innerHTML = `
-  <div class="card"><h2>Rank calculator</h2>
-    ${w.goal ? `<p style="margin:0 0 8px"><span class="pill live">MAIN GOAL</span> <b>Top ${w.goal.rank.toLocaleString()}</b> <small>${esc(w.goal.label)}</small> <button class="sec chip" id="goalbtn">Show it</button></p>` : ""}
+  <div class="card"><div class="hd"><h2>Rank calculator</h2><span class="sub">${w.goal ? `main goal: top ${nf(w.goal.rank)}` : ""}</span></div>
     <div class="row"><div><label>Top X (1 – 10,000)</label><input id="x" type="number" min="1" max="10000" value="${TTOP}"></div>
     <div><label>Entrants (optional)</label><input id="e" type="number" min="1" placeholder="auto"></div>
     <div style="flex:0"><button id="go">Predict</button></div></div>
-    <label style="margin-top:8px;display:flex;gap:8px;align-items:center"><input id="ap" type="checkbox" style="width:auto;margin:0"> Allow similar classes when this class has no history (approximate)</label>
-    <div class="tabs">${presets.map(p => `<button class="sec chip" data-r="${p}">Top ${p.toLocaleString()}</button>`).join("")}</div>
+    <label style="margin-top:10px;display:flex;gap:8px;align-items:center;font-weight:500"><input id="ap" type="checkbox"> Allow similar classes when this class has no history (approximate)</label>
+    <div class="chips" style="margin-top:10px">${presets.map(p => `<button class="chip" data-r="${p}">Top ${p.toLocaleString()}</button>`).join("")}</div>
     <div id="pred"></div></div>
-  <div class="card" id="bubblecard" style="display:none"><h2>Bubble: who is in the race</h2><div id="bubble"></div></div>
-  <div class="card"><h2>Points needed over time</h2><div id="chartbox"><canvas id="ch" height="110"></canvas></div><div id="chnote" class="small"></div></div>
-  <div class="card"><h2>Thresholds</h2><div id="th"></div></div>`;
+  <div class="card" id="bubblecard" style="display:none"><div class="hd"><h2>Bubble: who is in the race</h2></div><div id="bubble"></div></div>
+  ${chartCard("ch", "Points needed by rank", "now, previous events of this class, and the predicted final", { cls: "tall", table: false, ctrl: "" })}
+  ${chartCard("ch2", "Points needed over time", "how the cutoffs have grown during this window", { cls: "tall", table: false })}
+  <div class="card"><div class="hd"><h2>Thresholds</h2></div><div id="th"></div></div>`;
   $("#go").onclick = () => { predict(); bubble(); };
-  if (w.goal) $("#goalbtn").onclick = () => { $("#x").value = w.goal.rank; predict(); bubble(); };
-  document.querySelectorAll("[data-r]").forEach(b => b.onclick = () => { $("#x").value = b.dataset.r; predict(); bubble(); });
-  await Promise.all([predict(), chart(), thresholds(false), bubble()]);
+  $$("[data-r]").forEach(b => b.onclick = () => { $("#x").value = b.dataset.r; predict(); bubble(); });
+  await Promise.all([predict(), ladderChart(), timeChart(), thresholds(false), bubble()]);
   if (open) {
-    every(120000, () => { predict(true); bubble(); });   // the heavy panels: answers move slowly
-    every(60000, () => { chart(); thresholds(false); });
+    every(120000, () => { predict(true); bubble(); ladderChart(); });
+    every(60000, () => { timeChart(); thresholds(false); });
   }
 }
 async function tabLeaderboard(w, open) {
-  $("#panel").innerHTML = `<div class="card"><h2>Leaderboard</h2><div class="row"><div><input id="q" placeholder="Search player name"></div><div style="flex:0"><button class="sec" id="qb">Search</button></div></div><div id="bd"></div></div>`;
+  $("#panel").innerHTML = `<div class="card"><div class="hd"><h2>Leaderboard</h2></div><div class="row"><div><input id="q" placeholder="Search player name"></div><div style="flex:0"><button class="sec" id="qb">Search</button></div></div><div id="bd" style="margin-top:10px"></div></div>`;
   $("#qb").onclick = () => { TQ = $("#q").value.trim(); TPAGE = 0; boardLoad(); };
   $("#q").onkeydown = e => { if (e.key === "Enter") $("#qb").click(); };
   await boardLoad();
@@ -237,11 +282,11 @@ async function predictInto(el, rank, o = {}) {
   const d = await j("/api/predict?" + q);
   if (d.error) return el.innerHTML = `<p class="${o.compact ? "mut" : "err"}">${esc(d.error)}</p>`;
   if (o.compact) {
-    el.innerHTML = `<div class="result-big"><div class="kpi"><div class="l">Low</div><div class="v">${nf(d.low)}</div></div><div class="kpi"><div class="l">Most likely</div><div class="v ok">${nf(d.likely)}</div></div><div class="kpi"><div class="l">Safe (~95%)</div><div class="v">${nf(d.safe)}</div></div></div>` + miniEvidence(d);
+    el.innerHTML = `<div class="kpis">${kpi("Low (~5%)", nf(d.low))}${kpi("Most likely", nf(d.likely), "", "hero")}${kpi("Safe (~95%)", nf(d.safe))}</div>` + miniEvidence(d);
     return;
   }
-  const row = (l, r, b) => `<tr><td>${l}</td><td class="n">${nf(r.low)}</td><td class="n ${b ? "big" : ""}">${nf(r.likely)}</td><td class="n">${nf(r.safe)}</td></tr>`;
-  el.innerHTML = `<div class="scroll"><table><tr><th>Rank</th><th class="n">Low</th><th class="n">Most likely</th><th class="n">Safe (~95%)</th></tr>${row("Top " + nf(d.rank), d, 1)}${(d.cutoffs || []).map(c => row("Top " + c.rank + " <small>(advance)</small>", c)).join("")}</table></div>${evidence(d)}`;
+  const row = (l, r, b) => `<tr><td>${l}</td><td class="n">${nf(r.low)}</td><td class="n" style="${b ? "font-weight:800;font-size:1.15rem" : ""}">${nf(r.likely)}</td><td class="n">${nf(r.safe)}</td></tr>`;
+  el.innerHTML = `<div class="scroll" style="margin-top:12px"><table><tr><th>Rank</th><th class="n">Low</th><th class="n">Most likely</th><th class="n">Safe (~95%)</th></tr>${row("Top " + nf(d.rank), d, 1)}${(d.cutoffs || []).map(c => row("Top " + c.rank + " <small>(advance)</small>", c)).join("")}</table></div>${evidence(d)}`;
 }
 function miniEvidence(d) {
   const lv = d.live, p = d.parts || {};
@@ -254,13 +299,13 @@ async function predict(quiet) {
   await predictInto($("#pred"), x, { entrants: $("#e").value, approx: $("#ap").checked, quiet });
 }
 function evidence(d) {
-  const p = d.parts || {}, lv = d.live, sn = d.snapshots, pc = x => Math.round(x * 100) + "%";
+  const p = d.parts || {}, lv = d.live, sn = d.snapshots, pcx = x => Math.round(x * 100) + "%";
   if (d.current != null && !lv) return `<p class="small">Now ${nf(d.current)} pts at this rank · ${esc(d.method || "")}</p>`;
-  let h = lv ? `<div><span class="pill live">LIVE LEADERBOARD USED</span> rank ${d.rank} has <b>${nf(lv.current)}</b> pts now → projects to <b>${nf(p.live?.likely)}</b> <small>(${pc(p.live?.weight ?? 0)} of the answer · ${(lv.progress * 100).toFixed(0)}% through · ${lv.n || "?"} past events · ~${(lv.games_left_median || 0).toFixed(1)} games still to come for contenders)</small></div>`
-    : `<div><span class="pill up">NO LIVE BOARD</span> <small>prediction from history only</small></div>`;
-  h += p.history ? `<div>History says <b>${nf(p.history.likely)}</b> <small>(${pc(p.history.weight)} of the answer · ${d.prior?.n || "?"} comparable events)</small></div>` : "";
+  let h = lv ? `<div style="margin-top:10px"><span class="pill live">LIVE LEADERBOARD USED</span> rank ${d.rank} has <b>${nf(lv.current)}</b> pts now → projects to <b>${nf(p.live?.likely)}</b> <small>(${pcx(p.live?.weight ?? 0)} of the answer · ${(lv.progress * 100).toFixed(0)}% through · ${lv.n || "?"} past events · ~${(lv.games_left_median || 0).toFixed(1)} games still to come for contenders)</small></div>`
+    : `<div style="margin-top:10px"><span class="pill up">NO LIVE BOARD</span> <small>prediction from history only</small></div>`;
+  h += p.history ? `<div>History says <b>${nf(p.history.likely)}</b> <small>(${pcx(p.history.weight)} of the answer · ${d.prior?.n || "?"} comparable events)</small></div>` : "";
   if (sn) h += `<div class="small">Board refreshed ${ago(d.snapshot_age_s)} · ${sn.count} snapshots saved · ${d.board_players} players on the board</div>`;
-  if (lv?.analogs?.length) h += `<details><summary class="small">Same moment in ${lv.analogs.length} past events of this class</summary>${table(["Region", "Event", "Then", "Final", "×"], lv.analogs.map(a => [a.region, esc(a.window.replace(/^S\d+_/, "")), nf(a.now), nf(a.final), a.now ? (a.final / a.now).toFixed(2) : "-"]), ["", "", "n", "n", "n"])}</details>`;
+  if (lv?.analogs?.length) h += `<details style="margin-top:8px"><summary class="small" style="cursor:pointer">Same moment in ${lv.analogs.length} past events of this class</summary>${table(["Region", "Event", "Then", "Final", "×"], lv.analogs.map(a => [a.region, esc(a.window.replace(/^S\d+_/, "")), nf(a.now), nf(a.final), a.now ? (a.final / a.now).toFixed(2) : "-"]), ["", "", "n", "n", "n"])}</details>`;
   return h + `<div class="small">${esc(d.method || "")}</div>`;
 }
 async function bubble() {
@@ -270,23 +315,40 @@ async function bubble() {
   const b = await j(`/api/bubble?window=${encodeURIComponent(TW.window_id)}&rank=${goal}&approx=${$("#ap").checked ? 1 : 0}`);
   card.style.display = "block";
   if (b.error) { $("#bubble").innerHTML = `<p class="mut">${esc(b.error)}</p>`; return; }
-  const col = p => p >= 0.8 ? "var(--ok)" : p >= 0.4 ? "var(--warn)" : "var(--mut)";
-  $("#bubble").innerHTML = `<p>Chance to finish in the <b>top ${nf(b.goal)}</b>. Cutoff now <b>${nf(b.cutoff_now)}</b> pts, expected to end near <b>${nf(b.cutoff_final)}</b>.
-   <small>${b.safe} players are already virtually safe. Updated ${ago(b.age_s)}.</small></p>` +
+  const col = p => p >= 0.8 ? "var(--good)" : p >= 0.4 ? "var(--warn)" : "var(--mut)";
+  $("#bubble").innerHTML = `<div class="kpis">${kpi("Goal", "Top " + nf(b.goal))}${kpi("Cutoff now", nf(b.cutoff_now))}${kpi("Expected to end near", nf(b.cutoff_final), "", "hero")}${kpi("Virtually safe", b.safe, "players")}</div>` +
     table(["#", "Player", "Pts", "G", "Expected final", "Chance"], b.rows.map(r => [r.rank, r.players.length ? r.players.map(p => `<a href="#/player/${p.id}">${esc(p.name)}</a>`).join(" + ") : '<span class="mut">-</span>', nf(r.points), r.games, nf(r.final),
       `<b style="color:${col(r.prob)}">${Math.round(r.prob * 100)}%</b>`]), ["", "", "n", "n", "n", "n"]) +
-    `<p class="small">Each player is simulated game by game with comparable players from past events of this class. The percentages are checked against how this class of event actually ended before, but a few past events is not much data. In past events the current leaders finished inside the cutoff more often than these percentages say (for example 68% did when this said 51%), so the top of the table is conservative.</p>`;
+    `<p class="small">Updated ${ago(b.age_s)}. Each player is simulated game by game with comparable players from past events of this class. In past events the current leaders finished inside the cutoff more often than these percentages say, so the top of the table is conservative.</p>`;
 }
-async function chart() {
-  const s = await j("/api/series?window=" + encodeURIComponent(TW.window_id));
-  const rows = s.points || [];
-  if (rows.length < 2) { $("#chnote") && ($("#chnote").textContent = "The chart appears once the live collector has recorded a few snapshots."); return; }
+// points needed by rank: now vs history vs predicted final
+async function ladderChart() {
+  const d = await j("/api/ladder?window=" + encodeURIComponent(TW.window_id)), cv = $("#ch");
+  if (!cv) return; if (d.error) { cv.parentElement.innerHTML = `<p class="mut">${esc(d.error)}</p>`; return; }
+  const rk = d.ranks.filter(r => d.history[r] || d.now[r]);
+  const H = k => rk.filter(r => d.history[r]).map(r => ({ x: r, y: d.history[r][k] }));
+  const nowD = Object.keys(d.now).map(Number).sort((a, b) => a - b).map(r => ({ x: r, y: d.now[r] }));
+  const pr = Object.entries(d.predicted).map(([r, v]) => ({ x: +r, y: v.likely, lo: v.low, hi: v.safe })).sort((a, b) => a.x - b.x);
+  const old = Chart.getChart(cv); if (old) old.destroy();
+  const ds = [
+    { label: "Past events: 25%", data: H("p25"), borderColor: withAlpha(SER(0), .3), borderWidth: 1, pointRadius: 0, fill: false, order: 5 },
+    { label: "Past events: 25–75%", data: H("p75"), borderColor: withAlpha(SER(0), .3), borderWidth: 1, pointRadius: 0, backgroundColor: withAlpha(SER(0), .14), fill: "-1", order: 5 },
+    { label: "Past events: median", data: H("median"), borderColor: SER(0), borderDash: [6, 4], borderWidth: 2, pointRadius: 0, order: 3 },
+    { label: d.source === "live" ? "Now" : d.source === "final" ? "Final" : "Now", data: nowD, borderColor: SER(1), backgroundColor: SER(1), borderWidth: 3, pointRadius: 0, order: 2 },
+  ];
+  if (pr.length) ds.push({ label: "Predicted final", data: pr, showLine: false, borderColor: SER(2), backgroundColor: SER(2), pointStyle: "rectRot", pointRadius: 7, pointHoverRadius: 9, order: 1 });
+  mk(cv, { type: "line", data: { datasets: ds }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "logarithmic", min: 1, max: 10000, title: { text: "Rank (log scale)" }, ticks: { maxRotation: 0, autoSkip: false, callback: v => [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000].includes(v) ? v.toLocaleString() : "" } }, y: { title: { text: "Points" }, beginAtZero: false } }, plugins: { tooltip: { callbacks: { title: c => "Top " + nf(c[0].parsed.x), label: c => c.raw && c.raw.lo != null ? `Predicted final: ${nf(c.raw.y)} (${nf(c.raw.lo)} – ${nf(c.raw.hi)})` : `${c.dataset.label}: ${nf(c.parsed.y)}` } }, legend: { labels: { filter: i => i.text !== "Past events: 25%" } } } } });
+}
+async function timeChart() {
+  const cv = $("#ch2"); if (!cv) return;
+  const s = await j("/api/series?window=" + encodeURIComponent(TW.window_id)), rows = s.points || [];
+  if (rows.length < 2) { cv.parentElement.innerHTML = '<p class="mut">The chart appears once the live collector has recorded a few snapshots.</p>'; return; }
   const ranks = ["1", "10", "35", "100", "500", "1000", "5000", "10000"].filter(r => rows.some(p => p.p[r] != null));
-  const colors = ["#7c5cff", "#5fd0ff", "#2ecc71", "#f5a623", "#ff5d6c", "#c678dd", "#98c379", "#e5c07b"];
-  const data = { labels: rows.map(p => hm(p.ts)), datasets: ranks.map((r, i) => ({ label: "Top " + Number(r).toLocaleString(), data: rows.map(p => p.p[r] ?? null), borderColor: colors[i % 8], backgroundColor: colors[i % 8], pointRadius: 0, borderWidth: 2, tension: .25 })) };
-  charts.forEach(c => c.destroy()); charts = [];
-  charts.push(new Chart($("#ch"), { type: "line", data, options: { responsive: true, interaction: { mode: "index", intersect: false }, scales: { y: { title: { display: true, text: "points" } } }, plugins: { legend: { position: "bottom" } } } }));
-  $("#chnote").textContent = rows.length + " snapshots";
+  const pred = {}; try { const d = await j("/api/ladder?window=" + encodeURIComponent(TW.window_id)); Object.assign(pred, d.predicted || {}); } catch (e) { }
+  const old = Chart.getChart(cv); if (old) old.destroy();
+  const ds = ranks.map((r, i) => ({ label: "Top " + Number(r).toLocaleString(), data: rows.filter(p => p.p[r] != null).map(p => ({ x: p.ts, y: p.p[r] })), borderColor: SER(i), backgroundColor: SER(i), pointRadius: 0, borderWidth: 2 }));
+  ranks.forEach((r, i) => { if (pred[r]) ds.push({ label: "pred:" + r, data: [{ x: TW.end, y: pred[r].likely, lo: pred[r].low, hi: pred[r].safe, r }], showLine: false, borderColor: SER(i), backgroundColor: SER(i), pointStyle: "rectRot", pointRadius: 6, pointHoverRadius: 8 }); });
+  mk(cv, { type: "line", data: { datasets: ds }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "linear", max: Math.max(TW.end, rows[rows.length - 1].ts), ticks: { maxTicksLimit: 8, callback: v => hm(v) }, title: { text: "Time (diamonds = predicted final at the window's end)" } }, y: { title: { text: "Points" } } }, plugins: { legend: { labels: { filter: i => !i.text.startsWith("pred:") } }, tooltip: { callbacks: { title: c => fmt(c[0].parsed.x), label: c => c.raw && c.raw.lo != null ? `Top ${nf(c.raw.r)} predicted final: ${nf(c.raw.y)} (${nf(c.raw.lo)} – ${nf(c.raw.hi)})` : `${c.dataset.label}: ${nf(c.parsed.y)}` } } } } });
 }
 async function thresholds(compact) {
   const t = await j("/api/thresholds?window=" + encodeURIComponent(TW.window_id));
@@ -302,35 +364,54 @@ async function boardLoad() {
   if (b.error || !b.rows) return el.innerHTML = `<p class="mut">${esc(b.error || "No board yet.")}</p>`;
   const pages = Math.max(1, Math.ceil(b.total / b.size));
   el.innerHTML = table(["#", "Player", "Pts", "G"], b.rows.map(r => [r.rank, r.players.length ? r.players.map(p => `<a href="#/player/${p.id}">${esc(p.name)}</a>`).join(" + ") : '<span class="mut">–</span>', nf(r.points), r.games]), ["", "", "n", "n"]) +
-    `<div class="row" style="margin-top:8px;align-items:center"><button class="sec" ${TPAGE <= 0 ? "disabled" : ""} id="pv">‹ Prev</button><span class="small" style="text-align:center">page ${TPAGE + 1} / ${pages} · ${nf(b.total)} rows${b.source === "live" ? " · names shown for the top 60 live" : ""}</span><button class="sec" ${TPAGE + 1 >= pages ? "disabled" : ""} id="nx">Next ›</button></div>`;
+    `<div class="row" style="margin-top:12px;align-items:center"><button class="sec" ${TPAGE <= 0 ? "disabled" : ""} id="pv">‹ Prev</button><span class="small" style="text-align:center">page ${TPAGE + 1} / ${pages} · ${nf(b.total)} rows${b.source === "live" ? " · names shown for the top 60 live" : ""}</span><button class="sec" ${TPAGE + 1 >= pages ? "disabled" : ""} id="nx">Next ›</button></div>`;
   $("#pv").onclick = () => { TPAGE--; boardLoad(); }; $("#nx").onclick = () => { TPAGE++; boardLoad(); };
 }
 
-// ------------------------------------------------------------------ Schedule
+// ---------------------------------------------------------------- Schedule
 async function schedule() {
   const all = (await allWindows()).filter(w => ["upcoming", "live", "games finishing", "ended (collecting)"].includes(w.status));
-  app.innerHTML = `<h1>Schedule</h1>${filterBar(all, { status: true })}<div id="sl"></div>`;
+  app.innerHTML = head("Schedule", "Every live and upcoming window, with the rewards and how many games it runs.") + filterBar(all, { status: true }) + `<div id="sl"></div>`;
   const draw = () => {
     const l = applyFilters(all).sort((a, b) => a.begin - b.begin);
     const days = {}; l.forEach(w => (days[fmtDay(w.begin)] ||= []).push(w));
-    $("#sl").innerHTML = Object.entries(days).map(([d, ws]) => `<div class="card"><h2>${esc(d)}</h2>${table(["Start", "In", "Region", "Class", "Type", "Tournament", "Format", "Rewards", "Paid"], ws.map(w => [hm(w.begin), w.status === "upcoming" ? `<span data-cd="${w.begin}"></span>` : pill(w.status), w.region, esc(w.category), TYPE[w.family], star(w.window_id) + link(w.window_id, w.name), `${w.match_cap || "?"} games`, rewardSummary(w), w.payout_at ? hm(w.payout_at) : "-"]))}</div>`).join("") || '<div class="card mut">Nothing matches these filters.</div>';
+    $("#sl").innerHTML = Object.entries(days).map(([d, ws]) => `<div class="card"><div class="hd"><h2>${esc(d)}</h2><span class="sub">${ws.length} windows</span></div>${table(["Start", "In", "Region", "Class", "Type", "Tournament", "Games", "Rewards", "Paid", ""], ws.map(w => [hm(w.begin), w.status === "upcoming" ? `<span class="cd" data-cd="${w.begin}"></span>` : pill(w.status), w.region, esc(w.category), TYPE[w.family], star(w.window_id) + link(w.window_id, w.name), w.match_cap || "?", rewardSummary(w), w.payout_at ? hm(w.payout_at) : "-", link(w.window_id, "Plan ›", "strategy")]))}</div>`).join("") || '<div class="card empty">Nothing matches these filters.</div>';
     countdowns();
   };
-  bindFilters(draw); draw();
+  bindFilters(draw); draw(); every(1000, countdowns);
 }
 
-// ------------------------------------------------------------------ Archive
+// ---------------------------------------------------------------- Archive
 const ARCH = [1, 10, 35, 100, 500, 1000, 2000, 5000, 10000];
 async function archive() {
   const all = await j("/api/archive");
   if (all.error) return app.innerHTML = `<div class="card err">${esc(all.error)}</div>`;
-  app.innerHTML = `<h1>Archive</h1>${filterBar(all, { csv: true })}<div class="card" id="al"></div>`;
+  let TR = +store.get("archrank", 100);
+  app.innerHTML = head("Archive", "Points needed at every rank in every finished window. Filter, then look at the trend.") + filterBar(all, { csv: true }) +
+    chartCard("ar", "Cutoff trend", "one dot per finished window", { cls: "tall", ctrl: `<label style="margin:0">Rank</label><select id="arr" style="width:auto;margin:0">${ARCH.map(r => `<option value="${r}" ${r === TR ? "selected" : ""}>Top ${r.toLocaleString()}</option>`).join("")}</select>` }) + `<div class="card" id="al"></div>`;
   let cur = [];
   const draw = () => {
     cur = applyFilters(all);
-    $("#al").innerHTML = `<p class="small">${cur.length} events · points needed to finish at each rank</p>` + table(["Ended", "Region", "Class", "Event", ...ARCH.map(r => "#" + r.toLocaleString())], cur.slice(0, 400).map(w => [fmt(w.end), w.region, esc(w.category), star(w.window_id) + link(w.window_id, w.name), ...ARCH.map(r => nf(w.cutoffs[r]))]), ["", "", "", "", ...ARCH.map(() => "n")]);
+    $("#al").innerHTML = `<div class="hd"><h2>Events</h2><span class="sub">${cur.length} events · points needed to finish at each rank</span></div>` + table(["Ended", "Region", "Class", "Event", ...ARCH.map(r => "#" + r.toLocaleString())], cur.slice(0, 400).map(w => [fmt(w.end), w.region, esc(w.category), star(w.window_id) + link(w.window_id, w.name), ...ARCH.map(r => nf(w.cutoffs[r]))]), ["", "", "", "", ...ARCH.map(() => "n")]);
+    trend();
+  };
+  const trend = () => {
+    const old = Chart.getChart($("#ar")); if (old) old.destroy();
+    const rows = cur.filter(w => w.cutoffs[TR] > 0).sort((a, b) => a.end - b.end);
+    if (rows.length < 2) { $("#ar-take").innerHTML = take("warn", "Not enough events match the filters for a trend."); return; }
+    // one class selected: a line per region. Otherwise dots coloured by class (classes score very differently).
+    const byClass = !FILT.cls, key = w => byClass ? w.category : w.region;
+    const counts = {}; rows.forEach(w => counts[key(w)] = (counts[key(w)] || 0) + 1);
+    const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a]), shown = byClass ? names.slice(0, 7) : names;
+    const grp = w => shown.includes(key(w)) ? key(w) : "Other";
+    const keys = byClass && names.length > 7 ? [...shown, "Other"] : shown;
+    mk($("#ar"), { type: "scatter", data: { datasets: keys.map((k, i) => ({ label: k, showLine: !byClass, data: rows.filter(w => grp(w) === k).map(w => ({ x: w.end, y: w.cutoffs[TR], n: w.name, r: w.region, c: w.category })), borderColor: SER(i), backgroundColor: withAlpha(SER(i), byClass ? .8 : 1), borderWidth: 1.4, pointRadius: 4, pointHoverRadius: 7 })) }, options: { interaction: { mode: "nearest", intersect: true }, scales: { x: { type: "linear", ticks: { maxTicksLimit: 8, callback: v => new Date(v * 1000).toLocaleDateString([], { month: "short", day: "numeric" }) }, title: { text: "Date the window ended" } }, y: { title: { text: "Points for top " + TR.toLocaleString() } } }, plugins: { tooltip: { callbacks: { title: c => c[0].raw.n, label: c => `${c.raw.c} · ${c.raw.r} · ${new Date(c.parsed.x * 1000).toLocaleDateString()}: ${nf(c.parsed.y)}` } } } } });
+    const v = rows.map(w => w.cutoffs[TR]).sort((a, b) => a - b), med = v[v.length >> 1];
+    $("#ar-take").innerHTML = take(byClass ? "warn" : "", byClass ? `${rows.length} events across every class: median <b>${nf(med)}</b>, but the range is ${nf(v[0])} – ${nf(v[v.length - 1])} because classes score very differently. Pick a <b>Class</b> above to see one clean trend per region.` : `${rows.length} events: median points for top ${TR.toLocaleString()} <b>${nf(med)}</b>, from ${nf(v[0])} to ${nf(v[v.length - 1])}. Each line is one region.`);
+    $("#ar-tbl").innerHTML = table(["Ended", "Region", "Event", "Points"], rows.slice(-60).reverse().map(w => [fmt(w.end), w.region, esc(w.name), nf(w.cutoffs[TR])]), ["", "", "", "n"]);
   };
   bindFilters(draw);
+  $("#arr").onchange = () => { TR = +$("#arr").value; store.set("archrank", TR); trend(); };
   $("#csv").onclick = () => {
     const lines = [["event", "window_id", "region", "class", "ended", ...ARCH.map(r => "rank_" + r)].join(",")].concat(cur.map(w => [`"${w.name}"`, w.window_id, w.region, w.category, new Date(w.end * 1000).toISOString(), ...ARCH.map(r => w.cutoffs[r] ?? "")].join(",")));
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([lines.join("\n")], { type: "text/csv" })); a.download = "fn-archive.csv"; a.click();
@@ -338,30 +419,37 @@ async function archive() {
   draw();
 }
 
-// ------------------------------------------------------------------ Classes
+// ---------------------------------------------------------------- Classes
 async function classes() {
   const d = await j("/api/classes");
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
-  app.innerHTML = `<h1>Classes</h1><p class="small">Each event class is kept separate. History is only ever compared within the same class.</p><div class="grid g3">` + d.map(c => `<a class="card" href="#/class/${encodeURIComponent(c.category)}" style="color:inherit;text-decoration:none"><h2>${esc(c.category)}</h2><div class="small">${c.events} finished · ${c.upcoming} upcoming</div>${Object.entries(c.median).map(([r, v]) => `<div>Median #${r}: <b>${nf(v)}</b></div>`).join("")}</a>`).join("") + "</div>";
+  app.innerHTML = head("Classes", "Each event class is kept separate. History is only ever compared within the same class.") +
+    `<div class="evgrid">` + d.map(c => `<a class="ev" href="#/class/${encodeURIComponent(c.category)}"><div class="t">${esc(c.category)}</div><div class="small">${c.events} finished · ${c.upcoming} upcoming</div><div class="kpis" style="margin:0;grid-template-columns:repeat(3,1fr)">${Object.entries(c.median).slice(0, 3).map(([r, v]) => `<div class="kpi"><div class="l">Median #${r}</div><div class="v" style="font-size:1.1rem">${nf(v)}</div></div>`).join("")}</div><div class="go"><span></span><b>Open ›</b></div></a>`).join("") + "</div>";
 }
 async function classPage(name) {
   const d = await j("/api/class?name=" + encodeURIComponent(name));
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
   const t = d.table, ranks = Object.keys(t).map(Number).sort((a, b) => a - b);
-  app.innerHTML = `<h1>${esc(name)}</h1><p class="small"><a href="#/classes">‹ all classes</a> · ${d.events.length} finished events</p>
-  <div class="card"><h2>Points needed to reach each rank</h2>${table(["Rank", "Events", "Min", "25%", "Median", "75%", "Max"], ranks.map(r => ["Top " + r.toLocaleString(), t[r].n, nf(t[r].min), nf(t[r].p25), `<b>${nf(t[r].median)}</b>`, nf(t[r].p75), nf(t[r].max)]), ["", "n", "n", "n", "n", "n", "n"])}</div>
-  <div class="card"><h2>Cutoffs across events</h2><canvas id="cc" height="110"></canvas></div>
-  <div class="card"><h2>Events</h2>${table(["Ended", "Region", "Event", "#1", "#100", "#1000"], d.events.slice().reverse().map(e => [fmt(e.end), e.region, link(e.window_id, e.name), nf(e.cutoffs[1]), nf(e.cutoffs[100]), nf(e.cutoffs[1000])]), ["", "", "", "n", "n", "n"])}</div>`;
-  const colors = ["#7c5cff", "#5fd0ff", "#2ecc71", "#f5a623"];
-  charts.push(new Chart($("#cc"), { type: "line", data: { labels: d.events.map(e => e.region + " " + new Date(e.end * 1000).toLocaleDateString([], { month: "short", day: "numeric" })),
-    datasets: [1, 100, 1000, 5000].map((r, i) => ({ label: "#" + r, data: d.events.map(e => e.cutoffs[r] ?? null), borderColor: colors[i], backgroundColor: colors[i], tension: .2, pointRadius: 2 })) }, options: { plugins: { legend: { position: "bottom" } } } }));
+  app.innerHTML = `<div class="crumb"><a href="#/classes">Classes</a> ›</div>` + head(esc(name), `${d.events.length} finished events`) +
+    `<div class="grid g2">${chartCard("cf", "Points needed at each rank", "range across all events of this class", { cls: "tall", table: false })}${chartCard("cc", "Cutoffs across events", "oldest to newest", { cls: "tall", table: false })}</div>
+    <div class="card"><div class="hd"><h2>Points needed to reach each rank</h2></div>${table(["Rank", "Events", "Min", "25%", "Median", "75%", "Max"], ranks.map(r => ["Top " + r.toLocaleString(), t[r].n, nf(t[r].min), nf(t[r].p25), `<b>${nf(t[r].median)}</b>`, nf(t[r].p75), nf(t[r].max)]), ["", "n", "n", "n", "n", "n", "n"])}</div>
+    <div class="card"><div class="hd"><h2>Events</h2></div>${table(["Ended", "Region", "Event", "#1", "#100", "#1000"], d.events.slice().reverse().map(e => [fmt(e.end), e.region, link(e.window_id, e.name), nf(e.cutoffs[1]), nf(e.cutoffs[100]), nf(e.cutoffs[1000])]), ["", "", "", "n", "n", "n"])}</div>`;
+  const P = k => ranks.map(r => ({ x: r, y: t[r][k] }));
+  mk($("#cf"), { type: "line", data: { datasets: [
+    { label: "Min", data: P("min"), borderColor: "transparent", pointRadius: 0, fill: false },
+    { label: "Min – max", data: P("max"), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .12), pointRadius: 0, fill: "-1" },
+    { label: "25%", data: P("p25"), borderColor: "transparent", pointRadius: 0, fill: false },
+    { label: "25 – 75%", data: P("p75"), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .25), pointRadius: 0, fill: "-1" },
+    { label: "Median", data: P("median"), borderColor: SER(0), backgroundColor: SER(0), borderWidth: 3, pointRadius: 3 }] },
+    options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "logarithmic", ticks: { maxRotation: 0, autoSkip: false, callback: v => [1, 10, 35, 100, 500, 1000, 2000, 5000, 10000].includes(v) ? v.toLocaleString() : "" }, title: { text: "Rank (log scale)" } }, y: { title: { text: "Points" } } }, plugins: { legend: { labels: { filter: i => !["Min", "25%"].includes(i.text) } }, tooltip: { callbacks: { title: c => "Top " + nf(c[0].parsed.x), label: c => `${c.dataset.label}: ${nf(c.parsed.y)}` } } } } });
+  mk($("#cc"), { type: "line", data: { labels: d.events.map(e => e.region + " " + new Date(e.end * 1000).toLocaleDateString([], { month: "short", day: "numeric" })),
+    datasets: [1, 100, 1000, 5000].map((r, i) => ({ label: "Top " + r.toLocaleString(), data: d.events.map(e => e.cutoffs[r] ?? null), borderColor: SER(i), backgroundColor: SER(i), pointRadius: 2 })) }, options: { scales: { x: { ticks: { maxTicksLimit: 8 } }, y: { title: { text: "Points" } } } } });
 }
 
-// ------------------------------------------------------------------ Players
+// ---------------------------------------------------------------- Players
 async function players() {
-  app.innerHTML = `<h1>Players</h1><div class="card"><div class="row"><div><label>Search by name</label><input id="pq" placeholder="player name"></div>
-    <div style="flex:0"><button id="pb">Search</button></div></div><div id="pr"></div></div><div class="card"><h2>Strongest players so far</h2>
-    <p class="small">Average finishing position as a share of entrants, over events where they reached the top 1000 (at least 3 events).</p><div id="tp">Loading…</div></div>`;
+  app.innerHTML = head("Players", "Look up anyone who reached the top 1,000 of a collected event.") + `<div class="card"><div class="row"><div><label>Search by name</label><input id="pq" placeholder="player name"></div>
+    <div style="flex:0"><button id="pb">Search</button></div></div><div id="pr" style="margin-top:10px"></div></div><div class="card"><div class="hd"><h2>Strongest players so far</h2><span class="sub">average finishing share of the field, at least 3 events</span></div><div id="tp">${skel(1, 200)}</div></div>`;
   const search = async () => {
     const q = $("#pq").value.trim(); if (!q) return;
     const r = await j("/api/players?q=" + encodeURIComponent(q));
@@ -374,48 +462,58 @@ async function players() {
 async function playerPage(id) {
   const d = await j("/api/player?id=" + encodeURIComponent(id));
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
-  app.innerHTML = `<h1>${esc(d.name)}</h1><p class="small"><a href="#/players">‹ players</a> · ${d.events.length} top-1000 finishes recorded</p>
-  <div class="card"><h2>By class</h2>${table(["Class", "Events", "Best", "Median", "Avg top %", "Pts / game", "Wins", "Elims / game"], d.summary.map(s => [esc(s.category), s.events, "#" + s.best_rank, "#" + s.median_rank, s.avg_top_pct + "%", s.pts_per_game ?? "-", s.wins, s.elims_per_game ?? "-"]), ["", "n", "n", "n", "n", "n", "n", "n"])}</div>
-  <div class="card"><h2>Events</h2>${table(["Date", "Event", "Region", "Class", "Rank", "Points", "Games", "Avg place", "Wins"], d.events.map(e => [fmt(e.end), link(e.window_id, e.name), e.region, esc(e.category), "#" + e.rank, nf(e.points), e.games, e.avg_place ?? "-", e.wins]), ["", "", "", "", "n", "n", "n", "n", "n"])}</div>`;
+  const ev = d.events.slice().reverse();
+  app.innerHTML = `<div class="crumb"><a href="#/players">Players</a> ›</div>` + head(esc(d.name), `${d.events.length} top-1000 finishes recorded`) +
+    `<div class="card"><div class="hd"><h2>By class</h2></div>${table(["Class", "Events", "Best", "Median", "Avg top %", "Pts / game", "Wins", "Elims / game"], d.summary.map(s => [esc(s.category), s.events, "#" + s.best_rank, "#" + s.median_rank, s.avg_top_pct + "%", s.pts_per_game ?? "-", s.wins, s.elims_per_game ?? "-"]), ["", "n", "n", "n", "n", "n", "n", "n"])}</div>
+    <div class="grid g2">${chartCard("pr1", "Finishing rank by event", "higher is better", { table: false })}${chartCard("pr2", "Points per game by event", "", { table: false })}</div>
+    <div class="card"><div class="hd"><h2>Events</h2></div>${table(["Date", "Event", "Region", "Class", "Rank", "Points", "Games", "Avg place", "Wins"], d.events.map(e => [fmt(e.end), link(e.window_id, e.name), e.region, esc(e.category), "#" + e.rank, nf(e.points), e.games, e.avg_place ?? "-", e.wins]), ["", "", "", "", "n", "n", "n", "n", "n"])}</div>`;
+  const lab = ev.map(e => new Date(e.end * 1000).toLocaleDateString([], { month: "short", day: "numeric" }));
+  mk($("#pr1"), { type: "line", data: { labels: lab, datasets: [{ label: "Rank", data: ev.map(e => e.rank), borderColor: SER(0), backgroundColor: SER(0), pointRadius: 3 }] }, options: { scales: { y: { reverse: true, type: "logarithmic", title: { text: "Rank (log, 1 at the top)" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => ev[c[0].dataIndex].name, label: c => "Rank #" + nf(c.parsed.y) } } } } });
+  mk($("#pr2"), { type: "bar", data: { labels: lab, datasets: [{ label: "Points per game", data: ev.map(e => e.games ? +(e.points / e.games).toFixed(1) : null), backgroundColor: SER(0) }] }, options: { plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => ev[c[0].dataIndex].name } } }, scales: { y: { beginAtZero: true } } } });
 }
 
-// ------------------------------------------------------------------ FNCS
+// ---------------------------------------------------------------- FNCS
 async function fncs() {
   const d = await j("/api/fncs");
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
   const rows = REGION ? d.filter(w => w.region === REGION) : d;
   const groups = {}; rows.forEach(w => (groups[w.name.split(" · ")[0]] ||= []).push(w));
-  app.innerHTML = `<h1>FNCS tracker${REGION ? " · " + REGION : ""}</h1><p class="small">Qualifiers → Heats → Last Chance → Final. For each window: the places that advance, the real cutoff once finished, and the predicted cutoff while it runs.</p>` +
-    Object.entries(groups).map(([g, ws]) => `<div class="card"><h2>${esc(g)}</h2>${table(["Start", "Region", "Window", "Status", "Games", "Advancement cutoffs"], ws.map(w => [fmt(w.begin), w.region, link(w.window_id, w.name.split(" · ").slice(1).join(" · ") || w.name), pill(w.status), w.match_cap || "?",
-      w.advance.map(a => `Top ${a.rank}: ${a.actual != null ? `<b>${nf(a.actual)}</b> pts` : a.predicted ? `~<b>${nf(a.predicted.likely)}</b> <small>(${nf(a.predicted.low)}–${nf(a.predicted.safe)})</small>` : "<small>not yet</small>"}`).join("<br>") || "<small>no cutoff</small>"]))}</div>`).join("") || '<div class="card mut">Nothing to show.</div>';
+  app.innerHTML = head("FNCS tracker" + (REGION ? " · " + REGION : ""), "Qualifiers → Heats → Last Chance → Final. For each window: the places that advance, the real cutoff once finished, and the predicted cutoff while it runs.") +
+    Object.entries(groups).map(([g, ws]) => `<div class="card"><div class="hd"><h2>${esc(g)}</h2></div>${table(["Start", "Region", "Window", "Status", "Games", "Advancement cutoffs", ""], ws.map(w => [fmt(w.begin), w.region, link(w.window_id, w.name.split(" · ").slice(1).join(" · ") || w.name), pill(w.status), w.match_cap || "?",
+      w.advance.map(a => `Top ${a.rank}: ${a.actual != null ? `<b>${nf(a.actual)}</b> pts` : a.predicted ? `~<b>${nf(a.predicted.likely)}</b> <small>(${nf(a.predicted.low)}–${nf(a.predicted.safe)})</small>` : "<small>not yet</small>"}`).join("<br>") || "<small>no cutoff</small>", link(w.window_id, "Plan ›", "strategy")]))}</div>`).join("") || '<div class="card empty">Nothing to show.</div>';
 }
 
-// ------------------------------------------------------------------ Accuracy
+// ---------------------------------------------------------------- Accuracy
 async function accuracy() {
   const d = await j("/api/accuracy");
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
-  app.innerHTML = `<h1>Prediction accuracy</h1><div class="card"><p class="small">Every prediction the site stores during a live event is compared with the real final cutoff once the event is collected. ${d.events} events scored so far.</p>` +
-    (d.buckets.length ? table(["Point in event", "Predictions", "Average error", "Bias", "Real result inside range"], d.buckets.map(b => [Math.round(b.progress * 100) + "% through", b.n, b.mean_abs_error_pct + "%", (b.bias_pct > 0 ? "+" : "") + b.bias_pct + "%", b.inside_range_pct + "%"]), ["", "n", "n", "n", "n"]) +
-      `<p class="small">Bias above 0 means the site guessed too high. Range = Low to Safe.</p>` : '<p class="mut">No scored predictions yet. They accumulate as live events finish.</p>') + "</div>";
+  const b = d.buckets;
+  app.innerHTML = head("Prediction accuracy", `Every prediction stored during a live event is compared with the real final cutoff once the event is collected. ${d.events} events scored so far.`) +
+    (b.length ? `<div class="grid g2">${chartCard("ac1", "How far off are the predictions?", "by how far through the window", { table: false })}${chartCard("ac2", "How often the real result is inside the range", "range = low to safe, aimed at 90%", { table: false })}</div>
+    <div class="card"><div class="hd"><h2>Details</h2></div>${table(["Point in event", "Predictions", "Average error", "Bias", "Real result inside range"], b.map(x => [Math.round(x.progress * 100) + "% through", x.n, x.mean_abs_error_pct + "%", (x.bias_pct > 0 ? "+" : "") + x.bias_pct + "%", x.inside_range_pct + "%"]), ["", "n", "n", "n", "n"])}<p class="small">Bias above 0 means the site guessed too high.</p></div>` : '<div class="card empty">No scored predictions yet. They accumulate as live events finish.</div>');
+  if (!b.length) return;
+  const lab = b.map(x => Math.round(x.progress * 100) + "%");
+  mk($("#ac1"), { type: "bar", data: { labels: lab, datasets: [{ label: "Average error", data: b.map(x => x.mean_abs_error_pct), backgroundColor: SER(0) }, { label: "Bias (+ = too high)", data: b.map(x => x.bias_pct), backgroundColor: SER(1) }] }, options: { scales: { x: { title: { text: "Share of the window elapsed" } }, y: { title: { text: "% of the real cutoff" } } }, plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y}%` } } } } });
+  mk($("#ac2"), { type: "bar", data: { labels: lab, datasets: [{ label: "Inside range", data: b.map(x => x.inside_range_pct), backgroundColor: SER(2) }] }, options: { scales: { x: { title: { text: "Share of the window elapsed" } }, y: { min: 0, max: 100, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, refLines: { lines: [{ axis: "y", value: 90, label: "Aim: 90%", right: true }] }, tooltip: { callbacks: { label: c => c.parsed.y + "% of predictions" } } } } });
 }
 
-// ------------------------------------------------------------------ Status
+// ---------------------------------------------------------------- Status
 async function status() {
   const [s, a] = await Promise.all([j("/api/status_full"), j("/api/status")]);
   if (s.error) return app.innerHTML = `<div class="card err">${esc(s.error)}</div>`;
   const c = s.counts || {};
-  app.innerHTML = `<h1>Status</h1><div class="grid g4">
-   <div class="kpi"><div class="l">Collector last ran</div><div class="v ${s.last_tick_age_s != null && s.last_tick_age_s < 150 ? "ok" : "err"}">${ago(s.last_tick_age_s)}</div></div>
-   <div class="kpi"><div class="l">Epic login</div><div class="v ${s.login.logged_in ? "ok" : "err"}">${s.login.logged_in ? "valid" : "needed"}</div></div>
-   <div class="kpi"><div class="l">Events stored</div><div class="v">${c.final ?? "-"} / ${c.windows ?? "-"}</div></div>
-   <div class="kpi"><div class="l">Database</div><div class="v">${c.db_mb ?? "-"} MB</div></div></div>
-  <div class="card"><h2>Details</h2><p class="small">Regions tracked: ${esc((s.regions || []).join(", "))}. Windows: ${esc(JSON.stringify(s.windows_by_status))}.<br>
+  app.innerHTML = head("Status", "Is the collector running, and is Epic login valid?") + `<div class="kpis">
+   ${kpi("Collector last ran", ago(s.last_tick_age_s), "", s.last_tick_age_s != null && s.last_tick_age_s < 150 ? "good" : "bad")}
+   ${kpi("Epic login", s.login.logged_in ? "valid" : "needed", "", s.login.logged_in ? "good" : "bad")}
+   ${kpi("Events stored", (c.final ?? "-") + " / " + (c.windows ?? "-"))}
+   ${kpi("Database", (c.db_mb ?? "-") + " MB")}</div>
+  <div class="card"><div class="hd"><h2>Details</h2></div><p class="small">Regions tracked: ${esc((s.regions || []).join(", "))}. Windows: ${esc(JSON.stringify(s.windows_by_status))}.<br>
    Data read out of the database this month ≈ <b>${s.egress_mb_month} MB</b> (free plan allows 5,000 MB). Snapshots ${c.snapshots} · series points ${c.series} · stored predictions ${c.predictions} · player names ${c.names} · events still needing deep thresholds ${c.deep_missing}.</p>
    <h3>Epic login events</h3><pre class="small" style="white-space:pre-wrap">${esc((s.auth_log || []).map(x => new Date(x.at * 1000).toLocaleTimeString() + "  " + x.kind + "  " + x.detail).join("\n") || "none yet")}</pre>
    <h3>Last collector pass</h3><pre class="small" style="white-space:pre-wrap">${esc((s.last_tick || []).map(x => x.join(" ")).join("\n"))}</pre></div>
   ${s.login.logged_in ? "" : `<div class="card"><b>Epic login needed</b><p class="small">Log in to Epic in this browser, open <a href="${esc(a.login_url)}" target="_blank">this link</a>, copy the authorizationCode and paste it here.</p>
-   <input id="code" placeholder="authorizationCode"><input id="key" type="password" placeholder="Admin key" style="margin-top:6px"><button id="lg" style="margin-top:8px">Save login</button> <span id="lm" class="small"></span></div>`}
-  <div class="card"><h2>How the predictions work</h2><p class="small">Every player on the live leaderboard is replayed forward. Their remaining games (including the last queue that starts before the cutoff), points per game and chance of catching up come from players in the same spot at the same moment in earlier events <b>of the same class</b>. The result is corrected using a back-test on those past events. Ranks beyond 700 are scaled from the stored thresholds (ranks 1000, 1500 … 10000). Unofficial data; estimates only.</p></div>`;
+   <input id="code" placeholder="authorizationCode"><input id="key" type="password" placeholder="Admin key" style="margin-top:6px"><button id="lg" style="margin-top:10px">Save login</button> <span id="lm" class="small"></span></div>`}
+  <div class="card"><div class="hd"><h2>How the predictions work</h2></div><p class="small">Every player on the live leaderboard is replayed forward. Their remaining games (including the last queue that starts before the cutoff), points per game and chance of catching up come from players in the same spot at the same moment in earlier events <b>of the same class</b>. The result is corrected using a back-test on those past events. Ranks beyond 700 are scaled from the stored thresholds (ranks 1000, 1500 … 10000). Unofficial data; estimates only.</p></div>`;
   const lg = $("#lg");
   if (lg) lg.onclick = async () => {
     const r = await j("/api/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: $("#code").value.trim(), key: $("#key").value }) });
@@ -423,26 +521,16 @@ async function status() {
   };
 }
 
-// the "More" menu: close it when a link is chosen, when you click elsewhere, or press Escape
-document.addEventListener("click", e => { const d = $("#more"); if (d && d.open && !e.target.closest("#more") || e.target.closest("#more .menu a")) { if (d) d.open = false; } });
-document.addEventListener("keydown", e => { if (e.key === "Escape") { const d = $("#more"); if (d) d.open = false; } });
-
-// ------------------------------------------------------------------ Router
-function setNav(page) {
-  const more = ["classes", "class", "accuracy", "status"].includes(page);
-  const main = { t: "schedule", player: "players" }[page] || page;
-  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.p === main || (a.dataset.p === "class" && page === "class")));
-  const sm = $("#nav summary"); if (sm) sm.classList.toggle("on", more);
-  const d = $("#more"); if (d) d.open = false;
-}
+// ---------------------------------------------------------------- Router
 async function route() {
   clearAll();
   const h = location.hash.replace(/^#\/?/, ""), parts = h.split("/"), p = parts[0];
   const page = p || "home", arg = decodeURIComponent(parts.slice(1).join("/"));
-  setNav(page === "class" ? "classes" : page);
+  setNav(page, parts[2]);
   window.scrollTo(0, 0);
   try {
     if (page === "home") { await home(); every(30000, home); }
+    else if (page === "strategy") await strategyHub();
     else if (page === "t") await tournament(decodeURIComponent(parts[1] || ""), parts[2]);
     else if (page === "schedule") await schedule();
     else if (page === "archive") await archive();
@@ -454,7 +542,7 @@ async function route() {
     else if (page === "accuracy") await accuracy();
     else if (page === "status") await status();
     else app.innerHTML = '<div class="card">Page not found.</div>';
-  } catch (e) { app.innerHTML = `<div class="card err">Something went wrong: ${esc(e.message)}</div>`; }
+  } catch (e) { app.innerHTML = `<div class="card err">Something went wrong: ${esc(e.message)}</div>`; console.error(e); }
 }
 window.addEventListener("hashchange", route);
 route();

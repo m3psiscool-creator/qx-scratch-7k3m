@@ -85,6 +85,17 @@ def _run_predict(window_id, top, entrants=None):
     if not target:
         raise ValueError("Unknown window")
     finished = storage.windows(final=True)
+    if target["final"]:   # already happened: show the real result, not a prediction
+        def actual(rank):
+            if rank <= len(target["points"]):
+                return target["points"][rank - 1]
+            return (target.get("deep") or {}).get(str(rank), {}).get("points")
+        v = actual(top)
+        if v is not None:
+            cut = [{"rank": rk, "label": lb, "low": actual(rk), "likely": actual(rk), "safe": actual(rk)}
+                   for rk, lb in (target["meta"].get("advance") or []) if rk != top and actual(rk) is not None]
+            return {"rank": top, "low": round(v), "likely": round(v), "safe": round(v), "current": round(v),
+                    "final": True, "cutoffs": cut, "method": "Final result: this event has finished"}
     snap = None
     if not target["final"]:
         last = storage.snapshots(window_id, last=1)

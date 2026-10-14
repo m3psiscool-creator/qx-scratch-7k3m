@@ -151,6 +151,8 @@ function renderPlan() {
   const cols = [SER(2), SER(0), SER(3)];
   const ds = lines.map((l, i) => ({ type: "line", label: SS.aim ? "Your aim " + nf(SS.aim) : confLabel(l.conf), data: l.data, borderColor: cols[i], backgroundColor: cols[i], borderWidth: l.conf === SS.conf ? 3 : 1.6, borderDash: l.conf === SS.conf ? [] : [6, 4], pointRadius: 0, pointHoverRadius: 4, spanGaps: false, order: 1 }));
   if (f && pr.focus.scatter) ds.push({ type: "scatter", label: `Finishers around #${pr.rank}`, data: pr.focus.scatter.map(a => ({ x: a[1], y: a[0], pts: a[2] })), backgroundColor: withAlpha(cssv("--tx2"), .45), borderColor: "transparent", pointRadius: 3.5, pointHoverRadius: 6, order: 2 });
+  const ex0 = SS.ex || { p: Math.round(clamp(typ, 1, lobby) * 2) / 2, e: Math.round(clamp(f ? f.elims_per_game : 3, 0, maxE) * 4) / 4 };
+  ds.push({ type: "scatter", label: "Your playstyle", data: [{ x: ex0.e, y: ex0.p }], backgroundColor: SER(1), borderColor: cssv("--sf"), borderWidth: 2, pointStyle: "rectRot", pointRadius: 9, pointHoverRadius: 11, order: 0 });
   const heatP = [1, 2, 3, 5, 7, 10, 15, 20, 25].filter(p => p <= sc.placement.length), heatE = [0, 1, 2, 3, 4, 5, 6, 8, 10].filter(e => e <= Math.max(3, sc.elim_cap || 10));
   const fp = f ? f.avg_place : null, fe = f ? f.elims_per_game : null;
   const near = (arr, v) => arr.reduce((b, x) => Math.abs(x - v) < Math.abs(b - v) ? x : b, arr[0]);
@@ -158,7 +160,7 @@ function renderPlan() {
   const heat = `<div class="scroll"><div class="heat" style="grid-template-columns:120px repeat(${heatE.length},1fr)"><div class="h">Place · games that fit ↓ &nbsp; Elims →</div>${heatE.map(e => `<div class="h">${e}</div>`).join("")}` +
     heatP.map(p => { const G = gamesFit(p, remCap), need1 = ppgAt(need, G); return `<div class="h" style="text-align:right;padding-right:8px">${p === 1 ? "win" : "top " + p} · ${G}g</div>` + heatE.map(e => {
       const v = cell(p, e), ok = need1 != null && v >= need1, k = need1 ? clamp((v / need1 - 1) / 0.6, 0, 1) : 0, isF = f && p === near(heatP, fp) && e === near(heatE, fe);
-      return `<div class="${ok ? "yes" : ""} ${isF ? "need" : ""}" style="${ok ? `background:color-mix(in srgb,var(--s1) ${Math.round(45 + k * 55)}%,var(--sf2))` : ""}" title="Average place ${p}, ${e} elims: ${nf(v)} points a game. About ${G} games fit, so ${nf(v * G)} points; you need ${need1 == null ? "?" : nf(need1)} a game">${nf(v)}</div>`;
+      return `<div data-hp="${p}" data-he="${e}" class="${ok ? "yes" : ""} ${isF ? "need" : ""}" style="${ok ? `background:color-mix(in srgb,var(--s1) ${Math.round(45 + k * 55)}%,var(--sf2))` : ""}" title="Average place ${p}, ${e} elims: ${nf(v)} points a game. About ${G} games fit, so ${nf(v * G)} points; you need ${need1 == null ? "?" : nf(need1)} a game">${nf(v)}</div>`;
     }).join(""); }).join("") + `</div></div>`;
   // the worst average placement that still reaches the target with a given elim average (games priced at that placement)
   const recs = [1, 3, 6].filter(e => e <= Math.max(3, sc.elim_cap || 6)).map(e => {
@@ -170,12 +172,16 @@ function renderPlan() {
   }).join("");
   el.innerHTML = head + kp + timeNote + verdict + `
   <div class="grid g3" style="margin-top:16px">${recs}</div>
-  ${chartCard("c-front", "Trade-off: elims against placement", "Reach any point on or beyond a line to hit that certainty", { cls: "tall" })}
+  ${chartCard("c-front", "Trade-off: elims against placement", "Reach any point on or beyond a line to hit that certainty", { cls: "tall", zoom: true })}
+  <div class="card" id="explore"><div class="hd"><h2>Try a playstyle</h2><span class="sub">drag the sliders, click a point on the chart, or click a cell in the grid below</span></div>
+    <div class="explore"><div><label>Average placement <span class="rv" id="ex-pv"></span></label><input id="ex-p" type="range" min="1" max="${lobby}" step="0.5"></div><div><label>Average eliminations per game <span class="rv" id="ex-ev"></span></label><input id="ex-e" type="range" min="0" max="${maxE}" step="0.25"></div></div>
+    <div class="kpis" id="ex-out" style="margin:14px 0 0"></div></div>
   ${tp ? `<div class="grid g2">${chartCard("c-tm", "How long a game takes", "minutes, including the wait for the lobby", { cls: "short", table: false })}${chartCard("c-gf", "Games that fit in the time", `${fmtMin(timeLeftMin())} left; format allows ${remCap}`, { cls: "short", table: false })}</div>` : ""}
   <div class="card"><div class="hd"><h2>Points per game by playstyle</h2><span class="sub">blue = enough to reach ${T == null ? "your target" : nf(T)} in the games that fit · outlined = typical finisher</span></div>${heat}</div>`;
   if (ds.length) {
     put("plan", mk($("#c-front"), {
-      type: "scatter", data: { datasets: ds },
+      type: "scatter", data: { datasets: ds }, zoom: "xy", clickMode: "nearest", clickIntersect: true,
+      click: hit => { const r = hit.element.$context && hit.element.$context.raw; if (r && r.x != null && r.y != null) setEx(r.y, r.x); },
       options: {
         interaction: { mode: "nearest", intersect: true },
         scales: { x: { type: "linear", min: 0, max: maxE, title: { text: "Average eliminations per game needed" } }, y: { type: "linear", reverse: true, min: 1, max: lobby, title: { text: "Average placement (1 = best)" }, ticks: { stepSize: 5 } } },
@@ -185,6 +191,24 @@ function renderPlan() {
     $("#c-front-tbl").innerHTML = table(["Average placement", "Games that fit", ...lines.map(l => confLabel(l.conf) + " (elims)")], [1, 3, 5, 8, 10, 15, 20, 25].filter(p => p <= lobby).map(p => [p, gamesFit(p, remCap), ...lines.map(l => { const d = l.data.find(x => x.y === p); return d ? nd(d.x) + (d.over ? "+" : "") : "not possible"; })]), ["n", "n", ...lines.map(() => "n")]);
     $("#c-front-take").innerHTML = take("", "For every average placement, the line shows the <b>eliminations per game you would need</b>. It bends because surviving longer costs minutes: you play fewer games, so each one has to score more. Dots are real players who finished near your rank.");
   }
+  // playstyle explorer: sliders move a marker on the chart and price that style in points, games and chance
+  const updEx = () => {
+    if (!$("#ex-p")) return;
+    const p = +$("#ex-p").value, e = +$("#ex-e").value; SS.ex = { p, e };
+    const G = gamesFit(p, remCap), g = ptsAtPlace(sc, p) + ptsAtElims(sc, e), total = SS.pts + g * G, gm = gMin(p);
+    let chance = "", cls = "";
+    if (T != null) {
+      if (!SS.aim && !s.final && s.mu != null) { const c = phi((Math.log1p(total) - s.mu) / s.sd); chance = pc(c); cls = c >= 0.8 ? "good" : c < 0.3 ? "bad" : ""; }
+      else { chance = total >= T ? "Yes" : "No"; cls = total >= T ? "good" : "bad"; }
+    }
+    $("#ex-pv").textContent = p === 1 ? "win every game" : "top " + nd(p, 1); $("#ex-ev").textContent = nd(e, 2);
+    $("#ex-out").innerHTML = kpi("Points per game", nd(g), `${nd(ptsAtPlace(sc, p))} placement + ${nd(ptsAtElims(sc, e))} elims`) + kpi("Games that fit", G + " <small>of " + remCap + "</small>", gm ? `about ${Math.round(gm)} min each` : "") + kpi("Expected total", nf(total), T == null ? "" : (total >= T ? "+" : "-") + nf(Math.abs(total - T)) + " vs " + nf(T), "hero") + kpi(!SS.aim && !s.final ? `Chance of top ${nf(SS.rank)}` : "Reaches the target", chance || "-", "", cls);
+    const ch = Chart.getChart($("#c-front")), d = ch && ch.data.datasets.find(x => x.label === "Your playstyle");
+    if (d) { d.data = [{ x: e, y: p }]; ch.update("none"); }
+  };
+  window.setEx = (p, e) => { if (!$("#ex-p")) return; $("#ex-p").value = clamp(Math.round(p * 2) / 2, 1, lobby); $("#ex-e").value = clamp(Math.round(e * 4) / 4, 0, maxE); updEx(); };
+  if ($("#ex-p")) { $("#ex-p").value = ex0.p; $("#ex-e").value = ex0.e; $("#ex-p").oninput = updEx; $("#ex-e").oninput = updEx; updEx(); }
+  $$("[data-hp]").forEach(c => c.onclick = () => { setEx(+c.dataset.hp, +c.dataset.he); $("#explore").scrollIntoView({ behavior: "smooth", block: "center" }); });
   if (tp && $("#c-tm")) {
     const lb = Array.from({ length: Math.min(tp.lobby, 45) }, (_, i) => i + 1);
     put("plan", mk($("#c-tm"), { type: "line", data: { labels: lb, datasets: [{ label: "Minutes per game", data: lb.map(p => tp.by_place[p - 1]), borderColor: SER(0), backgroundColor: withAlpha(SER(0), .14), fill: true, pointRadius: 0 }] }, options: { scales: { x: { title: { text: "Finishing placement" }, ticks: { maxTicksLimit: 10 } }, y: { beginAtZero: true, title: { text: "Minutes" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => "Place " + c[0].label, label: c => nd(c.parsed.y) + " min per game" } } } } }));
@@ -265,8 +289,8 @@ function renderPace() {
   const status = played <= 0 ? take("", `Fill in <b>Games I have played</b> and <b>My points so far</b> above to see where you stand. A typical finisher near #${p.rank} has <b>${nf(expAt(1))}</b> after one game and <b>${nf(p.final_est)}</b> at the end.`)
     : diff >= 0 ? take("good", `You are <b>${nf(diff)} points ahead</b> of a typical finisher near #${p.rank} after ${played} games (≈ ${nd(diff / perGame)} games' worth). At your rate you finish near <b>${nf(proj)}</b>${timeCut}${T ? ` against a target of ${nf(T)}` : ""}.`)
       : take(Math.abs(diff) > 1.5 * perGame ? "bad" : "warn", `You are <b>${nf(-diff)} points behind</b> a typical finisher near #${p.rank} after ${played} games (≈ ${nd(-diff / perGame)} games' worth). At your rate you finish near <b>${nf(proj)}</b>${timeCut}${T ? ` against a target of ${nf(T)}` : ""}.`);
-  el.innerHTML = chartCard("c-pace", `Points after each game for finishers near #${p.rank}`, `${p.players} players · ranks ${p.band[0]}–${p.band[1]}${p.scaled ? " · scaled to the predicted cutoff" : ""}`, { cls: "tall" });
-  put("pace", mk($("#c-pace"), { type: "line", data: { datasets: ds }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "linear", min: 0, max: cap, ticks: { stepSize: 1 }, title: { text: "Games played" } }, y: { beginAtZero: true, title: { text: "Total points" } } }, plugins: { legend: { labels: { filter: i => i.text !== "Slower quarter" } }, tooltip: { callbacks: { title: c => "After game " + c[0].parsed.x, label: c => `${c.dataset.label}: ${nf(c.parsed.y)}` } }, refLines: { lines: T ? [{ axis: "y", value: T, label: "Aim: " + nf(T), color: cssv("--tx"), right: true }] : [] } } } }));
+  el.innerHTML = chartCard("c-pace", `Points after each game for finishers near #${p.rank}`, `${p.players} players · ranks ${p.band[0]}–${p.band[1]}${p.scaled ? " · scaled to the predicted cutoff" : ""}`, { cls: "tall", zoom: true });
+  put("pace", mk($("#c-pace"), { type: "line", zoom: "x", data: { datasets: ds }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "linear", min: 0, max: cap, ticks: { stepSize: 1 }, title: { text: "Games played" } }, y: { beginAtZero: true, title: { text: "Total points" } } }, plugins: { legend: { labels: { filter: i => i.text !== "Slower quarter" } }, tooltip: { callbacks: { title: c => "After game " + c[0].parsed.x, label: c => `${c.dataset.label}: ${nf(c.parsed.y)}` } }, refLines: { lines: T ? [{ axis: "y", value: T, label: "Aim: " + nf(T), color: cssv("--tx"), right: true }] : [] } } } }));
   $("#c-pace-tbl").innerHTML = table(["After game", "Slower quarter", "Typical", "Faster quarter"], p.mid.map((m, i) => [i + 1, nf(p.lo[i]), nf(m), nf(p.hi[i])]), ["n", "n", "n", "n"]);
   $("#c-pace-take").innerHTML = status + (n < cap ? `<p class="small">Per-game history is stored for ${n} of ${cap} games; the end value is extended in a straight line.</p>` : "");
 }
@@ -281,14 +305,14 @@ function renderSafe() {
   const dl = (v, h) => v == null ? "-" : (v >= 0 ? "+" : "") + nf(v);
   el.innerHTML = `<div class="kpis">${L.map(l => kpi(Math.round(l.conf * 100) + "% sure", nf(l.points), l.conf === SS.conf ? "your choice" : "+" + nf(l.points - g(0.5)) + " vs likely", l.conf === SS.conf ? "hero" : "")).join("")}</div>
   <div class="grid g3" style="margin-bottom:16px">${kpi("Cutoff right now", s.current ? nf(s.current) : "not started", "top " + nf(s.rank) + (s.current ? " today" : ""))}${kpi("Model uncertainty", "± " + nd(s.sd_pct) + "%", s.history_events ? "based on " + s.history_events + " past events" : "")}${kpi("Moved recently", d ? dl(d.h1) + " / hour" : "-", d ? dl(d.h3) + " in 3h · " + dl(d.h6) + " in 6h" : "needs a few snapshots")}</div>
-  ${chartCard("c-safe", `Chance that a score is enough for top ${nf(s.rank)}`, `predicted ${nf(s.low)} – ${nf(s.safe)}`, { cls: "" })}`;
+  ${chartCard("c-safe", `Chance that a score is enough for top ${nf(s.rank)}`, `predicted ${nf(s.low)} – ${nf(s.safe)}`, { cls: "", zoom: true })}`;
   const refs = [{ axis: "x", value: g(0.5), label: "50%", color: cssv("--tx2"), row: 0 }, { axis: "x", value: g(0.8), label: "80%", color: cssv("--tx2"), row: 1 }, { axis: "x", value: g(0.95), label: "95%", color: cssv("--tx2"), row: 2 }];
   if (s.current) refs.push({ axis: "x", value: s.current, label: "now " + nf(s.current), color: SER(1), row: 3 });
   const pf = projFinal(); if (pf) refs.push({ axis: "x", value: pf.pts, label: "you ≈ " + nf(pf.pts), color: SER(2), row: 4 });
-  put("safe", mk($("#c-safe"), { type: "line", data: { datasets: [{ label: "Chance the cutoff is at or below this score", data: s.curve.map(c => ({ x: c[0], y: c[1] * 100 })), borderColor: SER(0), backgroundColor: withAlpha(SER(0), .14), fill: true, pointRadius: 0 }] }, options: { scales: { x: { type: "linear", title: { text: "Your final points" }, min: s.curve[0][0], max: s.curve[s.curve.length - 1][0] }, y: { min: 0, max: 100, title: { text: "Chance it is enough (%)" }, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => nf(c[0].parsed.x) + " points", label: c => `${c.parsed.y.toFixed(0)}% chance this is enough` } }, refLines: { lines: refs } } } }));
+  put("safe", mk($("#c-safe"), { type: "line", zoom: "x", click: hit => { const x = Math.round(hit.element.$context.parsed.x); if (x > 0) { SS.aim = x; $("#saim").value = x; saveSS(); renderPersonal(); } }, data: { datasets: [{ label: "Chance the cutoff is at or below this score", data: s.curve.map(c => ({ x: c[0], y: c[1] * 100 })), borderColor: SER(0), backgroundColor: withAlpha(SER(0), .14), fill: true, pointRadius: 0 }] }, options: { scales: { x: { type: "linear", title: { text: "Your final points" }, min: s.curve[0][0], max: s.curve[s.curve.length - 1][0] }, y: { min: 0, max: 100, title: { text: "Chance it is enough (%)" }, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => nf(c[0].parsed.x) + " points", label: c => `${c.parsed.y.toFixed(0)}% chance this is enough` } }, refLines: { lines: refs } } } }));
   $("#c-safe-tbl").innerHTML = table(["Certainty", "Points"], L.map(l => [Math.round(l.conf * 100) + "%", nf(l.points)]), ["", "n"]);
   const extra = g(0.95) - g(0.5);
-  $("#c-safe-take").innerHTML = take("", `Going from a coin flip (<b>${nf(g(0.5))}</b>) to <b>95% sure</b> (<b>${nf(g(0.95))}</b>) costs <b>${nf(extra)} more points</b> (${pc(extra / g(0.5), 1)}). ${SS.pts && SS.played ? "" : "Enter your progress above to see where you land on this curve."}`);
+  $("#c-safe-take").innerHTML = take("", `Going from a coin flip (<b>${nf(g(0.5))}</b>) to <b>95% sure</b> (<b>${nf(g(0.95))}</b>) costs <b>${nf(extra)} more points</b> (${pc(extra / g(0.5), 1)}). ${SS.pts && SS.played ? "" : "Enter your progress above to see where you land on this curve."} <b>Click the curve</b> to use that score as your aim.`);
 }
 
 // ---------------------------------------------------------------- 6 keep playing?
@@ -364,10 +388,18 @@ function renderStop() {
   <div class="verdict ${cls}"><div><div class="big">${head}</div><div>${body}</div></div></div>
   ${timeLimited ? take("warn", `<b>Time, not the format, is your limit.</b> The format allows ${left} more game${left === 1 ? "" : "s"}, but with ${Math.round(budget)} minutes left and games lasting as long as you survive, you will finish about <b>${med}</b> (80% of runs: ${sim.games[0]} to ${sim.games[2]}).`) : ""}
   <div class="kpis" style="margin-top:12px">${kpi("Chance with 0 more games", pct1(p0) + "%", nf(SS.pts) + " points now")}${kpi("Chance with all you can play", nd(pAll, 0) + "%", "of " + goalName, "hero")}${kpi("Games you will finish", med, `80% of runs: ${sim.games[0]} to ${sim.games[2]}${tp ? "" : " (no timing data)"}`, timeLimited ? "bad" : "")}${kpi("Likely final points", nf(finalMed), "range " + nf(Q[rem][0]) + " – " + nf(Q[rem][2]))}${kpi("Cutoff aimed at", nf(T), fixed != null ? "fixed" : "varies ± " + nd(s.sd_pct) + "%")}</div>
-  ${chartCard("c-stop", `Chance of ${goalName}, by extra games played`, "6,000 simulated runs", {})}
+  <div class="card"><div class="hd"><h2>What if I play…</h2><span class="sub">drag to see your chance after that many more games</span></div>
+    <div class="explore"><div><label>Extra games <span class="rv" id="sk-v"></span></label><input id="sk" type="range" min="0" max="${rem}" step="1"></div><div class="kpis" id="sk-out" style="margin:0"></div></div></div>
+  ${chartCard("c-stop", `Chance of ${goalName}, by extra games played`, "6,000 simulated runs · click a point to set the slider", {})}
   <div class="grid g3">${chartCard("c-stop2", "What each extra game adds", "percentage points of chance", { cls: "short", table: false })}${chartCard("c-stop3", "Where your points could end up", "middle 80% of runs", { cls: "short", table: false })}${chartCard("c-stop4", "How many games you get in", "share of runs", { cls: "short", table: false })}</div>`;
   const xs = Array.from({ length: rem + 1 }, (_, k) => k);
-  put("stop", mk($("#c-stop"), { type: "line", data: { labels: xs, datasets: [{ label: "Chance", data: P, borderColor: SER(0), backgroundColor: withAlpha(SER(0), .14), fill: true, pointRadius: 3, borderWidth: 3 }] }, options: { scales: { x: { title: { text: "Extra games played" } }, y: { min: 0, max: 100, title: { text: "Chance (%)" }, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, refLines: { lines: [{ axis: "y", value: 95, label: "95% sure", right: true }] }, tooltip: { callbacks: { title: c => c[0].label + " more games", label: c => `${c.parsed.y.toFixed(0)}% chance` } } } } }));
+  put("stop", mk($("#c-stop"), { type: "line", click: hit => { $("#sk").value = hit.index; updK(); }, data: { labels: xs, datasets: [{ label: "Chance", data: P, borderColor: SER(0), backgroundColor: withAlpha(SER(0), .14), fill: true, pointRadius: 3, borderWidth: 3 }] }, options: { scales: { x: { title: { text: "Extra games played" } }, y: { min: 0, max: 100, title: { text: "Chance (%)" }, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, refLines: { lines: [{ axis: "y", value: 95, label: "95% sure", right: true }] }, tooltip: { callbacks: { title: c => c[0].label + " more games", label: c => `${c.parsed.y.toFixed(0)}% chance` } } } } }));
+  const updK = () => {
+    const k = clamp(+$("#sk").value, 0, rem); SS.sk = k; $("#sk-v").textContent = k;
+    $("#sk-out").innerHTML = kpi("Chance", pct1(P[k]) + "%", k ? (P[k] - P[0] >= 0 ? "+" : "") + nd(P[k] - P[0]) + " vs now" : "no more games", "hero") + kpi("Likely total", nf(Q[k][1]), nf(Q[k][0]) + " – " + nf(Q[k][2]));
+    const ch = Chart.getChart($("#c-stop")); if (ch) { ch.options.plugins.refLines.lines = [{ axis: "y", value: 95, label: "95% sure", right: true }, { axis: "x", value: k, label: k + " more", color: SER(1) }]; ch.update("none"); }
+  };
+  $("#sk").value = clamp(SS.sk ?? rem, 0, rem); $("#sk").oninput = updK; updK();
   put("stop", mk($("#c-stop2"), { type: "bar", data: { labels: xs.slice(1), datasets: [{ label: "Added chance", data: marg.slice(1).map(v => +v.toFixed(1)), backgroundColor: marg.slice(1).map(v => v < 1.5 ? withAlpha(SER(0), .4) : SER(0)) }] }, options: { scales: { x: { title: { text: "Game" } }, y: { title: { text: "Percentage points" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => "Game " + c[0].label, label: c => "+" + c.parsed.y + " points of chance" } } } } }));
   const cutLines = fixed != null ? [{ axis: "y", value: fixed, label: "cutoff " + nf(fixed), color: cssv("--tx"), right: true }] : [{ axis: "y", value: Math.round(Math.expm1(s.mu)), label: "likely cutoff " + nf(Math.expm1(s.mu)), color: cssv("--tx"), right: true }, { axis: "y", value: s.ladder.find(x => x.conf === 0.95).points, label: "95%: " + nf(s.ladder.find(x => x.conf === 0.95).points), color: cssv("--tx2"), right: true, dash: [2, 4] }];
   put("stop", mk($("#c-stop3"), { type: "line", data: { labels: xs, datasets: [{ label: "10%", data: Q.map(q => q[0]), borderColor: "transparent", pointRadius: 0, fill: false }, { label: "Middle 80% of runs", data: Q.map(q => q[2]), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .2), pointRadius: 0, fill: "-1" }, { label: "Median", data: Q.map(q => q[1]), borderColor: SER(0), backgroundColor: SER(0), borderWidth: 3, pointRadius: 2 }] }, options: { scales: { x: { title: { text: "Extra games played" } }, y: { title: { text: "Your total points" } } }, plugins: { legend: { labels: { filter: i => i.text !== "10%" } }, refLines: { lines: cutLines }, tooltip: { callbacks: { title: c => c[0].label + " more games", label: c => `${c.dataset.label === "Middle 80% of runs" ? "90th percentile" : c.dataset.label === "10%" ? "10th percentile" : c.dataset.label}: ${nf(c.parsed.y)}` } } } } }));

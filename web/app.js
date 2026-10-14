@@ -259,11 +259,13 @@ async function tabPredictions(w, open) {
     <div class="chips" style="margin-top:10px">${presets.map(p => `<button class="chip" data-r="${p}">Top ${p.toLocaleString()}</button>`).join("")}</div>
     <div id="pred"></div></div>
   <div class="card" id="bubblecard" style="display:none"><div class="hd"><h2>Bubble: who is in the race</h2></div><div id="bubble"></div></div>
-  ${chartCard("ch", "Points needed by rank", "now, previous events of this gamemode, and the predicted final", { cls: "tall", table: false, ctrl: "" })}
-  ${chartCard("ch2", "Points needed over time", "how the cutoffs have grown during this window", { cls: "tall", table: false })}
+  ${chartCard("ch", "Points needed by rank", "now, previous events of this gamemode, and the predicted final", { cls: "tall", table: false, zoom: true, ctrl: `<div class="seg" id="ladseg"><button data-s="log" class="${LADLOG ? "on" : ""}">Log scale</button><button data-s="lin" class="${LADLOG ? "" : "on"}">Linear</button></div><small>Click a point to calculate that rank</small>` })}
+  ${chartCard("ch2", "Points needed over time", "how the cutoffs have grown during this window", { cls: "tall", table: false, zoom: true, ctrl: `<div class="seg" id="rngseg">${[[0, "Whole window"], [3, "Last 3 hours"], [1, "Last hour"], [0.5, "Last 30 min"]].map(([h, l]) => `<button data-h="${h}" class="${h === TRANGE ? "on" : ""}">${l}</button>`).join("")}</div><small>Click a legend item to hide a rank</small>` })}
   <div class="card"><div class="hd"><h2>Thresholds</h2></div><div id="th"></div></div>`;
   $("#go").onclick = () => { predict(); bubble(); };
   $$("[data-r]").forEach(b => b.onclick = () => { $("#x").value = b.dataset.r; predict(); bubble(); });
+  $$("#ladseg button").forEach(b => b.onclick = () => { LADLOG = b.dataset.s === "log"; store.set("ladlog", LADLOG); $$("#ladseg button").forEach(x => x.classList.toggle("on", x === b)); const cv = $("#ch"); if (cv) cv.dataset.sig = ""; ladderChart(); });
+  $$("#rngseg button").forEach(b => b.onclick = () => { TRANGE = +b.dataset.h; $$("#rngseg button").forEach(x => x.classList.toggle("on", x === b)); const cv = $("#ch2"); if (cv) cv.dataset.sig = ""; timeChart(); });
   await Promise.all([predict(), ladderChart(), timeChart(), thresholds(false), bubble()]);
   if (open) {
     every(120000, () => { predict(true); bubble(); ladderChart(); });
@@ -325,6 +327,7 @@ async function bubble() {
     `<p class="small">Updated ${ago(b.age_s)}. Each player is simulated game by game with comparable players from past events of this gamemode. In past events the current leaders finished inside the cutoff more often than these percentages say, so the top of the table is conservative.</p>`;
 }
 // points needed by rank: now vs history vs predicted final
+let LADLOG = store.get("ladlog", true), TRANGE = 0;
 async function ladderChart() {
   const d = await j("/api/ladder?window=" + encodeURIComponent(TW.window_id)), cv = $("#ch");
   if (!cv) return; if (d.error) { cv.parentElement.innerHTML = `<p class="mut">${esc(d.error)}</p>`; return; }
@@ -340,7 +343,7 @@ async function ladderChart() {
   ];
   if (pr.length) ds.push({ label: "Predicted final", data: pr, showLine: false, borderColor: SER(2), backgroundColor: SER(2), pointStyle: "rectRot", pointRadius: 7, pointHoverRadius: 9, order: 1 });
   const sig = JSON.stringify(ds); if (cv.dataset.sig === sig) return; cv.dataset.sig = sig;   // unchanged: keep the chart as it is
-  mk(cv, { type: "line", data: { datasets: ds }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "logarithmic", min: 1, max: 10000, title: { text: "Rank (log scale)" }, ticks: { maxRotation: 0, autoSkip: false, callback: v => [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000].includes(v) ? v.toLocaleString() : "" } }, y: { title: { text: "Points" }, beginAtZero: false } }, plugins: { tooltip: { callbacks: { title: c => "Top " + nf(c[0].parsed.x), label: c => c.raw && c.raw.lo != null ? `Predicted final: ${nf(c.raw.y)} (${nf(c.raw.lo)} – ${nf(c.raw.hi)})` : `${c.dataset.label}: ${nf(c.parsed.y)}` } }, legend: { labels: { filter: i => i.text !== "Past events: 25%" } } } } });
+  mk(cv, { type: "line", zoom: "x", click: hit => { const x = hit.element.$context.parsed.x, r = d.ranks.reduce((a, b) => Math.abs(b - x) < Math.abs(a - x) ? b : a, d.ranks[0]); if ($("#x")) { $("#x").value = r; predict(); bubble(); $("#pred").scrollIntoView({ behavior: "smooth", block: "center" }); } }, data: { datasets: ds }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: LADLOG ? "logarithmic" : "linear", min: LADLOG ? 1 : 0, max: 10000, title: { text: LADLOG ? "Rank (log scale)" : "Rank" }, ticks: { maxRotation: 0, autoSkip: !LADLOG, callback: v => !LADLOG || [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000].includes(v) ? v.toLocaleString() : "" } }, y: { title: { text: "Points" }, beginAtZero: false } }, plugins: { tooltip: { callbacks: { title: c => "Top " + nf(c[0].parsed.x), label: c => c.raw && c.raw.lo != null ? `Predicted final: ${nf(c.raw.y)} (${nf(c.raw.lo)} – ${nf(c.raw.hi)})` : `${c.dataset.label}: ${nf(c.parsed.y)}` } }, legend: { labels: { filter: i => i.text !== "Past events: 25%" } } } } });
 }
 async function timeChart() {
   const cv = $("#ch2"); if (!cv) return;
@@ -351,7 +354,8 @@ async function timeChart() {
   const ds = ranks.map((r, i) => ({ label: "Top " + Number(r).toLocaleString(), data: rows.filter(p => p.p[r] != null).map(p => ({ x: p.ts, y: p.p[r] })), borderColor: SER(i), backgroundColor: SER(i), pointRadius: 0, borderWidth: 2 }));
   ranks.forEach((r, i) => { if (pred[r]) ds.push({ label: "pred:" + r, data: [{ x: TW.end, y: pred[r].likely, lo: pred[r].low, hi: pred[r].safe, r }], showLine: false, borderColor: SER(i), backgroundColor: SER(i), pointStyle: "rectRot", pointRadius: 6, pointHoverRadius: 8 }); });
   const sig = JSON.stringify(ds); if (cv.dataset.sig === sig) return; cv.dataset.sig = sig;
-  mk(cv, { type: "line", data: { datasets: ds }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "linear", max: Math.max(TW.end, rows[rows.length - 1].ts), ticks: { maxTicksLimit: 8, callback: v => hm(v) }, title: { text: "Time (diamonds = predicted final at the window's end)" } }, y: { title: { text: "Points" } } }, plugins: { legend: { labels: { filter: i => !i.text.startsWith("pred:") } }, tooltip: { callbacks: { title: c => fmt(c[0].parsed.x), label: c => c.raw && c.raw.lo != null ? `Top ${nf(c.raw.r)} predicted final: ${nf(c.raw.y)} (${nf(c.raw.lo)} – ${nf(c.raw.hi)})` : `${c.dataset.label}: ${nf(c.parsed.y)}` } } } } });
+  const lastTs = rows[rows.length - 1].ts, xr = TRANGE ? { min: lastTs - TRANGE * 3600, max: lastTs + TRANGE * 360 } : { max: Math.max(TW.end, lastTs) };
+  mk(cv, { type: "line", zoom: "x", data: { datasets: ds }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: { type: "linear", ...xr, ticks: { maxTicksLimit: 8, callback: v => hm(v) }, title: { text: "Time (diamonds = predicted final at the window's end)" } }, y: { title: { text: "Points" } } }, plugins: { legend: { labels: { filter: i => !i.text.startsWith("pred:") } }, tooltip: { callbacks: { title: c => fmt(c[0].parsed.x), label: c => c.raw && c.raw.lo != null ? `Top ${nf(c.raw.r)} predicted final: ${nf(c.raw.y)} (${nf(c.raw.lo)} – ${nf(c.raw.hi)})` : `${c.dataset.label}: ${nf(c.parsed.y)}` } } } } });
 }
 async function thresholds(compact) {
   const t = await j("/api/thresholds?window=" + encodeURIComponent(TW.window_id));
@@ -391,7 +395,7 @@ async function archive() {
   if (all.error) return app.innerHTML = `<div class="card err">${esc(all.error)}</div>`;
   let TR = +store.get("archrank", 100);
   app.innerHTML = head("Archive", "Points needed at every rank in every finished window. Filter, then look at the trend.") + filterBar(all, { csv: true }) +
-    chartCard("ar", "Cutoff trend", "one dot per finished window", { cls: "tall", ctrl: `<label style="margin:0">Rank</label><select id="arr" style="width:auto;margin:0">${ARCH.map(r => `<option value="${r}" ${r === TR ? "selected" : ""}>Top ${r.toLocaleString()}</option>`).join("")}</select>` }) + `<div class="card" id="al"></div>`;
+    chartCard("ar", "Cutoff trend", "one dot per finished window · click a dot to open it", { cls: "tall", zoom: true, ctrl: `<label style="margin:0">Rank</label><select id="arr" style="width:auto;margin:0">${ARCH.map(r => `<option value="${r}" ${r === TR ? "selected" : ""}>Top ${r.toLocaleString()}</option>`).join("")}</select>` }) + `<div class="card" id="al"></div>`;
   let cur = [];
   const draw = () => {
     cur = applyFilters(all);
@@ -408,7 +412,7 @@ async function archive() {
     const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a]), shown = byClass ? names.slice(0, 7) : names;
     const grp = w => shown.includes(key(w)) ? key(w) : "Other";
     const keys = byClass && names.length > 7 ? [...shown, "Other"] : shown;
-    mk($("#ar"), { type: "scatter", data: { datasets: keys.map((k, i) => ({ label: byClass ? gm(k) : k, showLine: !byClass, data: rows.filter(w => grp(w) === k).map(w => ({ x: w.end, y: w.cutoffs[TR], n: w.name, r: w.region, c: w.category })), borderColor: SER(i), backgroundColor: withAlpha(SER(i), byClass ? .8 : 1), borderWidth: 1.4, pointRadius: 4, pointHoverRadius: 7 })) }, options: { interaction: { mode: "nearest", intersect: true }, scales: { x: { type: "linear", ticks: { maxTicksLimit: 8, callback: v => new Date(v * 1000).toLocaleDateString([], { month: "short", day: "numeric" }) }, title: { text: "Date the window ended" } }, y: { title: { text: "Points for top " + TR.toLocaleString() } } }, plugins: { tooltip: { callbacks: { title: c => c[0].raw.n, label: c => `${gm(c.raw.c)} · ${c.raw.r} · ${new Date(c.parsed.x * 1000).toLocaleDateString()}: ${nf(c.parsed.y)}` } } } } });
+    mk($("#ar"), { type: "scatter", zoom: "x", clickMode: "nearest", clickIntersect: true, click: hit => { const r = hit.element.$context.raw; if (r && r.id) location.hash = "#/t/" + encodeURIComponent(r.id); }, data: { datasets: keys.map((k, i) => ({ label: byClass ? gm(k) : k, showLine: !byClass, data: rows.filter(w => grp(w) === k).map(w => ({ x: w.end, y: w.cutoffs[TR], n: w.name, r: w.region, c: w.category, id: w.window_id })), borderColor: SER(i), backgroundColor: withAlpha(SER(i), byClass ? .8 : 1), borderWidth: 1.4, pointRadius: 4, pointHoverRadius: 7 })) }, options: { interaction: { mode: "nearest", intersect: true }, scales: { x: { type: "linear", ticks: { maxTicksLimit: 8, callback: v => new Date(v * 1000).toLocaleDateString([], { month: "short", day: "numeric" }) }, title: { text: "Date the window ended" } }, y: { title: { text: "Points for top " + TR.toLocaleString() } } }, plugins: { tooltip: { callbacks: { title: c => c[0].raw.n, label: c => `${gm(c.raw.c)} · ${c.raw.r} · ${new Date(c.parsed.x * 1000).toLocaleDateString()}: ${nf(c.parsed.y)}` } } } } });
     const v = rows.map(w => w.cutoffs[TR]).sort((a, b) => a - b), med = v[v.length >> 1];
     $("#ar-take").innerHTML = take(byClass ? "warn" : "", byClass ? `${rows.length} events across every gamemode: median <b>${nf(med)}</b>, but the range is ${nf(v[0])} – ${nf(v[v.length - 1])} because gamemodes score very differently. Pick a <b>Gamemode</b> above to see one clean trend per region.` : `${rows.length} events: median points for top ${TR.toLocaleString()} <b>${nf(med)}</b>, from ${nf(v[0])} to ${nf(v[v.length - 1])}. Each line is one region.`);
     $("#ar-tbl").innerHTML = table(["Ended", "Region", "Event", "Points"], rows.slice(-60).reverse().map(w => [fmt(w.end), w.region, esc(w.name), nf(w.cutoffs[TR])]), ["", "", "", "n"]);
@@ -461,7 +465,7 @@ async function classPage(name) {
     const order = CF.by === "region" ? REGIONS : STAGES.map(s => s[0]).concat("unknown");
     const groups = groupKey ? order.map(g => [g, evs.filter(e => groupKey(e) === g)]).filter(([, v]) => v.length) : [];
     $("#cbody").innerHTML = `<div class="kpis">${kpi("Events", evs.length)}${kpi("Median top 1", m(1))}${kpi("Median top 100", m(100), "", "hero")}${kpi("Median top 1,000", m(1000))}${kpi("Median top 5,000", m(5000))}</div>
-      <div class="grid g2">${chartCard("cf", groupKey ? "Median points at each rank, by " + CF.by : "Points needed at each rank", groupKey ? "one line per " + CF.by : "range across the selected events", { cls: "tall", table: false })}${chartCard("cc", "Cutoffs across events", "oldest to newest", { cls: "tall", table: false })}</div>
+      <div class="grid g2">${chartCard("cf", groupKey ? "Median points at each rank, by " + CF.by : "Points needed at each rank", groupKey ? "one line per " + CF.by : "range across the selected events", { cls: "tall", table: false, zoom: true })}${chartCard("cc", "Cutoffs across events", "oldest to newest · click a point to open that event", { cls: "tall", table: false })}</div>
       <div id="ctake"></div>
       <div class="card"><div class="hd"><h2>Points needed to reach each rank</h2></div>${table(["Rank", "Events", "Min", "25%", "Median", "75%", "Max"], ranks.map(r => ["Top " + r.toLocaleString(), t[r].n, nf(t[r].min), nf(t[r].p25), `<b>${nf(t[r].median)}</b>`, nf(t[r].p75), nf(t[r].max)]), ["", "n", "n", "n", "n", "n", "n"])}</div>
       <div class="card"><div class="hd"><h2>Events</h2><span class="sub">${evs.length}</span></div>${table(["Ended", "Region", "Stage", "Event", "#1", "#100", "#1000"], evs.slice().reverse().map(e => [fmt(e.end), e.region, stageName(e.stage), link(e.window_id, e.name), nf(e.cutoffs[1]), nf(e.cutoffs[100]), nf(e.cutoffs[1000])]), ["", "", "", "", "n", "n", "n"])}</div>`;
@@ -469,7 +473,7 @@ async function classPage(name) {
     const tip = { title: c => "Top " + nf(c[0].parsed.x), label: c => `${c.dataset.label}: ${nf(c.parsed.y)}` };
     if (!groupKey) {
       const P = k => ranks.map(r => ({ x: r, y: t[r][k] }));
-      mk($("#cf"), { type: "line", data: { datasets: [
+      mk($("#cf"), { type: "line", zoom: "x", data: { datasets: [
         { label: "Min", data: P("min"), borderColor: "transparent", pointRadius: 0, fill: false },
         { label: "Min – max", data: P("max"), borderColor: "transparent", backgroundColor: withAlpha(SER(0), .12), pointRadius: 0, fill: "-1" },
         { label: "25%", data: P("p25"), borderColor: "transparent", pointRadius: 0, fill: false },
@@ -479,14 +483,14 @@ async function classPage(name) {
       $("#ctake").innerHTML = "";
     } else {
       const gs = groups.map(([g, v]) => [g, cutStats(v), v.length]);
-      mk($("#cf"), { type: "line", data: { datasets: gs.map(([g, st, n]) => ({ label: `${gname(g)} (${n})`, data: ranks.filter(r => st[r] && st[r].n >= 2).map(r => ({ x: r, y: st[r].median })), borderColor: SER(order.indexOf(g)), backgroundColor: SER(order.indexOf(g)), borderWidth: 2.5, pointRadius: 3 })) }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: logX, y: { title: { text: "Median points" } } }, plugins: { tooltip: { callbacks: tip } } } });
+      mk($("#cf"), { type: "line", zoom: "x", data: { datasets: gs.map(([g, st, n]) => ({ label: `${gname(g)} (${n})`, data: ranks.filter(r => st[r] && st[r].n >= 2).map(r => ({ x: r, y: st[r].median })), borderColor: SER(order.indexOf(g)), backgroundColor: SER(order.indexOf(g)), borderWidth: 2.5, pointRadius: 3 })) }, options: { interaction: { mode: "nearest", axis: "x", intersect: false }, scales: { x: logX, y: { title: { text: "Median points" } } }, plugins: { tooltip: { callbacks: tip } } } });
       const at = [100, 1000].map(r => {
         const v = gs.filter(([, st]) => st[r] && st[r].n >= 2).map(([g, st]) => [g, st[r].median]).sort((a, b) => b[1] - a[1]);
         return v.length > 1 ? `At top ${r.toLocaleString()}, <b>${esc(gname(v[0][0]))}</b> needs the most (<b>${nf(v[0][1])}</b>) and <b>${esc(gname(v[v.length - 1][0]))}</b> the least (<b>${nf(v[v.length - 1][1])}</b>), a gap of ${pc(v[0][1] / v[v.length - 1][1] - 1)}.` : "";
       }).filter(Boolean);
       $("#ctake").innerHTML = at.length ? take("", at.join(" ")) : "";
     }
-    mk($("#cc"), { type: "line", data: { labels: evs.map(e => e.region + " " + new Date(e.end * 1000).toLocaleDateString([], { month: "short", day: "numeric" })),
+    mk($("#cc"), { type: "line", click: hit => { const e = evs[hit.index]; if (e) location.hash = "#/t/" + encodeURIComponent(e.window_id); }, data: { labels: evs.map(e => e.region + " " + new Date(e.end * 1000).toLocaleDateString([], { month: "short", day: "numeric" })),
       datasets: [1, 100, 1000, 5000].map((r, i) => ({ label: "Top " + r.toLocaleString(), data: evs.map(e => e.cutoffs[r] ?? null), borderColor: SER(i), backgroundColor: SER(i), pointRadius: 2 })) }, options: { scales: { x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } }, y: { title: { text: "Points" } } } } });
   };
   const save = () => { store.set("classf", CF); draw(); };

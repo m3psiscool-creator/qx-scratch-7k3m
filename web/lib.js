@@ -91,7 +91,7 @@ const merge = (a, b) => { for (const k in b) { if (b[k] && typeof b[k] === "obje
 function themeChart() {
   const D = Chart.defaults;
   D.color = cssv("--tx2"); D.borderColor = cssv("--grid"); D.font.family = "system-ui,-apple-system,'Segoe UI',sans-serif"; D.font.size = 12;
-  D.animation = { duration: 220 };
+  D.animation = false;   // animations clash with the page re-drawing charts while they run (Chart.js 'this._fn' error)
 }
 // mk(canvas, config) -> Chart with the site look. config.options is merged over the defaults.
 function mk(canvas, cfg) {
@@ -101,7 +101,7 @@ function mk(canvas, cfg) {
   const grid = cssv("--grid"), mut = cssv("--mut");
   const axis = { grid: { color: grid, drawTicks: false }, border: { color: cssv("--axis") }, ticks: { color: mut, padding: 6, callback: v => typeof v === "number" ? v.toLocaleString() : v } };
   const base = {
-    responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+    responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
     elements: { line: { borderWidth: 2, tension: 0.2 }, point: { radius: 0, hoverRadius: 5, hitRadius: 14, borderWidth: 2, borderColor: cssv("--sf") }, bar: { borderRadius: 4, borderSkipped: "bottom" } },
     plugins: {
       legend: { position: "bottom", labels: { usePointStyle: true, pointStyle: "rectRounded", boxWidth: 8, boxHeight: 8, padding: 14, color: cssv("--tx2") } },
@@ -114,13 +114,24 @@ function mk(canvas, cfg) {
   base.scales.x.ticks.callback = tickFmt; base.scales.y.ticks.callback = tickFmt;
   base.scales.x.grid.display = cfg.type === "bar" ? false : true;
   const out = { type: cfg.type, data: cfg.data, options: merge(base, cfg.options || {}) };
+  // zoom with ctrl+scroll or a pinch, pan by dragging, double-click to reset
+  if (cfg.zoom) { const mode = cfg.zoom === "xy" ? "xy" : "x"; out.options.plugins.zoom = { limits: { x: { min: "original", max: "original" }, y: { min: "original", max: "original" } }, zoom: { wheel: { enabled: true, modifierKey: "ctrl" }, pinch: { enabled: true }, mode }, pan: { enabled: true, mode, threshold: 8 } }; }
+  // click a point/bar/line: cfg.click(hit, chart)
+  if (cfg.click) {
+    out.options.onClick = (evt, els, ch) => { const hit = ch.getElementsAtEventForMode(evt.native || evt, cfg.clickMode || "nearest", { intersect: cfg.clickIntersect === true, axis: cfg.clickAxis || "x" }, true); if (hit.length) setTimeout(() => cfg.click(hit[0], ch), 0); };   // after the chart has finished handling the event, so a click may redraw it
+    out.options.onHover = (evt, els, ch) => { ch.canvas.style.cursor = els.length ? "pointer" : "default"; };
+  }
   Object.values(out.options.scales).forEach(s => { if (s.title && s.title.text) { s.title.display = true; s.title.color = cssv("--mut"); s.title.font = { size: 11, weight: "600" }; } });
-  const c = new Chart(canvas, out); charts.push(c); return c;
+  const c = new Chart(canvas, out); charts.push(c);
+  if (cfg.zoom) canvas.addEventListener("dblclick", () => { try { c.resetZoom(); } catch (e) { } });
+  return c;
 }
 // A titled chart card with an optional table view (accessibility + exact numbers).
+const TOOL = { reset: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>', png: '<path d="M12 3v12M7 10l5 5 5-5M4 20h16"/>' };
 function chartCard(id, title, sub, o = {}) {
-  return `<div class="card"><div class="hd"><h2>${title}</h2><span class="sub">${sub || ""}</span></div>${o.ctrl ? `<div class="ctrl" id="${id}-ctrl">${o.ctrl}</div>` : ""}
-    <div class="cv ${o.cls || ""}"><canvas id="${id}"></canvas></div><div id="${id}-take"></div>${o.table !== false ? `<details class="tv"><summary>Show as table</summary><div id="${id}-tbl"></div></details>` : ""}</div>`;
+  const tool = (act, tip) => `<button class="tool" data-chart-act="${act}" data-for="${id}" data-name="${esc(String(title).replace(/<[^>]*>/g, "").replace(/\W+/g, "-").toLowerCase())}" title="${tip}" aria-label="${tip}"><svg viewBox="0 0 24 24">${TOOL[act]}</svg></button>`;
+  return `<div class="card"><div class="hd"><h2>${title}</h2><span class="hr"><span class="sub">${sub || ""}</span><span class="tools">${o.zoom ? tool("reset", "Reset zoom (or double-click the chart)") : ""}${tool("png", "Save as image")}</span></span></div>${o.ctrl ? `<div class="ctrl" id="${id}-ctrl">${o.ctrl}</div>` : ""}
+    <div class="cv ${o.cls || ""}"><canvas id="${id}"></canvas></div>${o.zoom ? '<div class="hint">Drag to pan · Ctrl + scroll or pinch to zoom · double-click to reset</div>' : ""}<div id="${id}-take"></div>${o.table !== false ? `<details class="tv"><summary>Show as table</summary><div id="${id}-tbl"></div></details>` : ""}</div>`;
 }
 const take = (kind, html) => `<div class="takeaway ${kind || ""}">${icon("info")}<div>${html}</div></div>`;
 function table(head, rows, cls = []) {
@@ -140,3 +151,18 @@ window.addEventListener("focus", () => setTimeout(redrawCharts, 100));
 window.addEventListener("pageshow", () => setTimeout(redrawCharts, 100));
 let _lostAt = 0;
 document.addEventListener("contextlost", e => { if (e.target && e.target.tagName === "CANVAS" && Date.now() - _lostAt > 5000) { _lostAt = Date.now(); setTimeout(() => { if (typeof route === "function") route(); }, 150); } }, true);
+
+// chart toolbar buttons (reset zoom, save as image)
+function savePng(ch, name) {
+  const c = ch.canvas, t = document.createElement("canvas"); t.width = c.width; t.height = c.height;
+  const x = t.getContext("2d"); x.fillStyle = cssv("--sf"); x.fillRect(0, 0, t.width, t.height); x.drawImage(c, 0, 0);
+  t.toBlob(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = (name || "chart") + ".png"; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 3000); });
+}
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-chart-act]"); if (!b) return;
+  const cv = document.getElementById(b.dataset.for), ch = cv && window.Chart && Chart.getChart(cv); if (!ch) return;
+  if (b.dataset.chartAct === "reset") { try { ch.resetZoom(); } catch (er) { } } else savePng(ch, b.dataset.name);
+});
+// normal distribution, for turning a points total into a chance
+const erf = x => { const s = Math.sign(x), t = 1 / (1 + 0.3275911 * Math.abs(x)); return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x)); };
+const phi = x => 0.5 * (1 + erf(x / Math.SQRT2));

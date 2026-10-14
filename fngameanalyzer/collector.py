@@ -145,9 +145,13 @@ def backfill_names(budget):
     return len(got)
 
 
+_BOOT = time.time()   # when this server process started (a fresh process has empty caches)
+
+
 def run_tick(duration=50, interval=30, force_sync=False):
     """Poll now and every `interval` seconds until `duration` has passed."""
     t0 = time.time()
+    eg0 = getattr(storage, "_EG", {}).get("bytes", 0)
     try:
         e = Epic(auth.Session())
         e.s.bearer()  # keeps the rolling login alive even when nothing is live
@@ -179,6 +183,8 @@ def run_tick(duration=50, interval=30, force_sync=False):
     except Exception as ex:
         log.append(("error", "extras", str(ex)[:120]))
     out = {"ok": True, "synced": synced, "log": log[-12:], "seconds": round(time.time() - t0, 1)}
+    used = getattr(storage, "_EG", {}).get("bytes", 0) - eg0
+    log.append(("meter", f"process age {round(time.time() - _BOOT)}s", f"{round(used / 1000)} KB read this pass"))
     storage.kv_set("last_tick", {"at": time.time(), "synced": synced, "log": log[-12:]})
     storage.egress_flush()
     return out

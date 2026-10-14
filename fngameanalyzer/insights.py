@@ -251,5 +251,6 @@ def status():
         by[w["status"]] = by.get(w["status"], 0) + 1
     return {"login": s, "last_tick_age_s": round(time.time() - tick["at"]) if tick else None,
             "last_tick": (tick or {}).get("log", []), "counts": c,
-            "egress_mb_month": round(storage.egress_month() / 1e6, 1), "windows_by_status": by,
+            "egress_mb_month": round(storage.egress_month() / 1e6, 1),
+            "egress_by": storage.kv_get("egress_by") or [], "windows_by_status": by,
             "regions": config.TRACKED_REGIONS, "now": time.time()}

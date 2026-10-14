@@ -36,27 +36,33 @@ ALTERS = ["ALTER TABLE windows ADD COLUMN IF NOT EXISTS deep TEXT",
           "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS deep TEXT"]
 _ready = False
 _lock = threading.Lock()
-_EG = {"bytes": 0}      # bytes read out of the database by this process (approximate)
+_EG = {"bytes": 0, "by": {}}   # bytes read out of the database by this process (approximate), by query
 
 
-def _count(rows):
+def _count(rows, sql=""):
     n = 0
     for r in rows:
         for v in r:
             n += len(v) if isinstance(v, str) else (8 if v is not None else 0)
     _EG["bytes"] += n
+    tag = " ".join(str(sql).split())[:70]
+    _EG["by"][tag] = _EG["by"].get(tag, 0) + n
 
 
 class _CC(psycopg.Cursor):
+    def execute(self, query, params=None, **kw):
+        self._sql = query if isinstance(query, str) else ""
+        return super().execute(query, params, **kw)
+
     def fetchall(self):
         rows = super().fetchall()
-        _count(rows)
+        _count(rows, getattr(self, "_sql", ""))
         return rows
 
     def fetchone(self):
         r = super().fetchone()
         if r:
-            _count([r])
+            _count([r], getattr(self, "_sql", ""))
         return r
 
 
@@ -409,9 +415,14 @@ def egress_flush():
     n = _EG["bytes"]
     if n < 300_000:
         return
+    by = sorted(_EG["by"].items(), key=lambda x: -x[1])[:6]
     _EG["bytes"] = 0
+    _EG["by"] = {}
     key = "egress:" + time.strftime("%Y-%m")
     kv_set(key, (kv_get(key) or 0) + n)
+    # keep the last few heavy-hitters so they can be shown on the Status page
+    log = kv_get("egress_by") or []
+    kv_set("egress_by", ([{"at": time.time(), "mb": round(n / 1e6, 2), "by": [[k, round(v / 1e6, 2)] for k, v in by]}] + log)[:12])
 
 
 def egress_month():

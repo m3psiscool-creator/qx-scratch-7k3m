@@ -270,3 +270,42 @@ def siblings(window_id):
                         "begin": i["begin"], "end": i["end"]})
     order = {r: n for n, r in enumerate(config.ALL_REGIONS)}
     return sorted(out, key=lambda o: order.get(o["region"], 99))
+
+
+def bubble_view(window_id, goal=None, approx=False):
+    """Players around the cutoff and their chance to finish inside it."""
+    from . import sim
+    from .insights import _name_map
+    target = storage.get_window(window_id)
+    if not target:
+        raise ValueError("Unknown window")
+    if target["final"]:
+        raise ValueError("This event has finished; there is no race left.")
+    goal = goal or (goal_of(target["meta"]) or {}).get("rank") or 100
+    if goal > 700:
+        raise ValueError("The bubble table works up to rank 700 (beyond that only thresholds are stored).")
+    last = storage.snapshots(window_id, last=1)
+    if not last:
+        raise ValueError("No live board yet.")
+    snap = last[0]
+    board = storage.kv_get("board:" + window_id)
+    players = board["players"] if board and abs(board["ts"] - snap["ts"]) < 5 else None
+    model._ctx.approx = bool(approx)
+    try:
+        res = sim.bubble(target, snap, storage.windows(final=True), goal, players)
+    finally:
+        model._ctx.approx = False
+    if not res:
+        raise ValueError(f"No usable '{classify.of(target)}' history yet for a simulation. Tick 'Allow similar classes' to estimate from the nearest classes.")
+    prob = res["prob"]
+    pts, games = snap["points"], snap["games"]
+    rows = [i for i in range(len(pts)) if 0.02 <= prob[i] <= 0.985 or abs(i + 1 - goal) <= 3][:80]
+    ids = [a for i in rows for a in (players[i] if players else [])]
+    names = _name_map(ids) if ids else {}
+    return {"goal": goal, "progress": res["progress"], "age_s": round(time.time() - snap["ts"]),
+            "cutoff_now": pts[goal - 1], "cutoff_final": round(res["cutoff_median"]),
+            "safe": int((prob >= 0.985).sum()), "in_race": len(rows), "history_used": res["used_history"],
+            "rows": [{"rank": i + 1, "points": pts[i], "games": games[i], "prob": round(float(prob[i]), 3),
+                      "final": round(float(res["median"][i])),
+                      "players": [{"id": a, "name": names.get(a, a[:8])} for a in (players[i] if players else [])]}
+                     for i in rows]}

@@ -103,10 +103,11 @@ async function tournament(id) {
     <label style="margin-top:8px;display:flex;gap:8px;align-items:center"><input id="ap" type="checkbox" style="width:auto;margin:0"> Allow similar classes when this class has no history (approximate)</label>
     <div class="tabs">${presets.map(p => `<button class="sec chip" data-r="${p}">Top ${p.toLocaleString()}</button>`).join("")}</div>
     <div id="pred"></div></div>
+  <div class="card" id="bubblecard" style="display:none"><h2>Bubble: who is in the race</h2><div id="bubble"></div></div>
   <div class="card"><h2>Points needed over time</h2><div id="chartbox"><canvas id="ch" height="110"></canvas></div><div id="chnote" class="small"></div></div>
   <div class="grid g2"><div class="card"><h2>Thresholds</h2><div id="th"></div></div>
   <div class="card"><h2>Leaderboard</h2><div class="row"><div><input id="q" placeholder="Search player name"></div><div style="flex:0"><button class="sec" id="qb">Search</button></div></div><div id="bd"></div></div></div>`;
-  $("#go").onclick = () => predict();
+  $("#go").onclick = () => { predict(); bubble(); };
   if (w.goal) $("#goalbtn").onclick = () => { $("#x").value = w.goal.rank; predict() };
   document.querySelectorAll("[data-r]").forEach(b => b.onclick = () => { $("#x").value = b.dataset.r; predict() });
   $("#qb").onclick = () => { TQ = $("#q").value.trim(); TPAGE = 0; boardLoad() };
@@ -114,8 +115,8 @@ async function tournament(id) {
   const active = LIVE.includes(w.status);
   const tick = () => { const t = w.begin - Date.now() / 1000, e = w.end - Date.now() / 1000; $("#cd") && ($("#cd").innerHTML = t > 0 ? `starts in <b>${dur(t)}</b>` : e > 0 ? `ends in <b>${dur(e)}</b>` : "") };
   tick(); every(1000, tick);
-  await Promise.all([predict(), chart(), thresholds(), boardLoad()]);
-  if (active || w.status === "upcoming") every(30000, () => { predict(true); chart(); thresholds(); if (TPAGE === 0 && !TQ) boardLoad() });
+  await Promise.all([predict(), chart(), thresholds(), boardLoad(), bubble()]);
+  if (active || w.status === "upcoming") every(30000, () => { predict(true); chart(); thresholds(); bubble(); if (TPAGE === 0 && !TQ) boardLoad() });
 }
 async function predict(quiet) {
   const x = +$("#x").value; TTOP = x;
@@ -135,6 +136,20 @@ function evidence(d) {
   if (sn) h += `<div class="small">Board refreshed ${ago(d.snapshot_age_s)} · ${sn.count} snapshots saved · ${d.board_players} players on the board</div>`;
   if (lv?.analogs?.length) h += `<details><summary class="small">Same moment in ${lv.analogs.length} past events of this class</summary>${table(["Region", "Event", "Then", "Final", "×"], lv.analogs.map(a => [a.region, esc(a.window.replace(/^S\d+_/, "")), nf(a.now), nf(a.final), a.now ? (a.final / a.now).toFixed(2) : "-"]), ["", "", "n", "n", "n"])}</details>`;
   return h + `<div class="small">${esc(d.method || "")}</div>`;
+}
+async function bubble() {
+  if (!TW || !["live", "games finishing"].includes(TW.status)) return;
+  const card = $("#bubblecard"); if (!card) return;
+  const goal = (+$("#x").value > 0 && +$("#x").value <= 700) ? +$("#x").value : (TW.goal ? Math.min(TW.goal.rank, 700) : 100);
+  const b = await j(`/api/bubble?window=${encodeURIComponent(TW.window_id)}&rank=${goal}&approx=${$("#ap").checked ? 1 : 0}`);
+  card.style.display = "block";
+  if (b.error) { $("#bubble").innerHTML = `<p class="mut">${esc(b.error)}</p>`; return; }
+  const col = p => p >= 0.8 ? "var(--ok)" : p >= 0.4 ? "var(--warn)" : "var(--mut)";
+  $("#bubble").innerHTML = `<p>Chance to finish in the <b>top ${nf(b.goal)}</b>. Cutoff now <b>${nf(b.cutoff_now)}</b> pts, expected to end near <b>${nf(b.cutoff_final)}</b>.
+   <small>${b.safe} players are already virtually safe. Updated ${ago(b.age_s)}. ${b.history_used ? "Past results used for " + b.history_used + " entries." : ""}</small></p>` +
+    table(["#", "Player", "Pts", "G", "Expected final", "Chance"], b.rows.map(r => [r.rank, r.players.length ? r.players.map(p => `<a href="#/player/${p.id}">${esc(p.name)}</a>`).join(" + ") : '<span class="mut">-</span>', nf(r.points), r.games, nf(r.final),
+      `<b style="color:${col(r.prob)}">${Math.round(r.prob * 100)}%</b>`]), ["", "", "n", "n", "n", "n"]) +
+    `<p class="small">Each player is simulated game by game with comparable players from past events of this class. The percentages are corrected with a back-test (when the raw simulation said 90%, the real rate was nearer 70%), so treat them as rough.</p>`;
 }
 async function chart() {
   const s = await j("/api/series?window=" + encodeURIComponent(TW.window_id));

@@ -31,7 +31,10 @@ def _snap(e, w):
     try:
         lb = e.leaderboard(w["event_id"], w["window_id"], MAX_RANK)
         if lb["points"]:
-            storage.save_snapshot(w["window_id"], lb)
+            ts = time.time()
+            storage.save_snapshot(w["window_id"], lb, ts)
+            if lb.get("players"):   # accounts behind every rank, aligned with this snapshot
+                storage.kv_set("board:" + w["window_id"], {"ts": ts, "players": lb["players"]})
             return ("snapshot", w["window_id"], len(lb["points"]))
     except Exception as ex:  # one bad window must not stop the others
         return ("error", w["window_id"], str(ex)[:150])

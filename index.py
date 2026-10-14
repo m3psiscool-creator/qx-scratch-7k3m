@@ -155,6 +155,11 @@ def series(window: str):
         return _err(e)
 
 
+@app.get("/api/bubble")
+def bubble(window: str, rank: int = 0, approx: int = 0):
+    return _api(service.bubble_view, window, rank or None, bool(approx))
+
+
 @app.get("/api/live")
 def live(window: str):
     try:

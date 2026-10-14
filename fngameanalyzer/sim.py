@@ -49,7 +49,7 @@ class Tables:
         return np.array([0])
 
 
-def simulate(P, g, tables, ranks, S=200, seed=0, cap=None, pace=True):
+def simulate(P, g, tables, ranks, S=200, seed=0, cap=None, pace=True, m_eff=None, full=False):
     """P, g: points and games per player. Returns {rank: array of S simulated final scores}.
 
     pace: this event may run faster or slower than the comparison events. A player's games are
@@ -58,7 +58,7 @@ def simulate(P, g, tables, ranks, S=200, seed=0, cap=None, pace=True):
     rng = np.random.default_rng(seed)
     P, g = np.asarray(P, float), np.asarray(g, int)
     n = len(P)
-    m = np.divide(P, g, out=np.zeros(n), where=g > 0)
+    m = np.divide(P, g, out=np.zeros(n), where=g > 0) if m_eff is None else np.asarray(m_eff, float)
     pos = np.sort(g[g > 0])
     ratio = 1.0
     g_eq = g.copy()
@@ -88,12 +88,68 @@ def simulate(P, g, tables, ranks, S=200, seed=0, cap=None, pace=True):
         add[idx] = (draws * mask).sum(axis=2)
     last_info["games_left_top200"] = float(nadd[:200].mean()) if nadd.size else 0.0
     final = P[:, None] + add
+    if full:
+        return final
     final.sort(axis=0)
     return {r: final[-r, :] for r in ranks if r <= n}
 
 
 _cal = {}
 last_info = {}
+_hist = {}
+PRIOR_GAMES = 2.0     # pseudo-games of evidence per past event
+MAX_PRIOR_GAMES = 6.0
+
+
+def history_ratios(target, finished):
+    """account -> list of (skill ratio, games): points per game relative to that event's field,
+    from earlier finished events of the SAME class."""
+    from . import classify
+    cat = classify.of(target)
+    key = (cat, round(target["begin"]), len(finished))
+    if key in _hist:
+        return _hist[key]
+    out = {}
+    for h in finished:
+        if classify.of(h) != cat or h["window_id"] == target["window_id"] or h["end"] >= target["begin"]:
+            continue
+        if not h.get("players") or not h.get("sessions"):
+            continue
+        tg = model._timed_games(h)
+        means = [(sum(pt for _, pt in gs) / len(gs)) if gs else None for gs in tg]
+        vals = [m for m in means if m]
+        if len(vals) < 100:
+            continue
+        mu = float(np.mean(vals))
+        for i, accts in enumerate(h["players"]):
+            if i < len(means) and means[i]:
+                for a in accts:
+                    out.setdefault(a, []).append((means[i] / mu, len(tg[i])))
+    _hist[key] = out
+    return out
+
+
+def skill_rates(P, g, players, hist):
+    """Blend each entry's points-per-game so far with what their past results in this class say."""
+    P, g = np.asarray(P, float), np.asarray(g, int)
+    n = len(P)
+    m = np.divide(P, g, out=np.zeros(n), where=g > 0)
+    live = m[g > 0]
+    if not len(live) or not hist:
+        return m, 0
+    mu = float(live.mean())
+    m_eff = m.copy()
+    used = 0
+    for i in range(n):
+        rs = [r for a in players[i] for r in hist.get(a, [])]
+        if not rs or g[i] == 0:
+            continue
+        ratio = float(np.mean([r for r, _ in rs]))
+        k = min(MAX_PRIOR_GAMES, PRIOR_GAMES * len(rs) / max(1, len(players[i])))
+        m_eff[i] = (k * ratio * mu + g[i] * m[i]) / (k + g[i])
+        used += 1
+    return m_eff, used
+
 
 
 def _state(w, t):
@@ -149,3 +205,47 @@ def live_estimate(target, snap, finished, rank):
     return {"mean": mean, "var": var, "progress": p, "basis": "player simulation", "learned": True,
             "current": cur, "n": len(pool), "backtest_n": cal_n, "bias": round(math.expm1(bias), 3),
             "games_left_median": games_left, "analogs": analogs}
+
+
+BUBBLE_X = [0.0, 0.01, 0.025, 0.033, 0.05, 0.075, 0.087, 0.122, 0.175, 0.215, 0.288, 0.363, 0.461, 0.924, 1.0]
+BUBBLE_Y = [0.012, 0.017, 0.025, 0.033, 0.05, 0.066, 0.082, 0.104, 0.142, 0.191, 0.237, 0.283, 0.361, 0.689, 0.95]
+
+
+def honest(prob):
+    """The raw simulation is overconfident when it is sure; this is the back-tested correction."""
+    return np.interp(prob, BUBBLE_X, BUBBLE_Y)
+
+
+def bubble_probs(P, g, tables, goal, S=300, seed=3, cap=None, m_eff=None, shift=0.0, noise=0.0):
+    """Chance that each entry finishes in the top `goal`, plus its median final and expected games.
+
+    shift/noise move and blur the cutoff the same way the back-test says the simulation misses it."""
+    final = simulate(P, g, tables, [], S=S, seed=seed, cap=cap, m_eff=m_eff, full=True)
+    n = final.shape[0]
+    goal = min(goal, n)
+    thr = np.sort(final, axis=0)[-goal, :]
+    rng = np.random.default_rng(seed + 1)
+    thr = thr * np.exp(shift + (rng.normal(0, noise, size=S) if noise > 0 else 0.0))
+    prob = (final >= thr[None, :]).mean(axis=1)
+    return prob, np.median(final, axis=1), thr
+
+
+def bubble(target, snap, finished, goal, players=None, approx=False):
+    pool = model.shape_pool(target, finished)
+    if len(pool) < 3 or not snap or goal > len(snap["points"]):
+        return None
+    after = snap["ts"] - target["end"]
+    p = min(max((snap["ts"] - target["begin"]) / max(target["end"] - target["begin"], 1), 0.0), 1.0)
+    if p < 0.03:
+        return None
+    tables = Tables(pool, p, after)
+    cap = (target.get("meta") or {}).get("match_cap")
+    P, g = np.asarray(snap["points"], float), np.asarray(snap["games"], int)
+    m_eff, used = (None, 0)
+    if players and len(players) == len(P):
+        hist = history_ratios(target, finished)
+        if hist:
+            m_eff, used = skill_rates(P, g, players, hist)
+    raw, med, thr = bubble_probs(P, g, tables, goal, cap=cap, m_eff=m_eff)
+    return {"prob": honest(raw), "raw": raw, "median": med, "cutoff_median": float(np.median(thr)),
+            "used_history": used, "progress": p}

@@ -41,7 +41,7 @@ REQUEST_DELAY =float(os.environ.get("FNGA_DELAY", "0.4"))  # seconds between API
 ALL_REGIONS = ["NAC", "NAW", "EU", "BR", "ASIA", "ME", "OCE"]
 TRACKED_REGIONS = [r for r in os.environ.get("FNGA_REGIONS", ",".join(ALL_REGIONS)).split(",") if r]
 # region parameter of Epic's event download call (NAE returns both NAC and NAW events)
-DOWNLOAD_REGIONS = ["NAE", "EU", "BR", "ASIA", "ME", "OCE"]
+DOWNLOAD_REGIONS = ["NAC", "NAW", "NAE", "EU", "BR", "ASIA", "ME", "OCE"]
 
 # Points are stored at these ranks for every event (Epic lists at most 10,000 places).
 DEEP_RANKS = [1000] + list(range(1500, 10001, 500))

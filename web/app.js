@@ -149,7 +149,7 @@ async function bubble() {
    <small>${b.safe} players are already virtually safe. Updated ${ago(b.age_s)}. ${b.history_used ? "Past results used for " + b.history_used + " entries." : ""}</small></p>` +
     table(["#", "Player", "Pts", "G", "Expected final", "Chance"], b.rows.map(r => [r.rank, r.players.length ? r.players.map(p => `<a href="#/player/${p.id}">${esc(p.name)}</a>`).join(" + ") : '<span class="mut">-</span>', nf(r.points), r.games, nf(r.final),
       `<b style="color:${col(r.prob)}">${Math.round(r.prob * 100)}%</b>`]), ["", "", "n", "n", "n", "n"]) +
-    `<p class="small">Each player is simulated game by game with comparable players from past events of this class. The percentages are corrected with a back-test (when the raw simulation said 90%, the real rate was nearer 70%), so treat them as rough.</p>`;
+    `<p class="small">Each player is simulated game by game with comparable players from past events of this class. The percentages are checked against how this class of event actually ended before, but a few past events is not much data. In past events the current leaders finished inside the cutoff more often than these percentages say (for example 68% did when this said 51%), so the top of the table is conservative.</p>`;
 }
 async function chart() {
   const s = await j("/api/series?window=" + encodeURIComponent(TW.window_id));

@@ -207,13 +207,58 @@ def live_estimate(target, snap, finished, rank):
             "games_left_median": games_left, "analogs": analogs}
 
 
-BUBBLE_X = [0.0, 0.01, 0.025, 0.033, 0.05, 0.075, 0.087, 0.122, 0.175, 0.215, 0.288, 0.363, 0.461, 0.924, 1.0]
-BUBBLE_Y = [0.012, 0.017, 0.025, 0.033, 0.05, 0.066, 0.082, 0.104, 0.142, 0.191, 0.237, 0.283, 0.361, 0.689, 0.95]
+_bmap = {}
+SHRINK = 5000.0   # samples at which the fitted correction gets half the weight
 
 
-def honest(prob):
-    """The raw simulation is overconfident when it is sure; this is the back-tested correction."""
-    return np.interp(prob, BUBBLE_X, BUBBLE_Y)
+def bubble_map(pool, p, goal, S=100):
+    """Reliability correction fitted on this class's own past events (leave-one-event-out).
+
+    Returns (knots_x, knots_y, samples). The raw simulation is overconfident for some classes and
+    underconfident for others, so a single global map would be wrong."""
+    key = (tuple(sorted(w["window_id"] for w in pool)), round(p, 1), goal)
+    if key in _bmap:
+        return _bmap[key]
+    xs, ys = [], []
+    for w in pool:
+        others = [x for x in pool if x is not w]
+        if len(others) < 2 or goal > len(w["points"]) * 0.7:
+            continue
+        P, g = _state(w, w["begin"] + p * (w["end"] - w["begin"]))
+        raw, _, _ = bubble_probs(P, g, Tables(others, p, 0), goal, S=S, cap=(w.get("meta") or {}).get("match_cap"))
+        y = np.zeros(len(P))
+        y[:goal] = 1                       # index = final rank
+        xs.append(raw)
+        ys.append(y)
+    if not xs:
+        res = (np.array([0.0, 1.0]), np.array([0.0, 1.0]), 0)
+    else:
+        X, Y = np.concatenate(xs), np.concatenate(ys)
+        o = np.argsort(X)
+        X, Y = X[o], Y[o]
+        stack = []
+        for c in np.array_split(np.arange(len(X)), min(200, len(X))):
+            if not len(c):
+                continue
+            stack.append([Y[c].mean(), len(c), X[c].mean()])
+            while len(stack) > 1 and stack[-2][0] > stack[-1][0]:
+                a, b = stack[-2], stack[-1]
+                n = a[1] + b[1]
+                stack[-2:] = [[(a[0] * a[1] + b[0] * b[1]) / n, n, (a[2] * a[1] + b[2] * b[1]) / n]]
+        kx = np.array([b[2] for b in stack])
+        ky = np.array([b[0] for b in stack])
+        res = (np.concatenate([[0.0], kx, [1.0]]), np.concatenate([[ky[0]], ky, [ky[-1]]]), len(X))
+    _bmap[key] = res
+    return res
+
+
+def honest(prob, pool=None, p=None, goal=None):
+    """Blend of the raw probability and the class's fitted correction (more data, more weight)."""
+    if pool is None:
+        return prob
+    kx, ky, n = bubble_map(pool, p, goal)
+    w = n / (n + SHRINK)
+    return (1 - w) * prob + w * np.interp(prob, kx, ky)
 
 
 def bubble_probs(P, g, tables, goal, S=300, seed=3, cap=None, m_eff=None, shift=0.0, noise=0.0):
@@ -247,5 +292,5 @@ def bubble(target, snap, finished, goal, players=None, approx=False):
         if hist:
             m_eff, used = skill_rates(P, g, players, hist)
     raw, med, thr = bubble_probs(P, g, tables, goal, cap=cap, m_eff=m_eff)
-    return {"prob": honest(raw), "raw": raw, "median": med, "cutoff_median": float(np.median(thr)),
+    return {"prob": honest(raw, pool, p, goal), "raw": raw, "median": med, "cutoff_median": float(np.median(thr)),
             "used_history": used, "progress": p}

@@ -175,7 +175,7 @@ def deep_missing(limit=1):
 
 
 _WL = {"t": 0, "rows": None}
-LIST_TTL = 300
+LIST_TTL = 600
 # the event list without the heavy parts of meta (scoring rules and reward tiers)
 SLIM = ("(jsonb_set(COALESCE(meta,'{}')::jsonb - 'rules', '{rewards}', "
         "COALESCE(COALESCE(meta,'{}')::jsonb->'rewards','{}'::jsonb) - 'tiers'))::text")
@@ -295,7 +295,21 @@ def get_window(window_id):
     return w
 
 
+_SNAP = {}
+
+
 def snapshots(window_id, last=None, light=False):
+    if last == 1:   # the newest board is read many times per pass: share it for 20 seconds
+        hit = _SNAP.get(window_id)
+        if hit and time.time() - hit[0] < 20:
+            return hit[1]
+        out = _snapshots(window_id, last)
+        _SNAP[window_id] = (time.time(), out)
+        return out
+    return _snapshots(window_id, last)
+
+
+def _snapshots(window_id, last=None):
     q = "SELECT ts,entrants,points,games,top,deep FROM snapshots WHERE window_id=%s ORDER BY ts" + (
         " DESC LIMIT %s" if last else "")
     with db() as c:

@@ -145,6 +145,12 @@ class Epic:
                 out[a["id"]] = a.get("displayName") or a["id"][:8]
         return out
 
+    def lookup(self, name):
+        """Epic display name -> account id (exact name; the lookup works for any account)."""
+        import urllib.parse
+        r = self.s.get(f"{config.ACCOUNT}/public/account/displayName/{urllib.parse.quote(name, safe='')}")
+        return {"id": r["id"], "name": r.get("displayName") or name}
+
     def raw_events(self, region="EU"):
         return self.s.get(f"{config.EVENTS}/events/Fortnite/download/{self.s.account_id}",
                           region=region, platform="Windows", teamAccountIds=self.s.account_id)
@@ -232,6 +238,31 @@ class Epic:
         return {"points": points, "games": games, "sessions": sessions, "players": players,
                 "entrants": entrants, "total_pages": total, "deep": deep_out,
                 "capped": total >= 100}
+
+    def find_entry(self, event_id, window_id, account_id, chunk=12):
+        """One player's leaderboard entry (points, rank, every game), found by reading the board page by page.
+        Epic only lets an account read its own history, but the public board lists every entry (top 10,000)."""
+        def scan(d):
+            return next((e for e in (d or {}).get("entries", []) if account_id in (e.get("teamAccountIds") or [])), None)
+
+        def get(pg):
+            try:
+                return self.page(event_id, window_id, pg)
+            except Exception:
+                return None
+        first = self.page(event_id, window_id, 0)
+        total = first.get("totalPages", 1) or 1
+        hit = scan(first)
+        if hit:
+            return hit, total
+        pages = list(range(1, total))
+        with ThreadPoolExecutor(max_workers=8) as ex:    # best ranks first, so a strong player is found in the first batch
+            for i in range(0, len(pages), chunk):
+                for d in ex.map(get, pages[i:i + chunk]):
+                    hit = scan(d)
+                    if hit:
+                        return hit, total
+        return None, total
 
     def deep_only(self, event_id, window_id):
         """Deep thresholds only (used to backfill finished events)."""

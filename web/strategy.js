@@ -19,7 +19,7 @@ const saveSS = () => store.set("sp:" + SS.w.window_id, { rank: SS.rank, conf: SS
 
 async function tabStrategy(w, open) {
   const saved = store.get("sp:" + w.window_id, {});
-  SS = { w, rank: saved.rank || (w.goal ? w.goal.rank : 100), conf: saved.conf || 0.8, played: saved.played || 0, pts: saved.pts || 0, aim: saved.aim || 0, like: saved.like || "focus", d: {} };
+  SS = { w, rank: saved.rank || (w.goal ? w.goal.rank : 100), conf: saved.conf || 0.8, played: saved.played || 0, pts: saved.pts || 0, aim: saved.aim || 0, like: saved.like || "focus", d: {}, name: store.get("epicname", ""), me: null };
   const presets = [...new Set([...(w.goal ? [w.goal.rank] : []), 1, 10, 50, 100, 250, 500, 1000, 2500, 5000])].sort((a, b) => a - b);
   const sec = (n, id, t, s) => `<div class="sec-title" id="${id}"><span class="num">${n}</span><div><h2>${t}</h2><div class="sub">${s}</div></div></div>`;
   $("#panel").innerHTML = `
@@ -32,27 +32,33 @@ async function tabStrategy(w, open) {
       <div><label>Aim for (optional)</label><input id="saim" type="number" min="0" placeholder="points" value="${SS.aim || ""}"></div>
       <div style="flex:0"><button id="sgo">Update</button></div>
     </div>
+    <div class="row" style="margin-top:10px"><div style="flex:2;min-width:220px"><label>My Epic name <span style="font-weight:500">(reads your points and games from the public leaderboard; no login needed)</span></label><input id="sme" placeholder="Epic display name" value="${esc(SS.name)}"></div><div style="flex:0"><button class="sec" id="smeb">Find me</button></div><div id="smemsg" class="small" style="flex:3;align-self:center;min-width:200px"></div></div>
     <div class="chips" style="margin-top:10px"><small>Quick pick:</small>${presets.map(p => `<button class="chip ${p === SS.rank ? "on" : ""}" data-sr="${p}">${w.goal && w.goal.rank === p ? "★ " : ""}Top ${p.toLocaleString()}</button>`).join("")}</div>
-    <div class="anch"><a href="#s-plan" data-a="s-plan">1 Plan</a><a href="#s-scoring" data-a="s-scoring">2 Scoring</a><a href="#s-fin" data-a="s-fin">3 Finishers</a><a href="#s-pace" data-a="s-pace">4 Pace</a><a href="#s-safe" data-a="s-safe">5 Safety</a><a href="#s-stop" data-a="s-stop">6 Keep playing?</a></div>
+
   </div>
+    <div class="anchbar"><a href="#s-plan" data-a="s-plan">1 Plan</a><a href="#s-scoring" data-a="s-scoring">2 Scoring</a><a href="#s-fin" data-a="s-fin">3 Finishers</a><a href="#s-pace" data-a="s-pace">4 Pace</a><a href="#s-me" data-a="s-me">5 Your games</a><a href="#s-safe" data-a="s-safe">6 Safety</a><a href="#s-stop" data-a="s-stop">7 Keep playing?</a></div>
   ${sec(1, "s-plan", "Your plan", "How many points to aim for, and the ways to get there")}<div id="p-plan">${skel(2, 160)}</div>
   ${sec(2, "s-scoring", "What the scoring rewards", "Points per placement and per elimination in this event")}<div id="p-scoring">${skel(1, 160)}</div>
   ${sec(3, "s-fin", "What finishers actually did", "Per-game numbers of real players, from the closest finished event of this gamemode")}<div id="p-fin">${skel(2, 200)}</div>
   ${sec(4, "s-pace", "Pace tracker", "Where you should be after each game")}<div id="p-pace">${skel(1, 260)}</div>
-  ${sec(5, "s-safe", "Safety margin", "How much cushion each level of certainty costs")}<div id="p-safe">${skel(1, 260)}</div>
-  ${sec(6, "s-stop", "Keep playing or stop?", "Your chance of reaching the cutoff as you play more games")}<div id="p-stop">${skel(1, 260)}</div>`;
+  ${sec(5, "s-me", "Your games", "Read from the leaderboard by your Epic name")}<div id="p-me"><div class="card empty">Type your Epic name above and press <b>Find me</b> to load your points and every game you have played here.</div></div>
+  ${sec(6, "s-safe", "Safety margin", "How much cushion each level of certainty costs")}<div id="p-safe">${skel(1, 260)}</div>
+  ${sec(7, "s-stop", "Keep playing or stop?", "Your chance of reaching the cutoff as you play more games")}<div id="p-stop">${skel(1, 260)}</div>`;
   // controls
   const readPersonal = () => { SS.conf = +$("#sconf").value; SS.played = clamp(+$("#spl").value || 0, 0, 99); SS.pts = Math.max(0, +$("#spt").value || 0); SS.aim = Math.max(0, +$("#saim").value || 0); saveSS(); };
   const apply = async () => { const r = clamp(Math.round(+$("#sx").value || SS.rank), 1, 10000); const changed = r !== SS.rank; SS.rank = r; readPersonal(); $$("[data-sr]").forEach(b => b.classList.toggle("on", +b.dataset.sr === r)); if (changed) await loadRank(); else renderPersonal(); };
   $("#sgo").onclick = apply;
+  const goMe = () => { SS.name = $("#sme").value.trim(); store.set("epicname", SS.name); loadMe(); };
+  $("#smeb").onclick = goMe; $("#sme").addEventListener("keydown", e => { if (e.key === "Enter") goMe(); });
   ["sx", "sconf", "spl", "spt", "saim"].forEach(id => $("#" + id).addEventListener(id === "sconf" ? "change" : "change", apply));
   $$("[data-sr]").forEach(b => b.onclick = () => { $("#sx").value = b.dataset.sr; apply(); });
-  $$(".anch a").forEach(a => a.onclick = e => { e.preventDefault(); $("#" + a.dataset.a).scrollIntoView({ behavior: "smooth" }); });
+  $$(".anchbar a").forEach(a => a.onclick = e => { e.preventDefault(); $("#" + a.dataset.a).scrollIntoView({ behavior: "smooth" }); });
   // data that does not depend on the rank
   j("/api/scoring?window=" + encodeURIComponent(w.window_id)).then(s => { SS.d.scoring = s; renderScoring(); renderPersonal(); });
   j("/api/tempo?window=" + encodeURIComponent(w.window_id)).then(t => { SS.d.tempo = t; renderPersonal(); });
+  if (SS.name) loadMe();
   await loadRank();
-  if (open) every(120000, () => loadRank(true));
+  if (open) { every(120000, () => loadRank(true)); every(180000, () => { if (SS.me && SS.me.found) loadMe(true); }); }
 }
 
 async function loadRank(quiet) {
@@ -71,7 +77,7 @@ async function loadRank(quiet) {
   if (SS.tok !== mine) return;
   SS.d.pace = pace; renderPersonal();
 }
-function renderPersonal() { renderPlan(); renderPace(); renderSafe(); renderStop(); }
+function renderPersonal() { renderPlan(); renderPace(); renderMe(); renderSafe(); renderStop(); }
 
 // the cutoff to aim for at the chosen certainty
 function aimPoints(conf) {
@@ -97,7 +103,9 @@ function timeLeftMin() {
 // games you can start in the time left if you finish around placement p (a game may start right before the window closes)
 const gamesFit = (p, left) => { const T = gMin(p); return T ? Math.min(left, Math.ceil(timeLeftMin() / T)) : left; };
 const invElims = (sc, v) => { if (v <= 0) return 0; const top = sc.elim.length - 1; if (v > ptsAtElims(sc, top)) return null; for (let e = 0; e <= top; e += 0.05) if (ptsAtElims(sc, e) >= v) return e; return null; };
-function typicalPlace() { const f = SS.d.profile && !SS.d.profile.error ? SS.d.profile.focus : null; return f ? f.avg_place : 10; }
+function typicalPlace() {
+  if (SS.me && SS.me.found && SS.me.games_played >= 3) return SS.me.avg_place;   // your own average finish
+  const f = SS.d.profile && !SS.d.profile.error ? SS.d.profile.focus : null; return f ? f.avg_place : 10; }
 // where you would finish at your current points-per-game, given the games that fit
 function projFinal() {
   const cap = capOf(), remCap = Math.max(0, cap - SS.played), games = SS.played + gamesFit(typicalPlace(), remCap);
@@ -301,7 +309,11 @@ function simStop(o) {
   for (let i = 0; i < S; i++) {
     cuts[i] = o.cut.fixed != null ? o.cut.fixed : Math.expm1(o.cut.mu + o.cut.sd * gauss(R));
     let draw, t = 0, tot = o.pts, g = 0; totals[0][i] = tot;
-    if (o.mode === "band" && o.players.length) { const pl = o.players[(R() * o.players.length) | 0]; draw = () => pl[(R() * pl.length) | 0]; }
+    if (o.mode !== "band" && o.own && o.own.games && o.own.games.length) {   // your real games, shrunk toward finisher form while you have few
+      const og = o.own.games, w = og.length / (og.length + (o.mode === "own" ? 0 : PRIOR_GAMES));
+      draw = () => (R() < w ? og[(R() * og.length) | 0] : o.pooled[(R() * o.pooled.length) | 0]);
+    }
+    else if (o.mode === "band" && o.players.length) { const pl = o.players[(R() * o.players.length) | 0]; draw = () => pl[(R() * pl.length) | 0]; }
     else {
       const n = o.own ? o.own.n : 1, k = o.mode === "own" ? 0 : PRIOR_GAMES, post = (n * (o.own ? o.own.mean : pm) + k * pm) / (n + k), se = o.sd / Math.sqrt(n + k);
       const sc = Math.max(0.15, post + se * gauss(R)) / pm;
@@ -324,9 +336,10 @@ function renderStop() {
   const pr = SS.d.profile, s = SS.d.safety;
   if (!pr || pr.error || !s) { el.innerHTML = `<div class="card empty">${esc(pr && pr.error || "Waiting for data…")}</div>`; return; }
   if (s.error && !SS.aim) { el.innerHTML = `<div class="card empty">${esc(s.error)}</div>`; return; }
-  const own = SS.played > 0 ? { n: SS.played, mean: SS.pts / SS.played } : null;
+  const mine = SS.me && SS.me.found ? SS.me.games.filter(g => g.points != null).map(g => [g.points, g.placement]) : null;
+  const own = SS.played > 0 ? { n: SS.played, mean: SS.pts / SS.played, games: mine && mine.length === SS.played ? mine : null } : null;
   const bands = [{ key: "focus", name: `Players around #${pr.rank}`, b: pr.focus }, ...pr.bands.map(b => ({ key: b.from + "-" + b.to, name: `Top #${b.from}–${b.to}`, b }))];
-  const opts = [...(own ? [{ key: "blend", name: `My pace blended with finishers (${nd(own.mean)} pts/game so far)`, mode: "blend" }, { key: "own", name: `Only my pace so far (${nd(own.mean)} pts/game)`, mode: "own" }] : []), ...bands.map(x => ({ ...x, mode: "band", name: x.name + ` (${nd(x.b.pts_per_game)} pts/game)` }))];
+  const opts = [...(own ? [{ key: "blend", name: `${own.games ? "My real games" : "My pace"} blended with finishers (${nd(own.mean)} pts/game so far)`, mode: "blend" }, { key: "own", name: `Only ${own.games ? "my real games" : "my pace"} so far (${nd(own.mean)} pts/game)`, mode: "own" }] : []), ...bands.map(x => ({ ...x, mode: "band", name: x.name + ` (${nd(x.b.pts_per_game)} pts/game)` }))];
   const def = own && own.n >= 3 ? "blend" : "focus";
   const sel = opts.find(x => x.key === SS.like) || opts.find(x => x.key === def) || opts[0];
   const base = bands.find(x => x.key === "focus").b;                        // the form of finishers near the target
@@ -362,4 +375,42 @@ function renderStop() {
   $("#c-stop-tbl").innerHTML = table(["Extra games", "Chance", "Adds", "10%", "Median", "90%"], xs.map(k => [k, nd(P[k], 0) + "%", k ? "+" + nd(marg[k]) : "", nf(Q[k][0]), nf(Q[k][1]), nf(Q[k][2])]), ["n", "n", "n", "n", "n", "n"]);
   $("#c-stop-take").innerHTML = take("", `Each run picks how well you play, plays games from real results (each one lasting as long as that finish really takes), stops when the window closes, and compares your total with a cutoff drawn from the prediction${fixed != null ? "" : ` (±${nd(s.sd_pct)}%)`}. ${sel.mode === "band" ? "Players are real finishers from the selected group, so it includes strong and weak runs." : sel.mode === "blend" ? `Your ${own.n} games count against ${PRIOR_GAMES} games of finisher form, so a short hot or cold start does not dominate.` : "Only your own games so far set your pace, so a short start can mislead."} It assumes you start the next game right away.`);
   $("#slike").onchange = e => { SS.like = e.target.value; saveSS(); renderStop(); };
+}
+
+// ---------------------------------------------------------------- 5 your games (read by Epic name from the public leaderboard)
+async function loadMe(quiet) {
+  const msg = $("#smemsg"), mine = ++SS.metok || (SS.metok = 1);
+  if (!SS.name) { if (msg) msg.textContent = "Type your Epic name first."; return; }
+  if (msg && !quiet) msg.innerHTML = '<span class="mut">Looking you up on the leaderboard… this can take up to 20 seconds.</span>';
+  let d;
+  try { d = await j(`/api/me?window=${encodeURIComponent(SS.w.window_id)}&name=${encodeURIComponent(SS.name)}`); } catch (e) { d = { error: "Could not reach the site." }; }
+  if (SS.metok !== mine || !$("#sme")) return;
+  if (d.error) { if (msg) msg.innerHTML = `<span class="err">${esc(d.error)}</span>`; return; }
+  SS.me = d;
+  if (d.found) {
+    SS.played = d.games_played; SS.pts = Math.round(d.points); $("#spl").value = SS.played; $("#spt").value = SS.pts; saveSS();
+    if (msg) msg.innerHTML = `<span class="ok">Found ${esc(d.name)}: rank #${nf(d.rank)}, ${nf(d.points)} points, ${d.games_played} games. Read ${hm(d.updated)}.</span>`;
+  } else if (msg) msg.innerHTML = `<span class="mut">${esc(d.message || "Not found.")}</span>`;
+  renderPersonal();
+}
+function renderMe() {
+  const el = $("#p-me"); if (!el) return; drop("me");
+  const m = SS.me;
+  if (!m) return;
+  if (!m.found) { el.innerHTML = `<div class="card empty">${esc(m.message || "Not found.")}<br><small>You can still type your games played and points in the bar above.</small></div>`; return; }
+  const pr = SS.d.profile, f = pr && !pr.error ? pr.focus : null, T = aimPoints();
+  const rem = Math.max(0, capOf() - m.games_played), Gt = gamesFit(typicalPlace(), rem), need = T == null ? null : Math.max(0, T - m.points), ppg = need == null ? null : Gt ? need / Gt : null;
+  const gs = m.games, minutes = gs.map(g => g.gap_min).filter(x => x != null), avgMin = minutes.length ? minutes.reduce((a, b) => a + b, 0) / minutes.length : null;
+  const mismatch = m.rules_total != null && Math.abs(m.rules_total - m.points) > 1;
+  el.innerHTML = `<div class="kpis">${kpi("Rank right now", "#" + nf(m.rank), m.team && m.team.length ? "with " + esc(m.team.join(", ")) : esc(m.name), "hero")}${kpi("Points", nf(m.points), nd(m.pts_per_game) + " per game" + (f ? " · finishers " + nd(f.pts_per_game) : ""))}${kpi("Games played", m.games_played, rem + " left in the format")}${kpi("Avg placement", nd(m.avg_place), f ? "finishers " + nd(f.avg_place) : "")}${kpi("Elims per game", nd(m.elims_per_game), f ? "finishers " + nd(f.elims_per_game) : "")}${kpi("Wins", m.wins, avgMin ? "about " + Math.round(avgMin) + " min between games" : "")}</div>
+  <div class="grid g2">${chartCard("c-me", "Points in each of your games", ppg ? "dashed line: what you need from here, per game" : "", { cls: "short", table: false })}${chartCard("c-me2", "Where you finished", "1 is a win", { cls: "short", table: false })}</div>
+  <div id="me-take"></div>
+  <div class="card" style="margin-top:16px"><div class="hd"><h2>Game by game</h2><span class="sub">read ${hm(m.updated)} from the leaderboard${mismatch ? " · points do not add up exactly to this event's scoring, so per-game points are approximate" : ""}</span></div>${table(["Game", "Finished", "Elims", "Points", "Ended", "Minutes since previous"], gs.map(g => [g.n, g.win ? "🏆 win" : "#" + g.placement, g.elims, g.points == null ? "-" : g.points, g.end ? hm(g.end) : "-", g.gap_min == null ? "-" : nd(g.gap_min)]), ["n", "", "n", "n", "n", "n"])}</div>`;
+  const lab = gs.map(g => g.n), ref = [];
+  if (ppg) ref.push({ axis: "y", value: ppg, label: "need " + nd(ppg) + " / game", color: cssv("--tx"), right: true });
+  if (f) ref.push({ axis: "y", value: f.pts_per_game, label: "finishers " + nd(f.pts_per_game), color: cssv("--tx2"), right: true, dash: [2, 4] });
+  put("me", mk($("#c-me"), { type: "bar", data: { labels: lab, datasets: [{ label: "Points", data: gs.map(g => g.points), backgroundColor: SER(0) }] }, options: { scales: { x: { title: { text: "Game" } }, y: { beginAtZero: true, title: { text: "Points" } } }, plugins: { legend: { display: false }, refLines: { lines: ref }, tooltip: { callbacks: { title: c => "Game " + c[0].label, label: c => `${c.parsed.y} points · finished #${gs[c.dataIndex].placement}, ${gs[c.dataIndex].elims} elims` } } } } }));
+  put("me", mk($("#c-me2"), { type: "line", data: { labels: lab, datasets: [{ label: "Placement", data: gs.map(g => g.placement), borderColor: SER(1), backgroundColor: SER(1), pointRadius: 4, borderWidth: 2.5 }] }, options: { scales: { x: { title: { text: "Game" } }, y: { reverse: true, min: 1, title: { text: "Placement (1 = best)" } } }, plugins: { legend: { display: false }, refLines: { lines: f ? [{ axis: "y", value: f.avg_place, label: "finishers " + nd(f.avg_place), color: cssv("--tx2"), right: true, dash: [2, 4] }] : [] }, tooltip: { callbacks: { title: c => "Game " + c[0].label, label: c => "Finished #" + c.parsed.y } } } } }));
+  const better = f && m.pts_per_game >= f.pts_per_game;
+  $("#me-take").innerHTML = f ? take(better ? "good" : "", `You are averaging <b>${nd(m.pts_per_game)}</b> points a game against <b>${nd(f.pts_per_game)}</b> for finishers around #${pr.rank}${ppg ? `, and you need <b>${nd(ppg)}</b> from here over about ${Gt} more games` : ""}. Your average finish is <b>${nd(m.avg_place)}</b> with <b>${nd(m.elims_per_game)}</b> elims a game (finishers: ${nd(f.avg_place)} and ${nd(f.elims_per_game)}). Plan, pace and the keep-playing simulation now use your real games.`) : "";
 }

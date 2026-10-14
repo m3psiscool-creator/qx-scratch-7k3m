@@ -57,13 +57,16 @@ async function tabStrategy(w, open) {
 async function loadRank(quiet) {
   const w = SS.w, id = encodeURIComponent(w.window_id), r = SS.rank, mine = ++SS.tok || (SS.tok = 1);
   if (!quiet) ["plan", "fin", "pace", "safe", "stop"].forEach(k => { const e = $("#p-" + k); if (e && !SS.d.safety) e.innerHTML = skel(1, 200); });
-  const [prof, safe] = await Promise.all([j(`/api/profile?window=${id}&rank=${Math.min(r, 1000)}`), j(`/api/safety?window=${id}&rank=${r}`)]);
+  // each part draws as soon as its data arrives: the safety estimate is the slow one
+  const pProf = j(`/api/profile?window=${id}&rank=${Math.min(r, 1000)}`).then(x => { if (SS.tok === mine) { SS.d.profile = x; renderFin(); renderPersonal(); } });
+  const safe = await j(`/api/safety?window=${id}&rank=${r}`);
   if (SS.tok !== mine) return;
-  SS.d.profile = prof; SS.d.safety = safe;
+  SS.d.safety = safe; renderPersonal();
   const target = safe && !safe.error ? safe.likely : 0;
-  SS.d.pace = r <= 1000 ? await j(`/api/pace?window=${id}&rank=${r}${target ? "&target=" + target : ""}`) : { error: "Pace curves need a rank inside the stored top 1,000." };
+  const pace = r <= 1000 ? await j(`/api/pace?window=${id}&rank=${r}${target ? "&target=" + target : ""}`) : { error: "Pace curves need a rank inside the stored top 1,000." };
+  await pProf;
   if (SS.tok !== mine) return;
-  renderFin(); renderPersonal();
+  SS.d.pace = pace; renderPersonal();
 }
 function renderPersonal() { renderPlan(); renderPace(); renderSafe(); renderStop(); }
 
@@ -99,7 +102,7 @@ function renderPlan() {
     ${kpi("Needed per game", ppg == null ? "-" : isFinite(ppg) ? nd(ppg) : "∞", f ? "finishers: " + nd(f.pts_per_game) : "")}
     ${kpi("Typical finisher", f ? "place " + nd(f.avg_place) : "-", f ? nd(f.elims_per_game) + " elims · wins " + pc(f.win_rate) : "")}</div>`;
   if (!sc.per_elim && sc.placement.length < 3) {
-    el.innerHTML = head + kp + verdict + `<div class="card"><p>Eliminations do not score here, so only placement matters. ${esc(sc.text)}</p></div>`; return;
+    el.innerHTML = head + kp + verdict + `<div class="card"><p>${sc.placement.length === 1 ? "Only a win scores in this event, so the plan is simply: win as many games as you can." : "Eliminations do not score here, so only placement matters."} ${esc(sc.text)}</p></div>`; return;
   }
   // frontier: average elims per game -> the average placement you must reach
   const maxE = Math.min(Math.max(sc.elim_cap || 8, 3), 12), xs = Array.from({ length: maxE * 4 + 1 }, (_, i) => i / 4);

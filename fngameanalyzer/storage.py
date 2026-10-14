@@ -101,10 +101,14 @@ def _w(r):
     return d
 
 
-def windows(final=None):
+def windows(final=None, category=None, light=False):
     q = "SELECT * FROM windows" + ("" if final is None else f" WHERE final={int(final)}")
     with db() as c:
-        return [_w(r) for r in c.execute(q + " ORDER BY end DESC")]
+        out = [_w(r) for r in c.execute(q + " ORDER BY end DESC")]
+    if category:
+        from . import classify
+        out = [w for w in out if classify.of(w) == category]
+    return out
 
 
 def get_window(window_id):
@@ -198,3 +202,20 @@ import os as _os  # noqa: E402
 
 if _os.environ.get("POSTGRES_URL") or _os.environ.get("DATABASE_URL"):
     from .storage_pg import *  # noqa: F401,F403,E402  (hosted: use Postgres instead)
+
+
+def player_rows():
+    out = []
+    for w in windows(final=True):
+        rows = []
+        for rank, accts in enumerate(w.get("players") or [], start=1):
+            sess = w["sessions"][rank - 1] if rank <= len(w["sessions"]) else []
+            plc = [g[0] for g in sess if g and g[0]]
+            for a in accts:
+                rows.append([a, rank, w["points"][rank - 1], w["games"][rank - 1],
+                             sum(1 for g in sess if len(g) > 2 and g[2]), sum(g[1] for g in sess if len(g) > 1),
+                             round(sum(plc) / len(plc), 1) if plc else None])
+        out.append({"window_id": w["window_id"], "event_id": w["event_id"], "family": w["family"],
+                    "region": w["region"], "end": w["end"], "entrants": w.get("entrants"),
+                    "meta": w["meta"], "prow": rows})
+    return out

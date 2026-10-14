@@ -21,6 +21,13 @@ def pretty(event_id, window_id):
     return (name + (" · " + " ".join(seen) if seen else "")).strip()
 
 
+def _history(target):
+    """Finished events the model may use: the same class, or every class when approximation is on."""
+    if model.approx():
+        return storage.windows(final=True)
+    return storage.windows(final=True, category=classify.of(target))
+
+
 def goal_of(meta):
     """The rank the event is really about: last place with cosmetics, else last paid place, else the
     advancement cutoff."""
@@ -84,7 +91,7 @@ def _run_predict(window_id, top, entrants=None):
     target = storage.get_window(window_id)
     if not target:
         raise ValueError("Unknown window")
-    finished = storage.windows(final=True)
+    finished = _history(target)
     if target["final"]:   # already happened: show the real result, not a prediction
         def actual(rank):
             if rank <= len(target["points"]):
@@ -173,8 +180,7 @@ def live_view(window_id, n=25):
         except Exception:
             pass  # names are a nicety
     cat = classify.of(w)
-    form = player_form(ids, [f for f in storage.windows(final=True) if classify.of(f) == cat],
-                       w["family"])
+    form = player_form(ids, storage.windows(final=True, category=cat), w["family"])
     return {"snapshot": {"age_s": round(time.time() - s["ts"]), "entrants": s["entrants"]},
             "top": [{"rank": t["rank"], "points": t["points"], "games": t["games"],
                      "players": [{"id": a, "name": names.get(a, a[:8]), **form.get(a, {})}
@@ -292,7 +298,7 @@ def bubble_view(window_id, goal=None, approx=False):
     players = board["players"] if board and abs(board["ts"] - snap["ts"]) < 5 else None
     model._ctx.approx = bool(approx)
     try:
-        res = sim.bubble(target, snap, storage.windows(final=True), goal, players)
+        res = sim.bubble(target, snap, _history(target), goal, players)
     finally:
         model._ctx.approx = False
     if not res:

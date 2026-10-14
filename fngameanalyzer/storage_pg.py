@@ -13,7 +13,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS windows(
  window_id TEXT PRIMARY KEY, event_id TEXT, family TEXT, region TEXT,
  begin_ts DOUBLE PRECISION, end_ts DOUBLE PRECISION, entrants INTEGER,
- points TEXT, games TEXT, sessions TEXT, players TEXT, meta TEXT, final INTEGER DEFAULT 0);
+ points TEXT, games TEXT, sessions TEXT, players TEXT, meta TEXT, final INTEGER DEFAULT 0,
+ category TEXT, prow TEXT);
 CREATE TABLE IF NOT EXISTS snapshots(
  id SERIAL PRIMARY KEY, window_id TEXT, ts DOUBLE PRECISION,
  entrants INTEGER, points TEXT, games TEXT, top TEXT);
@@ -29,6 +30,8 @@ CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS names(account_id TEXT PRIMARY KEY, name TEXT);
 """
 ALTERS = ["ALTER TABLE windows ADD COLUMN IF NOT EXISTS deep TEXT",
+          "ALTER TABLE windows ADD COLUMN IF NOT EXISTS category TEXT",
+          "ALTER TABLE windows ADD COLUMN IF NOT EXISTS prow TEXT",
           "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS deep TEXT"]
 _ready = False
 _cache = {"t": 0, "rows": None}
@@ -65,22 +68,36 @@ FULL = COLS + ",points,games,sessions,players,deep"
 
 def upsert_window(w):
     with db() as c:
-        c.execute("""INSERT INTO windows(window_id,event_id,family,region,begin_ts,end_ts,meta)
-                     VALUES(%s,%s,%s,%s,%s,%s,%s)
+        from . import classify
+        c.execute("""INSERT INTO windows(window_id,event_id,family,region,begin_ts,end_ts,meta,category)
+                     VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
                      ON CONFLICT(window_id) DO UPDATE SET
-                       begin_ts=excluded.begin_ts, end_ts=excluded.end_ts, meta=excluded.meta""",
+                       begin_ts=excluded.begin_ts, end_ts=excluded.end_ts, meta=excluded.meta,
+                       category=excluded.category""",
                   (w["window_id"], w["event_id"], w["family"], w["region"], w["begin"], w["end"],
-                   json.dumps(w.get("meta") or {})))
+                   json.dumps(w.get("meta") or {}), classify.of(w)))
+
+
+def _player_rows(lb):
+    """[account, rank, points, games, wins, elims, avg placement] for each entry (compact player history)."""
+    rows = []
+    for rank, accts in enumerate(lb.get("players") or [], start=1):
+        sess = lb["sessions"][rank - 1] if rank <= len(lb.get("sessions") or []) else []
+        plc = [g[0] for g in sess if g and g[0]]
+        for a in accts:
+            rows.append([a, rank, lb["points"][rank - 1], lb["games"][rank - 1],
+                         sum(1 for g in sess if len(g) > 2 and g[2]), sum(g[1] for g in sess if len(g) > 1),
+                         round(sum(plc) / len(plc), 1) if plc else None])
+    return rows
 
 
 def save_final(window_id, lb):
     with db() as c:
-        c.execute("UPDATE windows SET entrants=%s,points=%s,games=%s,sessions=%s,players=%s,deep=%s,final=1"
+        c.execute("UPDATE windows SET entrants=%s,points=%s,games=%s,sessions=%s,players=%s,deep=%s,prow=%s,final=1"
                   " WHERE window_id=%s",
                   (lb["entrants"], json.dumps(lb["points"]), json.dumps(lb["games"]),
                    json.dumps(lb.get("sessions", [])), json.dumps(lb.get("players", [])),
-                   json.dumps(lb.get("deep", {})), window_id))
-    _cache["rows"] = None
+                   json.dumps(lb.get("deep", {})), json.dumps(_player_rows(lb)), window_id))
 
 
 def _series_point(lb):
@@ -107,7 +124,6 @@ def save_snapshot(window_id, lb, ts=None):
 def set_deep(window_id, deep):
     with db() as c:
         c.execute("UPDATE windows SET deep=%s WHERE window_id=%s", (json.dumps(deep), window_id))
-    _cache["rows"] = None
 
 
 def series(window_id):
@@ -141,15 +157,45 @@ def window_list():
             f"SELECT {COLS} FROM windows ORDER BY end_ts DESC").fetchall()]
 
 
-def windows(final=None):
-    if final is True and _cache["rows"] is not None and time.time() - _cache["t"] < 300:
-        return _cache["rows"]
-    q = f"SELECT {FULL} FROM windows" + ("" if final is None else f" WHERE final={int(final)}")
+_wcache = {}
+
+
+def _row_light(r):
+    d = {"window_id": r[0], "event_id": r[1], "family": r[2], "region": r[3], "begin": r[4],
+         "end": r[5], "entrants": r[6], "final": r[7], "meta": _j(r[8], {})}
+    d.update(points=_j(r[9], []), games=_j(r[10], []), deep=_j(r[11], {}))
+    return d
+
+
+def windows(final=None, category=None, light=False):
+    """Windows. `category` limits the heavy columns to one event class; `light` skips sessions and
+    players. Finished windows are cached for 10 minutes (they only ever get added)."""
+    key = (final, category, light)
+    hit = _wcache.get(key)
+    if final is True and hit and time.time() - hit[0] < 600:
+        return hit[1]
+    cols = COLS + (",points,games,deep" if light else ",points,games,sessions,players,deep")
+    where = []
+    if final is not None:
+        where.append(f"final={int(final)}")
+    if category:
+        where.append("category=%s")
+    q = f"SELECT {cols} FROM windows" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY end_ts DESC"
     with db() as c:
-        rows = [_row(r) for r in c.execute(q + " ORDER BY end_ts DESC").fetchall()]
+        rows = c.execute(q, (category,) if category else ()).fetchall()
+    out = [(_row_light if light else _row)(r) for r in rows]
     if final is True:
-        _cache.update(t=time.time(), rows=rows)
-    return rows
+        _wcache[key] = (time.time(), out)
+    return out
+
+
+def player_rows():
+    """Compact per-event player results (for the player pages) without the heavy columns."""
+    with db() as c:
+        rows = c.execute("SELECT window_id,event_id,family,region,end_ts,entrants,meta,prow FROM windows "
+                         "WHERE final=1 AND prow IS NOT NULL ORDER BY end_ts DESC").fetchall()
+    return [{"window_id": r[0], "event_id": r[1], "family": r[2], "region": r[3], "end": r[4],
+             "entrants": r[5], "meta": _j(r[6], {}), "prow": _j(r[7], [])} for r in rows]
 
 
 def get_window(window_id):

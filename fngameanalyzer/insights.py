@@ -96,7 +96,7 @@ def board(window_id, page=0, q="", size=50):
 # ---------------------------------------------------------------- archive / classes
 def archive():
     rows = []
-    for w in storage.windows(final=True):
+    for w in storage.windows(final=True, light=True):
         i = service.window_info(w)
         rows.append({k: i[k] for k in ("window_id", "name", "family", "region", "category", "begin", "end", "match_cap")}
                     | {"entrants": w.get("entrants"), "cutoffs": cutoffs(w)})
@@ -105,7 +105,7 @@ def archive():
 
 
 def classes():
-    fin = storage.windows(final=True)
+    fin = storage.windows(final=True, light=True)
     by = {}
     for w in fin:
         by.setdefault(classify.of(w), []).append(w)
@@ -122,7 +122,7 @@ def classes():
 
 
 def class_detail(category):
-    ws = sorted((w for w in storage.windows(final=True) if classify.of(w) == category), key=lambda w: w["end"])
+    ws = sorted(storage.windows(final=True, category=category, light=True), key=lambda w: w["end"])
     ev = [{"window_id": w["window_id"], "name": service.pretty(w.get("event_id") or "", w["window_id"]),
            "region": w["region"], "end": w["end"], "family": w["family"], "cutoffs": cutoffs(w)} for w in ws]
     table = {}
@@ -136,26 +136,20 @@ def class_detail(category):
 
 # ---------------------------------------------------------------- players
 def _index():
-    fin = storage.windows(final=True)
-    key = (len(fin), max((w["end"] for w in fin), default=0))
+    rows = storage.player_rows()
+    key = (len(rows), max((w["end"] for w in rows), default=0))
     if _idx["key"] == key:
         return _idx["data"]
     data = {}
-    for w in fin:
+    for w in rows:
         ent = min(w.get("entrants") or 10000, 10000)
         cat = classify.of(w)
-        for rank, accts in enumerate(w.get("players") or [], start=1):
-            sess = w["sessions"][rank - 1] if rank <= len(w["sessions"]) else []
-            plc = [g[0] for g in sess if g and g[0]]
-            for a in accts:
-                data.setdefault(a, []).append({
-                    "window_id": w["window_id"], "name": service.pretty(w.get("event_id") or "", w["window_id"]),
-                    "category": cat, "family": w["family"], "region": w["region"], "end": w["end"],
-                    "rank": rank, "points": w["points"][rank - 1], "games": w["games"][rank - 1],
-                    "pct": round(100 * rank / ent, 2),
-                    "wins": sum(1 for g in sess if len(g) > 2 and g[2]),
-                    "elims": sum(g[1] for g in sess if len(g) > 1),
-                    "avg_place": round(statistics.mean(plc), 1) if plc else None})
+        name = service.pretty(w.get("event_id") or "", w["window_id"])
+        for a, rank, points, games, wins, elims, avg in w["prow"]:
+            data.setdefault(a, []).append({
+                "window_id": w["window_id"], "name": name, "category": cat, "family": w["family"],
+                "region": w["region"], "end": w["end"], "rank": rank, "points": points, "games": games,
+                "pct": round(100 * rank / ent, 2), "wins": wins, "elims": elims, "avg_place": avg})
     _idx.update(key=key, data=data)
     return data
 
@@ -200,11 +194,12 @@ def top_players(category=None, limit=50):
 def fncs():
     rows = []
     preds = {}
+    finals = {w["window_id"]: w for w in storage.windows(final=True, light=True)}
     for w in storage.window_list():
         if w["family"] != "FNCS":
             continue
         i = service.window_info(w)
-        full = storage.get_window(w["window_id"]) if w["final"] else None
+        full = finals.get(w["window_id"])
         for p in storage.predictions_for(w["window_id"])[::-1]:
             preds.setdefault((w["window_id"], p["rank"]), p)
         adv = []
@@ -220,7 +215,7 @@ def fncs():
 
 # ---------------------------------------------------------------- accuracy
 def accuracy():
-    fin = {w["window_id"]: w for w in storage.windows(final=True)}
+    fin = {w["window_id"]: w for w in storage.windows(final=True, light=True)}
     buckets = {0.25: [], 0.5: [], 0.75: [], 0.9: []}
     recent = {}
     for wid, ts, rank, low, likely, safe, prog in storage.predictions_all():

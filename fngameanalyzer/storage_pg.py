@@ -263,7 +263,7 @@ _LIGHT = {}          # category ("" = all) -> (time, finished windows without se
 _HEAVY = {}          # window_id -> {"sessions", "players"} of the most recent finished windows
 _GW = {}             # window_id -> finished window (immutable once final)
 LIGHT_TTL = 3600
-HEAVY_RECENT = 10    # the model only replays the newest events of a class game by game
+HEAVY_RECENT = 8    # the model only replays the newest events of a class game by game
 _PR = {"t": 0, "rows": None}
 
 

@@ -11,9 +11,20 @@ from fngameanalyzer import auth, collector, config, insights, service, storage
 app = FastAPI()
 
 
+# How long Vercel's cache may reuse an answer (seconds). Identical requests inside this window cost
+# the database nothing, whoever asks and however often a page refreshes.
+CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/live": 15, "/api/windows": 60,
+             "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
+             "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
+             "/api/accuracy": 300, "/api/players": 300, "/api/player": 300}
+
+
 @app.middleware("http")
 async def meter(request, call_next):
     resp = await call_next(request)
+    ttl = CACHE_TTL.get(request.url.path)
+    if ttl and request.method == "GET" and resp.status_code == 200 and "x-admin-key" not in request.headers:
+        resp.headers["Cache-Control"] = f"public, s-maxage={ttl}, stale-while-revalidate={ttl * 3}"
     try:
         storage.egress_flush()   # keeps a running total of data read from the database
     except Exception:

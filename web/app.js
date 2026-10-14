@@ -116,7 +116,10 @@ async function tournament(id) {
   const tick = () => { const t = w.begin - Date.now() / 1000, e = w.end - Date.now() / 1000; $("#cd") && ($("#cd").innerHTML = t > 0 ? `starts in <b>${dur(t)}</b>` : e > 0 ? `ends in <b>${dur(e)}</b>` : "") };
   tick(); every(1000, tick);
   await Promise.all([predict(), chart(), thresholds(), boardLoad(), bubble()]);
-  if (active || w.status === "upcoming") every(30000, () => { predict(true); chart(); thresholds(); bubble(); if (TPAGE === 0 && !TQ) boardLoad() });
+  if (active || w.status === "upcoming") {
+    every(120000, () => { predict(true); bubble(); });                       // heavy panels: the answers move slowly
+    every(60000, () => { chart(); thresholds(); if (TPAGE === 0 && !TQ) boardLoad(); });
+  }
 }
 async function predict(quiet) {
   const x = +$("#x").value; TTOP = x;

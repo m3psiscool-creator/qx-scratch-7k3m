@@ -445,7 +445,8 @@ def areas(window_id, top=100, game=0, radius=0.055, min_chests=4):
     out.sort(key=lambda o: -o["score"])
     return {"areas": out, "matches": matches, "chest_matches": M, "team_size": team_size,
             "teams_per_match": round(per_match, 1), "game": game,
-            "lobby": (w.get("meta") or {}).get("lobby") or config.LOBBY.get(((w.get("meta") or {}).get("game_type"), (w.get("meta") or {}).get("mode")))}
+            "lobby": (w.get("meta") or {}).get("lobby") or config.LOBBY.get(((w.get("meta") or {}).get("game_type"), (w.get("meta") or {}).get("mode")))
+            or int(a["placement"].max())}      # size unknown (Reload solo): the worst placement seen
 
 
 def _area_loot(window_id, a, mask, base, poly):

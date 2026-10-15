@@ -67,3 +67,67 @@ def run(window_id, rank=1):
     except Exception as ex:
         out["data_meta"] = {"error": str(ex)[:200]}
     return out
+
+
+def scan(q="", regions=None):
+    """Owner only: every event Epic lists (not only the types the site tracks) whose id or type matches q."""
+    import re
+    from . import config
+    from .epic_api import classify, parse_time
+    epic = Epic(auth.Session())
+    seen = {}
+    for region in regions or config.ALL_REGIONS:
+        try:
+            raw = epic.raw_events(region)
+        except Exception as ex:
+            seen[f"error:{region}"] = str(ex)[:120]
+            continue
+        for ev in raw.get("events", []):
+            eid = ev.get("eventId", "")
+            ttype = (ev.get("metadata") or {}).get("tournamentType")
+            text = f"{eid} {ttype} {(ev.get('metadata') or {}).get('minimumAccountLevel', '')}"
+            if q and not re.search(q, text, re.I):
+                continue
+            fam, _ = classify(eid)
+            row = seen.setdefault(eid, {"event_id": eid, "tournamentType": ttype, "tracked": bool(config.TOURNAMENT_TYPES.get(ttype) or (fam and not ttype)),
+                                        "regions": [], "windows": []})
+            row["regions"].append(region)
+            for w in ev.get("eventWindows", []):
+                if w["eventWindowId"] not in row["windows"] and len(row["windows"]) < 12:
+                    row["windows"].append(w["eventWindowId"])
+            row["begin"] = ev.get("beginTime")
+            row["end"] = ev.get("endTime")
+    return sorted(seen.values(), key=lambda r: r.get("begin") or "", reverse=True) if all(isinstance(v, dict) for v in seen.values()) else seen
+
+
+def sync_test(region="NAC"):
+    """Owner only: run the window parser for one region and say what it returns or where it fails."""
+    epic = Epic(auth.Session())
+    raw = epic.raw_events(region)
+    out = {"events": len(raw.get("events", [])), "windows": 0, "by_family": {}, "errors": []}
+    try:
+        ws = epic.windows(region, raw)
+        out["windows"] = len(ws)
+        from . import classify
+        for w in ws:
+            out["by_family"][w["family"]] = out["by_family"].get(w["family"], 0) + 1
+            if w["family"] == "WORKSHOP" and "sample" not in out:
+                try:
+                    out["sample"] = {"id": w["window_id"], "category": classify.of(w), "meta": {k: w["meta"].get(k) for k in ("playlist", "mode", "game_type", "match_cap", "lobby")}}
+                except Exception:
+                    import traceback
+                    out["errors"].append("classify: " + traceback.format_exc()[-500:])
+    except Exception as ex:
+        import traceback
+        out["errors"].append(traceback.format_exc()[-900:])
+    # which workshop events fail on their own
+    from . import epic_api
+    for ev in raw.get("events", []):
+        if (ev.get("metadata") or {}).get("tournamentType") == "WorkshopCup":
+            for w in ev.get("eventWindows", [])[:2]:
+                try:
+                    epic_api.window_meta(raw, ev, w)
+                except Exception:
+                    import traceback
+                    out["errors"].append(ev["eventId"] + ": " + traceback.format_exc()[-600:])
+    return out

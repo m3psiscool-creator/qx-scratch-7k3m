@@ -12,7 +12,7 @@ const SITE = process.env.SITE || 'https://fn-game-analyzer.vercel.app';
 const KEY = process.env.ADMIN_KEY;
 const DLL = process.env.LANDINGS_DLL || join(import.meta.dirname, 'landings', 'out', 'landings.dll');
 const DOTNET = process.env.DOTNET || 'dotnet';
-const [minX, maxX, minY, maxY] = (process.env.MAP_BOUNDS || '-55000,55000,-55000,55000').split(',').map(Number);
+let [minX, maxX, minY, maxY] = [-55000, 55000, -55000, 55000];   // Reload maps; the big Battle Royale island is set once the window is known
 const BASE = 128;
 
 const args = process.argv.slice(2);
@@ -33,6 +33,8 @@ const toUnit = (x, y) => [(y - minY) / (maxY - minY), (maxX - x) / (maxX - minX)
 const inside = ([u, v]) => u >= 0 && u <= 1 && v >= 0 && v <= 1;
 
 const listing = await api(`/api/admin/matches?window=${encodeURIComponent(windowId)}`);
+if (process.env.MAP_BOUNDS) [minX, maxX, minY, maxY] = process.env.MAP_BOUNDS.split(',').map(Number);
+else if (listing.game_type === 'br') [minX, maxX, minY, maxY] = [-131072, 131072, -131072, 131072];   // landings reach about +-112,000
 const done = new Set(RESET ? [] : listing.done);   // --reset starts this window over: rows, finished matches and chest counts
 // A tournament has thousands of matches. Alternate between the matches with the most qualifying teams (the ones that
 // answer "where did the qualifiers land") and a random draw (so "everyone else" is not skewed towards qualifiers).
@@ -115,7 +117,13 @@ for (let i = 0; i < files.length; i += 20) {
 rmSync(dir, { recursive: true, force: true });
 console.log(`landings for ${rows.length} teams from ${finished.length} matches (${failed} downloads failed, ${synthetic} teams were not on the leaderboard); ${chestBursts} chest openings in ${chestCells.size} map cells, in ${((Date.now() - started) / 1000).toFixed(0)}s`);
 
-if (DRY) { console.log(JSON.stringify(rows.slice(0, 3))); process.exit(0); }
+if (DRY) {
+  const w = (v, lo, hi) => (lo + v * (hi - lo)).toFixed(0);
+  const xs = rows.map((r) => r.x), ys = rows.map((r) => r.y);
+  console.log('world extent of landings: east (Y)', w(Math.min(...xs), minY, maxY), 'to', w(Math.max(...xs), minY, maxY), ', north (X)', w(1 - Math.max(...ys), minX, maxX), 'to', w(1 - Math.min(...ys), minX, maxX));
+  console.log(JSON.stringify(rows.slice(0, 2)));
+  process.exit(0);
+}
 const code = (listing.playlist || '').match(/SourSpawn|BlastBerry|DashBerry|PiperBoot|JumpBear/i)?.[0] || '';
 const kind = listing.game_type === 'reload' || /reload/i.test(listing.playlist || '') ? 'Reload map' : 'Battle Royale island';
 for (let i = 0; i < Math.max(rows.length, 1); i += 4000) {

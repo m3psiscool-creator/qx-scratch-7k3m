@@ -309,6 +309,23 @@ def admin_matches(window: str, pages: int = 100, x_admin_key: str = Header(defau
     return _api(replays.matches, window, max(1, min(pages, 100)))
 
 
+@app.get("/api/admin/event_scan")
+def admin_event_scan(q: str = "", x_admin_key: str = Header(default="")):
+    """Owner only: every event Epic lists that matches q, tracked by the site or not."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    from fngameanalyzer import probe
+    return _api(probe.scan, q)
+
+
+@app.get("/api/admin/sync_test")
+def admin_sync_test(region: str = "NAC", x_admin_key: str = Header(default="")):
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    from fngameanalyzer import probe
+    return _api(probe.sync_test, region)
+
+
 @app.get("/api/sessions")
 def api_sessions(window: str):
     return _api(service.sessions, window)

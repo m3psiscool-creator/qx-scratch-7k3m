@@ -77,17 +77,20 @@ def map_info(window_id):
             rec = {k: v for k, v in rec.items() if k not in ("image", "name", "credit")}
             rec["image"] = ""
             rec["name"] = ""
-        else:
-            rec.pop("base", None)
         rec.pop("mask", None)
+    rec = dict(rec or {})
+    rec.pop("base", None)      # never a map drawn from player movement: only a real picture of the map, or none
+    rec.pop("base_size", None)
+    if not rec.get("image"):
+        rec.update(image="", credit="", name=rec.get("name") or "")
     avail = storage.drops_available() if hasattr(storage, "drops_available") else {}
     return {"window_id": window_id, "name": service.pretty(w.get("event_id") or "", window_id), "region": w["region"],
             "begin": w["begin"], "end": w["end"], "final": bool(w["final"]),
             "playlist": playlist, "game_type": meta.get("game_type"), "mode": meta.get("mode"), "build": build, "codename": codename,
             "label": label, "match_cap": meta.get("match_cap"), "goal": service.goal_of(meta),
             "map": rec, "map_check": check, "landings": (avail.get(window_id) or (0, 0))[0], "games": (avail.get(window_id) or (0, 0))[1],
-            "note": ("The map is named by whoever loads the landing data. Epic's event data only says which playlist the event uses."
-                     if not rec else None)}
+            "note": (None if rec.get("image") else
+                     f"No picture of this map is available yet{' (' + codename + ')' if codename else ''}: a map picture is only shown when it is a real image of that map.")}
 
 
 def events():

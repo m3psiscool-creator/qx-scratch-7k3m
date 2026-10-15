@@ -247,6 +247,28 @@ function rewardSummary(w) {
   if (f.advance) parts.push("advance");
   return parts.join(" · ") || "<span class=mut>-</span>";
 }
+// ---- skip through the sessions (rounds, days, editions) of the same event in the same region
+let SESS = null;
+async function loadSessions(w, tab) {
+  const el = $("#sessions"); SESS = null;
+  const d = await j("/api/sessions?window=" + encodeURIComponent(w.window_id));
+  if (!el || !$("#sessions") || d.error || !d.items || d.items.length < 2) return;
+  SESS = { items: d.items, i: d.index, tab };
+  const href = it => "#/t/" + encodeURIComponent(it.window_id) + "/" + tab, short = t => new Date(t * 1000).toLocaleDateString([], { month: "short", day: "numeric" });
+  const sub = it => it.status === "finished" ? (it.goal_pts != null ? `top ${d.goal_rank}: ${nf(it.goal_pts)}` : "finished") : ACTIVE.includes(it.status) ? "live now" : it.status === "upcoming" ? "starts " + short(it.begin) : it.status;
+  const prev = d.items[d.index - 1], next = d.items[d.index + 1];
+  el.innerHTML = `<div class="sess"><div class="sess-h"><b>Sessions of this event</b><small>${esc(d.region)} · ${d.total} in total · arrow keys ← → also work</small>
+    <button class="chip" id="s-prev" ${prev ? "" : "disabled"}>‹ Previous</button><button class="chip" id="s-next" ${next ? "" : "disabled"}>Next ›</button></div>
+    <div class="sess-row" id="sessrow">${d.items.map((it, n) => `<a class="sc ${n === d.index ? "on" : ""} ${it.status}" href="${href(it)}"><b>${esc(it.label)}</b><small>${short(it.begin)}${it.games ? " · " + it.games + " games" : ""}</small><small>${esc(sub(it))}</small></a>`).join("")}</div></div>`;
+  if (prev) $("#s-prev").onclick = () => { location.hash = href(prev); };
+  if (next) $("#s-next").onclick = () => { location.hash = href(next); };
+  const row = $("#sessrow"), cur = row.querySelector(".on"); if (cur) row.scrollLeft = cur.offsetLeft - row.clientWidth / 2 + cur.clientWidth / 2;
+}
+document.addEventListener("keydown", e => {
+  if (!SESS || !location.hash.startsWith("#/t/") || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
+  const it = SESS.items[SESS.i + (e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0)];
+  if (it && (e.key === "ArrowLeft" || e.key === "ArrowRight")) { e.preventDefault(); location.hash = "#/t/" + encodeURIComponent(it.window_id) + "/" + SESS.tab; }
+});
 let TW = null, TPAGE = 0, TQ = "", TTOP = null;
 const TABS = [["overview", "Overview"], ["strategy", "Strategy"], ["predictions", "Predictions"], ["leaderboard", "Leaderboard"], ["rewards", "Rewards"]];
 async function tournament(id, tab) {
@@ -259,13 +281,14 @@ async function tournament(id, tab) {
   <div class="crumb"><a href="#/schedule">Schedule</a> › ${esc(w.region)}</div>
   <div class="card"><div class="hd" style="margin:0"><div><h1 style="font-size:1.45rem">${star(w.window_id)}${esc(w.name)}</h1>
     <div class="chips" style="margin-top:8px"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div></div>
-    <div class="small" style="text-align:right" id="cd"></div></div>${regionChips(w, tab)}<div class="mestrip" id="mestrip"></div></div>
+    <div class="small" style="text-align:right" id="cd"></div></div>${regionChips(w, tab)}<div class="mestrip" id="mestrip"></div><div id="sessions"></div></div>
   <div class="tabbar">${TABS.map(([k, label]) => `<a href="#/t/${encodeURIComponent(w.window_id)}/${k}" class="${k === tab ? "on" : ""}">${label}${k === "strategy" ? '<span class="new">NEW</span>' : ""}</a>`).join("")}</div>
   <div id="panel"></div>`;
   const tick = () => { const t = w.begin - Date.now() / 1000, e = w.end - Date.now() / 1000; $("#cd") && ($("#cd").innerHTML = t > 0 ? `starts in <b class="cd">${dur(t)}</b>` : e > 0 ? `games can start for <b class="cd">${dur(e)}</b>` : ""); };
   tick(); every(1000, tick);
   const open = w.status === "upcoming" || ACTIVE.includes(w.status);
   const stripMe = async force => { if (!ACCT || w.status === "upcoming") return; const r = await fetchMe(w.window_id, force); const el = $("#mestrip"); if (el) el.innerHTML = meLine(r, w.window_id); };
+  loadSessions(w, tab);
   stripMe(); if (open) every(180000, () => stripMe(true));   // your own result, checked automatically on every event page
   if (tab === "overview") await tabOverview(w, open);
   else if (tab === "strategy") await tabStrategy(w, open);

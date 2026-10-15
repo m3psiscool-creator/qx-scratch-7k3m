@@ -231,6 +231,18 @@ details.tv[open] summary{margin-bottom:8px}
 .verdict .big{font-size:1.3rem;font-weight:800;line-height:1.2}
 .verdict.go{background:var(--good-bg)}.verdict.stop{background:var(--warn-bg)}.verdict.hard{background:var(--bad-bg)}
 
+/* ---------- sessions of an event ---------- */
+.sess{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.sess-h{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.sess-h small{margin-right:auto}
+.sess-row{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+.sc{flex:none;min-width:138px;display:flex;flex-direction:column;gap:1px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--sf2);color:var(--tx)}
+.sc:hover{text-decoration:none;border-color:var(--line2)}
+.sc.on{border-color:var(--ac);background:var(--ac-soft)}
+.sc b{font-size:.86rem}.sc small{font-size:.74rem}
+.sc.live small:last-child{color:var(--good)}
+.sc.upcoming small:last-child{color:var(--warn)}
+
 /* ---------- recommended strategy ---------- */
 .rec{background:var(--sf);border:1px solid var(--ac);border-radius:16px;padding:18px;margin:0 0 16px}
 .rec .tag{display:inline-flex;gap:6px;align-items:center;font-size:.72rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ac)}

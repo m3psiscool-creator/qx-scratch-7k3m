@@ -299,3 +299,37 @@ def bubble_view(window_id, goal=None, approx=False):
                       "final": round(float(res["median"][i])),
                       "players": [{"id": a, "name": names.get(a, a[:8])} for a in (players[i] if players else [])]}
                      for i in rows]}
+
+
+def _series_key(window_id):
+    """'S42_ReloadCashCup_DuosZB_Event5Round2_OCE' -> 'ReloadCashCup_DuosZB': the same event series across rounds and seasons."""
+    import re
+    k = re.sub(r"_(NAC|NAW|EU|BR|ASIA|ME|OCE)$", "", window_id)
+    k = re.sub(r"^S\d+_", "", k)
+    k = re.sub(r"(Event|Qual|Heat|Round|Day|Week|Part|Stage)\d+", "", k)
+    return re.sub(r"_+", "_", k).strip("_")
+
+
+def sessions(window_id):
+    """Every session (round, day, edition) of this event in the same region, oldest first, with the points the goal rank took."""
+    from . import insights
+    cur = storage.get_window(window_id)
+    if not cur:
+        raise ValueError("Unknown window")
+    key, region = _series_key(window_id), cur["region"]
+    rows = [w for w in storage.window_list() if w["region"] == region and _series_key(w["window_id"]) == key]
+    rows.sort(key=lambda w: w["begin"])
+    goal = (goal_of(cur.get("meta")) or {}).get("rank")
+    finals = {w["window_id"]: w for w in storage.windows(final=True, light=True)} if any(w["final"] for w in rows) else {}
+    items = []
+    for w in rows:
+        i = window_info(w)
+        label = i["name"].split(" · ", 1)[1] if " · " in i["name"] else i["name"]
+        pts = None
+        if goal and w["window_id"] in finals:
+            pts = insights.cutoffs(finals[w["window_id"]], [goal]).get(goal)
+        items.append({"window_id": w["window_id"], "label": label, "begin": w["begin"], "end": w["end"],
+                      "status": i["status"], "goal_pts": pts, "games": i["match_cap"]})
+    idx = next((n for n, x in enumerate(items) if x["window_id"] == window_id), 0)
+    lo = max(0, idx - 30)
+    return {"key": key, "region": region, "goal_rank": goal, "index": idx - lo, "items": items[lo:idx + 12], "total": len(items)}

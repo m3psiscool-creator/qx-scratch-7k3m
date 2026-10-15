@@ -13,6 +13,7 @@ from . import classify, insights, rules, service, storage
 
 GRID = 96
 BASE = 128           # resolution of the background map drawn from player movement
+CHEST = 360          # chest map: CHEST x CHEST cells over the map square (about 3 m per cell)
 _cache = {}          # window_id -> (time, arrays); a tournament is a few tens of thousands of rows
 CACHE_TTL = 300
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
@@ -23,9 +24,35 @@ HEX32 = re.compile(r"^[0-9a-f]{32}$")
 # landings (north-up is NOT assumed: it is the picture rotated/scaled to match the game's own coordinates, see
 # docs/dropspots-data.md "Map pictures"). Picture: Epic Games' overview image of the map, via the Fortnite Wiki.
 MAPS = {
-    "SourSpawn": {"name": "Nitemare Island", "image": "/maps/nitemare-island.jpg",
+    "SourSpawn": {"name": "Nitemare Island", "image": "/maps/nitemare-island.jpg", "mask": "nitemare-island",
                   "credit": "Map: Nitemare Island, Epic Games (overview image from the Fortnite Wiki)"},
 }
+MIN_ON_LAND = 0.93     # a registered picture is only shown while at least this share of the real landings is on its land
+_masks = {}
+
+
+def _land_mask(name):
+    """Land/water outline that goes with a map picture (tools/mapfit/make_mask.py), as a boolean array."""
+    if name not in _masks:
+        import json
+        import os
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "maps", name + ".mask.json")
+        d = json.load(open(path))
+        _masks[name] = np.array([[c == "1" for c in row] for row in d["rows"]], dtype=bool)
+    return _masks[name]
+
+
+def picture_check(window_id, known):
+    """Share of this tournament's landings that fall on land of the registered picture (None: no landings to test with)."""
+    try:
+        a = _arrays(window_id)
+    except ValueError:
+        return None
+    m = _land_mask(known["mask"])
+    n = m.shape[0]
+    ix = np.clip((a["x"] * n).astype(int), 0, n - 1)
+    iy = np.clip((a["y"] * n).astype(int), 0, n - 1)
+    return float(m[iy, ix].mean())
 
 
 def map_info(window_id):
@@ -40,15 +67,25 @@ def map_info(window_id):
     label = "Reload map" if reload_ else "Battle Royale island"
     rec = storage.drop_map_get(window_id) if hasattr(storage, "drop_map_get") else None
     known = MAPS.get(codename)
-    if known:   # a known map picture wins over the background drawn from player movement
+    check = None
+    if known:   # a known map picture wins over the background drawn from player movement, but only while the landings agree with it
         rec = {**(rec or {}), **known}
-        rec.pop("base", None)
+        share = picture_check(window_id, known) if known.get("mask") else None
+        check = {"on_land": None if share is None else round(share, 3), "min": MIN_ON_LAND,
+                 "status": "untested" if share is None else "ok" if share >= MIN_ON_LAND else "mismatch"}
+        if check["status"] == "mismatch":   # wrong map picture: never show it
+            rec = {k: v for k, v in rec.items() if k not in ("image", "name", "credit")}
+            rec["image"] = ""
+            rec["name"] = ""
+        else:
+            rec.pop("base", None)
+        rec.pop("mask", None)
     avail = storage.drops_available() if hasattr(storage, "drops_available") else {}
     return {"window_id": window_id, "name": service.pretty(w.get("event_id") or "", window_id), "region": w["region"],
             "begin": w["begin"], "end": w["end"], "final": bool(w["final"]),
             "playlist": playlist, "game_type": meta.get("game_type"), "mode": meta.get("mode"), "build": build, "codename": codename,
             "label": label, "match_cap": meta.get("match_cap"), "goal": service.goal_of(meta),
-            "map": rec, "landings": (avail.get(window_id) or (0, 0))[0], "games": (avail.get(window_id) or (0, 0))[1],
+            "map": rec, "map_check": check, "landings": (avail.get(window_id) or (0, 0))[0], "games": (avail.get(window_id) or (0, 0))[1],
             "note": ("The map is named by whoever loads the landing data. Epic's event data only says which playlist the event uses."
                      if not rec else None)}
 
@@ -112,7 +149,7 @@ def grid(window_id, top=100, game=0, size=GRID):
         u, c = np.unique(cell[mask], return_counts=True)
         return [[int(i), int(n)] for i, n in zip(u, c)]
     return {"size": size, "all": sparse(m), "q": sparse(m & q), "total": int(m.sum()), "qualifier_landings": int((m & q).sum()),
-            "games": sorted(int(g) for g in np.unique(a["game"])), "top": top}
+            "games": sorted(int(g) for g in np.unique(a["game"]) if g > 0), "top": top}
 
 
 def _in_poly(x, y, poly):
@@ -146,6 +183,7 @@ def area(window_id, poly, top=100, game=0):
     for g in np.unique(a["game"][idx]):
         by_game[int(g)] = int((a["game"][idx] == g).sum())
     out["by_game"] = by_game
+    out["loot"] = _area_loot(window_id, a, mask, base, poly)
     pois = {}
     for p in a["poi_arr"][idx]:
         if p:
@@ -255,6 +293,21 @@ def ingest(body):
             rec["base"] = base
             rec["base_size"] = BASE
         storage.drop_map_set(wid, rec)
+    if body.get("reset"):   # start this tournament over (landings were replaced above): forget finished matches and chest counts
+        storage.kv_set("drops_done:" + wid, {"sessions": []})
+        storage.kv_set(_atlas_key(w), {"size": CHEST, "matches": 0, "cells": {}})
+        _atlas_cache.pop(_atlas_key(w), None)
+    ch = body.get("chests")
+    if isinstance(ch, dict) and isinstance(ch.get("cells"), list):
+        key = _atlas_key(w)
+        atlas = storage.kv_get(key) or {"size": CHEST, "matches": 0, "cells": {}}
+        atlas["matches"] = int(atlas.get("matches") or 0) + max(0, int(ch.get("matches") or 0))
+        cells = atlas.setdefault("cells", {})
+        for cell, n in ch["cells"][:CHEST * CHEST]:
+            if 0 <= int(cell) < CHEST * CHEST and int(n) > 0:
+                cells[str(int(cell))] = cells.get(str(int(cell)), 0) + int(n)
+        storage.kv_set(key, atlas)
+        _atlas_cache.pop(key, None)
     done = body.get("sessions_done")
     if isinstance(done, list):
         k = "drops_done:" + wid
@@ -263,3 +316,153 @@ def ingest(body):
         storage.kv_set(k, {"sessions": sorted(cur)})
     _cache.pop(wid, None)
     return {"ok": True, "stored": len(rows), "skipped": skipped}
+
+
+# ---------------------------------------------------------------- chests: where they are and how often they are looted
+# The replay has no chest objects, but when a player opens a chest its 5 or so loot items appear together at one spot.
+# The landing tool finds those bursts (and removes player-death drops); the worker counts, per map cell, in how many
+# matches a chest was opened during the first minutes. A chest is a spot where that keeps happening; its lootage rate is
+# the share of matches in which it was opened early.
+def _code(w):
+    import re
+    pl = (w.get("meta") or {}).get("playlist") or ""
+    m = re.search(r"SourSpawn|BlastBerry|DashBerry|PiperBoot|JumpBear", pl, re.I)
+    return m.group(0) if m else pl
+
+
+def _atlas_key(w):
+    return "chests:" + _code(w)
+
+
+MIN_MATCHES = 20      # chest rates need at least this many matches behind them
+
+
+_atlas_cache = {}      # key -> (time, atlas): the chest counts are a few hundred KB, do not read them on every request
+
+
+def _sites(w):
+    """Chest sites of the map this tournament was played on: [{x, y, rate, chests}] with x, y in 0-1 map units."""
+    key = _atlas_key(w)
+    hit = _atlas_cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_TTL:
+        atlas = hit[1]
+    else:
+        atlas = storage.kv_get(key) or {}
+        _atlas_cache[key] = (time.time(), atlas)
+    M = int(atlas.get("matches") or 0)
+    if M < MIN_MATCHES or not atlas.get("cells"):
+        return [], M
+    n = int(atlas.get("size") or CHEST)
+    C = np.zeros((n, n), dtype=np.float32)
+    for k, v in atlas["cells"].items():
+        C[int(k) // n, int(k) % n] = v
+    P = np.pad(C, 1)
+    S = sum(P[dy:dy + n, dx:dx + n] for dy in range(3) for dx in range(3))     # 3x3 sum: a chest's openings spread over neighbouring cells
+    P2 = np.pad(S, 2, constant_values=-1)
+    peak = np.ones_like(S, dtype=bool)
+    for dy in range(5):
+        for dx in range(5):
+            if dy == 2 and dx == 2:
+                continue
+            peak &= S >= P2[dy:dy + n, dx:dx + n]
+    thr = max(3.0, 0.05 * M)                      # opened in at least 5% of matches (and 3 times): not a one-off drop
+    ys, xs = np.nonzero(peak & (S >= thr))
+    out, taken = [], set()
+    for y, x in sorted(zip(ys.tolist(), xs.tolist()), key=lambda p: -S[p[0], p[1]]):
+        if any(abs(x - a) <= 2 and abs(y - b) <= 2 for a, b in taken):
+            continue                              # equal-height neighbours: keep one
+        taken.add((x, y))
+        r = float(S[y, x]) / M
+        k = max(1, int(round(r))) if r > 1.4 else 1   # more than one opening per match at one spot: two chests close together
+        out.append({"x": round((x + 0.5) / n, 4), "y": round((y + 0.5) / n, 4), "rate": round(min(1.0, r / k), 3), "chests": k})
+    return out, M
+
+
+def loot(window_id):
+    w = storage.get_window(window_id)
+    if not w:
+        raise ValueError("Unknown window")
+    sites, M = _sites(w)
+    return {"matches": M, "sites": sites, "min_matches": MIN_MATCHES,
+            "chests": sum(s["chests"] for s in sites),
+            "note": None if sites else f"Chest positions need at least {MIN_MATCHES} processed matches of this map (have {M})."}
+
+
+def _label(u, v):
+    return f"{chr(65 + min(9, int(u * 10)))}{min(9, int(v * 10)) + 1}"
+
+
+TEAM = {"solo": 1, "duos": 2, "trios": 3, "squads": 4}
+
+
+def areas(window_id, top=100, game=0, radius=0.055, min_chests=4):
+    """Spots around chest clusters: how many chests, how often they are looted early, how many players land there per
+    game, and a loot score = chests / (players + 1). Sorted by that score: the most loot for the fewest players first."""
+    w = storage.get_window(window_id)
+    if not w:
+        raise ValueError("Unknown window")
+    sites, M = _sites(w)
+    if not sites:
+        raise ValueError(f"Chest positions need at least {MIN_MATCHES} processed matches of this map (have {M}).")
+    a = _arrays(window_id)
+    done = (storage.kv_get("drops_done:" + window_id) or {}).get("sessions") or []
+    matches = max(1, len(done))
+    team_size = TEAM.get((w.get("meta") or {}).get("mode"), 1)
+    per_match = len(a["game"]) / matches                       # teams per match
+    base = _sel(a, game)
+    nbase = max(1, int(base.sum()))
+    left = list(range(len(sites)))
+    out = []
+    while left:
+        near_of = lambda i: [j for j in left if (sites[i]["x"] - sites[j]["x"]) ** 2 + (sites[i]["y"] - sites[j]["y"]) ** 2 <= radius ** 2]
+        seed = max(left, key=lambda i: len(near_of(i)))
+        mem = near_of(seed)
+        left = [j for j in left if j not in mem]
+        ch = sum(sites[j]["chests"] for j in mem)
+        cx = sum(sites[j]["x"] * sites[j]["chests"] for j in mem) / ch
+        cy = sum(sites[j]["y"] * sites[j]["chests"] for j in mem) / ch
+        rate = sum(sites[j]["rate"] * sites[j]["chests"] for j in mem) / ch
+        reach = radius + 0.01
+        near = base & ((a["x"] - cx) ** 2 + (a["y"] - cy) ** 2 <= reach ** 2)
+        landings = int(near.sum())
+        teams = landings / nbase * per_match                   # average teams landing here per game
+        players = teams * team_size
+        s = _stats(a, near, top)
+        out.append({"label": _label(cx, cy), "x": round(cx, 4), "y": round(cy, 4), "r": round(reach, 3), "chests": ch,
+                    "lootage": round(rate, 3), "landings": landings, "teams_per_game": round(teams, 2),
+                    "players_per_game": round(players, 2), "chests_per_player": round(ch / max(players, 0.25), 2),
+                    "score": round(ch / (players + 1), 2),   # loot per crowd: many chests AND few players (an empty corner with 3 chests is not the best pick)
+                    "free_chests": round(ch * (1 - rate), 1),
+                    "qualifier_share": s.get("qualifier_share"), "avg_points": s.get("avg_points"), "avg_placement_pct": s.get("avg_placement_pct")})
+    out = [o for o in out if o["chests"] >= min_chests]
+    groups = {}
+    for o in out:
+        groups.setdefault(o["label"], []).append(o)
+    for label, g in groups.items():          # several areas in one grid square: A1a, A1b, ... from left to right
+        if len(g) > 1:
+            for n, o in enumerate(sorted(g, key=lambda o: (o["x"], o["y"]))):
+                o["label"] = label + chr(97 + n)
+    out.sort(key=lambda o: -o["score"])
+    return {"areas": out, "matches": matches, "chest_matches": M, "team_size": team_size,
+            "teams_per_match": round(per_match, 1), "game": game}
+
+
+def _area_loot(window_id, a, mask, base, poly):
+    """Chests inside a drawn area and how crowded it is: None when chest positions are not known yet."""
+    w = storage.get_window(window_id)
+    sites, M = _sites(w)
+    if not sites:
+        return None
+    sx = np.array([s["x"] for s in sites], dtype=np.float32)
+    sy = np.array([s["y"] for s in sites], dtype=np.float32)
+    inside = _in_poly(sx, sy, poly)
+    chests = int(sum(s["chests"] for s, i in zip(sites, inside) if i))
+    rate = (sum(s["rate"] * s["chests"] for s, i in zip(sites, inside) if i) / chests) if chests else None
+    done = (storage.kv_get("drops_done:" + window_id) or {}).get("sessions") or []
+    matches = max(1, len(done))
+    per_match = len(a["game"]) / matches
+    teams = float(mask.sum()) / max(1, int(base.sum())) * per_match
+    players = teams * TEAM.get((w.get("meta") or {}).get("mode"), 1)
+    return {"chests": chests, "lootage": None if rate is None else round(rate, 3), "teams_per_game": round(teams, 2),
+            "players_per_game": round(players, 2), "chests_per_player": round(chests / max(players, 0.25), 2) if chests else 0,
+            "free_chests": round(chests * (1 - rate), 1) if chests else 0, "chest_matches": M}

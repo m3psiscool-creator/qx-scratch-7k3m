@@ -19,7 +19,7 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
              "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
              "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
              "/api/accuracy": 300, "/api/players": 300, "/api/player": 300,
-             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/pois": 120, "/api/calendar.ics": 300, "/api/health": 30}
+             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/pois": 120, "/api/drops/loot": 300, "/api/drops/areas": 120, "/api/calendar.ics": 300, "/api/health": 30}
 
 
 @app.middleware("http")
@@ -251,6 +251,16 @@ def api_drops_grid(window: str, top: int = 100, game: int = 0):
 @app.get("/api/drops/pois")
 def api_drops_pois(window: str, top: int = 100, game: int = 0):
     return _api(drops.pois, window, max(1, top), game)
+
+
+@app.get("/api/drops/loot")
+def api_drops_loot(window: str):
+    return _api(drops.loot, window)
+
+
+@app.get("/api/drops/areas")
+def api_drops_areas(window: str, top: int = 100, game: int = 0, min_chests: int = 4):
+    return _api(drops.areas, window, max(1, top), game, 0.055, max(1, min_chests))
 
 
 @app.get("/api/drops/area")

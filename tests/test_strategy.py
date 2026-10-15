@@ -121,6 +121,67 @@ class DropsTest(unittest.TestCase):
         self.assertAlmostEqual(saved["map"]["pois"][0]["x"], 0.5)
 
 
+class ChestTest(unittest.TestCase):
+    W = {"window_id": "w", "meta": {"playlist": "Playlist_ShowdownTournament_SourSpawnDuos_PBM", "mode": "duos"}}
+
+    def setUp(self):
+        drops._atlas_cache.clear()
+
+    def _atlas(self, cells, matches=100):
+        return {"size": drops.CHEST, "matches": matches, "cells": cells}
+
+    def test_sites_keep_repeated_openings_and_drop_one_offs(self):
+        n = drops.CHEST
+        # chest A: opened in 60 of 100 matches (its openings landed in two neighbouring cells), chest B in 8, a single drop in 1
+        atlas = self._atlas({str(10 * n + 10): 40, str(10 * n + 11): 20, str(50 * n + 50): 8, str(80 * n + 80): 1})
+        with mock.patch.object(storage, "kv_get", return_value=atlas):
+            sites, M = drops._sites(self.W)
+        self.assertEqual(M, 100)
+        self.assertEqual(len(sites), 2)                         # the single opening is not a chest
+        self.assertAlmostEqual(sites[0]["rate"], 0.6, places=2)  # looted early in 60% of matches
+        self.assertAlmostEqual(sites[1]["rate"], 0.08, places=2)
+
+    def test_too_few_matches_gives_no_chests(self):
+        with mock.patch.object(storage, "kv_get", return_value=self._atlas({"5": 9}, matches=5)):
+            self.assertEqual(drops._sites(self.W)[0], [])
+
+    def test_area_ranking_prefers_many_chests_and_few_players(self):
+        n = drops.CHEST
+        cells = {}
+        for k in range(4):   # crowded spot around (0.2, 0.2): 4 chests
+            cells[str(int((0.2 + 0.004 * k) * n) * n + int(0.2 * n))] = 50
+        for k in range(4):   # quiet spot around (0.7, 0.7): 4 chests
+            cells[str(int((0.7 + 0.004 * k) * n) * n + int(0.7 * n))] = 50
+        xs = np.array([0.2] * 30 + [0.7] * 3, dtype=np.float32)   # 30 landings at the first spot, 3 at the second
+        a = {"game": np.ones(len(xs), dtype=np.int16), "x": xs, "y": xs.copy(), "placement": np.full(len(xs), 5, dtype=np.int16),
+             "points": np.full(len(xs), 20, dtype=np.int32), "rank": np.zeros(len(xs), dtype=np.int32), "lobby": np.full(len(xs), 20, dtype=np.int16),
+             "win": np.zeros(len(xs), dtype=np.int8)}
+        def kv(k):
+            return self._atlas(cells) if k.startswith("chests:") else {"sessions": ["s%d" % i for i in range(10)]}
+        with (mock.patch.object(storage, "get_window", return_value=self.W), mock.patch.object(storage, "kv_get", side_effect=kv),
+              mock.patch.object(drops, "_arrays", return_value=a)):
+            out = drops.areas("w", min_chests=1)
+        first, second = out["areas"][0], out["areas"][1]
+        self.assertGreater(first["x"], 0.5)                       # the quiet spot comes first
+        self.assertLess(first["players_per_game"], second["players_per_game"])
+        self.assertGreater(first["chests_per_player"], second["chests_per_player"])
+        self.assertAlmostEqual(out["teams_per_match"], 3.3, places=1)
+
+
+class PictureCheckTest(unittest.TestCase):
+    def _arrays(self, xs, ys):
+        return {"x": np.array(xs, dtype=np.float32), "y": np.array(ys, dtype=np.float32)}
+
+    def test_landings_on_land_pass_and_landings_in_the_sea_fail(self):
+        known = drops.MAPS["SourSpawn"]
+        with mock.patch.object(drops, "_arrays", return_value=self._arrays([0.5, 0.45, 0.55, 0.4], [0.5, 0.4, 0.45, 0.55])):
+            self.assertGreaterEqual(drops.picture_check("w", known), drops.MIN_ON_LAND)     # the middle of the island is land
+        with mock.patch.object(drops, "_arrays", return_value=self._arrays([0.02, 0.03, 0.97, 0.98], [0.02, 0.97, 0.03, 0.98])):
+            self.assertLess(drops.picture_check("w", known), 0.2)                           # the four corners are open sea
+        with mock.patch.object(drops, "_arrays", side_effect=ValueError("none")):
+            self.assertIsNone(drops.picture_check("w", known))                               # no landings: nothing to test with
+
+
 class DropsLoaderTest(unittest.TestCase):
     def _load(self, body, rec, kv):
         final = {"window_id": "w", "final": 0, "players": [], "meta": {"rules": RULES}}

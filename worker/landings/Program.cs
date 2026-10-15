@@ -4,16 +4,19 @@
 using System.Globalization;
 using System.Text;
 using FortniteReplayReader;
+using Unreal.Core;
+using Unreal.Core.Models;
 using Unreal.Core.Models.Enums;
 
-var reader = new ReplayReader(null, ParseMode.Full);
 var inv = CultureInfo.InvariantCulture;
+const int MaxChestItems = 9;   // chests give about 5 items; player death drops are mostly 9+
 
 foreach (var file in args)
 {
     var sb = new StringBuilder();
     try
     {
+        var reader = new Spy();
         var replay = reader.ReadReplay(file);
         var g = replay.GameData;
         sb.Append("{\"file\":").Append(Q(Path.GetFileName(file)))
@@ -21,6 +24,7 @@ foreach (var file in args)
           .Append(",\"players\":[");
         bool first = true;
         var trail = new List<(double x, double y)>();
+        var deaths = new List<(double x, double y, double t)>();
         foreach (var p in replay.PlayerData.Where(p => !p.IsBot && p.Locations.Count > 5))
         {
             var L = p.Locations.Where(m => m.ReplicatedMovement.HasValue).ToList();
@@ -49,6 +53,11 @@ foreach (var file in args)
             sb.Append("{\"epic\":").Append(Q(p.EpicId)).Append(",\"team\":").Append(p.TeamIndex?.ToString(inv) ?? "null")
               .Append(",\"placement\":").Append(p.Placement?.ToString(inv) ?? "null")
               .Append(",\"kills\":").Append(p.Kills?.ToString(inv) ?? "null");
+            if (p.DeathLocation != null)   // where and when (game clock) this player was eliminated
+                deaths.Add((p.DeathLocation.X, p.DeathLocation.Y, p.DeathTimeDouble ?? p.DeathTime ?? 0));
+            if (p.DeathLocation != null)
+                sb.Append(",\"death\":[").Append(p.DeathLocation.X.ToString("F0", inv)).Append(',').Append(p.DeathLocation.Y.ToString("F0", inv)).Append(',')
+                  .Append((p.DeathTimeDouble ?? p.DeathTime ?? 0).ToString("F1", inv)).Append(']');
             if (land >= 0)
             {
                 var lp = P(land);
@@ -64,6 +73,18 @@ foreach (var file in args)
             if (i > 0) sb.Append(',');
             sb.Append('[').Append(trail[i].x.ToString("F0", inv)).Append(',').Append(trail[i].y.ToString("F0", inv)).Append(']');
         }
+        sb.Append("],\"clock_offset\":").Append(reader.ClockOffset.ToString("F2", inv)).Append(",\"chests\":[");
+        // A player's elimination drops their whole inventory at once, which looks like a chest. Remove every burst that is at a
+        // death place around the death moment (game clock = replay time + offset), and any burst too big to be a chest.
+        var off = reader.ClockOffset;
+        var bursts = reader.Bursts().Where(b => b.n <= MaxChestItems
+            && !deaths.Any(d => Math.Sqrt(Math.Pow(b.x - d.x, 2) + Math.Pow(b.y - d.y, 2)) <= 600 && Math.Abs(d.t - (b.t + off)) <= 4)).ToList();
+        for (int i = 0; i < bursts.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append('[').Append(bursts[i].x.ToString("F0", inv)).Append(',').Append(bursts[i].y.ToString("F0", inv)).Append(',')
+              .Append(bursts[i].n).Append(',').Append(bursts[i].t.ToString("F0", inv)).Append(']');
+        }
         sb.Append("]}");
     }
     catch (Exception e)
@@ -75,3 +96,53 @@ foreach (var file in args)
 }
 
 static string Q(string s) => s == null ? "null" : "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+
+// Loot pickups (FortPickupAthena) with the time and place they appeared. A chest opened by a player spits out 5+ pickups at
+// one spot within a fraction of a second; floor loot appears all at once at the very start (before 40 s) and is ignored.
+class Spy : ReplayReader
+{
+    const double MinTime = 40, Window = 0.6, Radius = 250; const int MinItems = 5;
+    readonly List<(double t, double x, double y)> pk = new();
+    double now;
+    readonly List<double> offsets = new();
+    /// <summary>game clock minus replay time (seconds): turns a game-clock time into the time bursts are stamped with</summary>
+    public double ClockOffset => offsets.Count == 0 ? 0 : offsets.OrderBy(x => x).ElementAt(offsets.Count / 2);
+    protected override void OnExportRead(uint channelIndex, Unreal.Core.Contracts.INetFieldExportGroup? exportGroup)
+    {
+        if (exportGroup is FortniteReplayReader.Models.NetFieldExports.PlayerPawn pp && pp.ReplayLastTransformUpdateTimeStamp is float w && w > 100 && offsets.Count < 2000)
+            offsets.Add(w - now);
+        base.OnExportRead(channelIndex, exportGroup);
+    }
+    public Spy() : base(null, ParseMode.Full) { }
+    public override void ReadDemoFrameIntoPlaybackPackets(FArchive archive)
+    {
+        var start = archive.Position;
+        if (archive.NetworkVersion >= NetworkVersionHistory.HISTORY_MULTIPLE_LEVELS) archive.ReadInt32();
+        now = archive.ReadSingle();
+        archive.Seek(start, SeekOrigin.Begin);
+        base.ReadDemoFrameIntoPlaybackPackets(archive);
+    }
+    public override void ProcessBunch(DataBunch bunch)
+    {
+        bool had = Channels[bunch.ChIndex]?.Actor != null;
+        base.ProcessBunch(bunch);
+        var a = Channels[bunch.ChIndex]?.Actor;
+        if (!had && a != null && a.ActorNetGUID.IsDynamic() && now >= MinTime && a.Archetype != null
+            && _netGuidCache.TryGetPathName(a.Archetype.Value, out var path) && path.Contains("FortPickupAthena"))
+            pk.Add((now, a.Location.X, a.Location.Y));
+    }
+    public List<(double x, double y, int n, double t)> Bursts()
+    {
+        var res = new List<(double, double, int, double)>();
+        var used = new bool[pk.Count];
+        for (int i = 0; i < pk.Count; i++)
+        {
+            if (used[i]) continue;
+            used[i] = true; var grp = new List<int> { i };
+            for (int j = i + 1; j < pk.Count && pk[j].t - pk[i].t <= Window; j++)
+                if (!used[j] && Math.Sqrt(Math.Pow(pk[j].x - pk[i].x, 2) + Math.Pow(pk[j].y - pk[i].y, 2)) <= Radius) { used[j] = true; grp.Add(j); }
+            if (grp.Count >= MinItems) res.Add((grp.Average(k => pk[k].x), grp.Average(k => pk[k].y), grp.Count, grp.Average(k => pk[k].t)));
+        }
+        return res;
+    }
+}

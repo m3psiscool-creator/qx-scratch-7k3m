@@ -2,11 +2,11 @@
 // Dropspots: where teams landed in a tournament, for the teams that qualified and for everyone.
 // Landing rows are loaded by the owner (docs/dropspots-data.md); this page only reads them.
 const DR = { wid: null, info: null, grid: null, pois: null, area: null, top: 100, game: 0, mode: "move", z: 1, ox: 0, oy: 0, poly: null, draft: null, hover: null,
-  layers: { q: true, all: true, spots: true }, blur: 5, alpha: 0.9, img: null, imgUrl: "", heat: {}, S: 700, sortBy: "landings", fq: "", freg: "" };
+  layers: { q: true, all: true, spots: true, chests: true }, loot: null, areas: null, mark: null, blur: 5, alpha: 0.9, img: null, imgUrl: "", heat: {}, S: 700, sortBy: "landings", fq: "", freg: "" };
 const MODES = [["move", "Move"], ["box", "Box"], ["draw", "Draw"], ["spot", "Spot"]];
 
 async function dropsPage(wid) {
-  DR.wid = wid || null; DR.info = DR.grid = DR.pois = DR.area = DR.poly = null; DR.z = 1; DR.ox = DR.oy = 0; DR.heat = {}; DR.game = 0;
+  DR.wid = wid || null; DR.info = DR.grid = DR.pois = DR.area = DR.poly = null; DR.z = 1; DR.ox = DR.oy = 0; DR.heat = {}; DR.game = 0; DR.loot = DR.areas = DR.mark = null;
   const [avail, all] = await Promise.all([j("/api/drops/events"), allWindows()]);
   DR.avail = avail && !avail.error ? avail : {};
   DR.events = all.filter(w => w.status === "finished" || ACTIVE.includes(w.status)).map(w => ({ ...w, n: (DR.avail[w.window_id] || {}).landings || 0 }))
@@ -33,7 +33,7 @@ async function loadDrops(wid) {
   const info = await j("/api/drops/info?window=" + encodeURIComponent(wid));
   if (info.error) { tool.innerHTML = `<div class="card err">${esc(info.error)}</div>`; return; }
   DR.info = info; DR.top = info.goal ? info.goal.rank : 100;
-  tool.innerHTML = infoCard(info) + (info.landings ? `<div id="dcontrols"></div><div id="dmap"></div><div id="dspots"></div>` : noData(info));
+  tool.innerHTML = infoCard(info) + (info.landings ? `<div id="dcontrols"></div><div id="dmap"></div><div id="dloot"></div><div id="dspots"></div>` : noData(info));
   if (!info.landings) return;
   DR.imgUrl = info.map && info.map.image || ""; DR.img = null; DR.base = info.map && info.map.base ? buildBase(info.map.base, info.map.base_size || 128) : null;
   if (DR.imgUrl) { const im = new Image(); im.onload = () => { DR.img = im; draw(); }; im.src = DR.imgUrl; }
@@ -64,6 +64,7 @@ async function refresh(first) {
   if (first) { controls(); mapShell(); }
   else { $("#dtotals") && ($("#dtotals").innerHTML = totals()); }
   spotsTable(); draw();
+  lootCard(first);
   if (DR.poly) selectPoly(DR.poly);
 }
 const spotsList = () => (DR.info.map && DR.info.map.pois && DR.info.map.pois.length ? DR.info.map.pois : (DR.pois ? DR.pois.pois.map(p => ({ name: p.name, x: p.x, y: p.y, r: 0.03 })) : []));
@@ -74,14 +75,14 @@ function controls() {
   $("#dcontrols").innerHTML = `<div class="card"><div class="row" style="align-items:flex-end">
     <div style="flex:1"><label>Qualified = finished top…</label><input id="dtop" type="number" min="1" max="10000" value="${DR.top}"></div>
     <div style="flex:1"><label>Game</label><select id="dgame"><option value="0">All games</option>${DR.grid ? "" : ""}</select></div>
-    <div style="flex:2"><label>Layers</label><div class="chips"><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lq" checked> <span style="color:#3aa0ff">● Qualified</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="la" checked> <span style="color:#ffb02e">● Everyone</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="ls" checked> Named spots</label></div></div></div>
+    <div style="flex:2"><label>Layers</label><div class="chips"><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lq" checked> <span style="color:#3aa0ff">● Qualified</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="la" checked> <span style="color:#ffb02e">● Everyone</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lc" checked> <span style="color:#5be38a">◉ Chests</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="ls" checked> Named spots</label></div></div></div>
     <div class="chips" style="margin-top:8px"><small>Quick pick:</small>${chips.map(c => `<button class="chip ${c === DR.top ? "on" : ""}" data-t="${c}">${c === goal ? "★ " : ""}Top ${c.toLocaleString()}</button>`).join("")}</div>
     <div class="row" style="margin-top:10px;align-items:center"><div><label>Heat spread</label><input id="dblur" type="range" min="0" max="16" value="${DR.blur}" style="padding:0;min-height:0"></div><div><label>Heat strength</label><input id="dalpha" type="range" min="20" max="100" value="${Math.round(DR.alpha * 100)}" style="padding:0;min-height:0"></div></div></div>`;
   const sel = $("#dgame"); (DR.grid.games || []).forEach(g => sel.insertAdjacentHTML("beforeend", `<option value="${g}">Game ${g}</option>`));
   const redo = () => { DR.top = clamp(Math.round(+$("#dtop").value || 100), 1, 10000); DR.game = +$("#dgame").value; $$("[data-t]").forEach(b => b.classList.toggle("on", +b.dataset.t === DR.top)); refresh(false); };
   $("#dtop").onchange = redo; $("#dgame").onchange = redo;
   $$("[data-t]").forEach(b => b.onclick = () => { $("#dtop").value = b.dataset.t; redo(); });
-  $("#lq").onchange = e => { DR.layers.q = e.target.checked; draw(); }; $("#la").onchange = e => { DR.layers.all = e.target.checked; draw(); }; $("#ls").onchange = e => { DR.layers.spots = e.target.checked; draw(); };
+  $("#lq").onchange = e => { DR.layers.q = e.target.checked; draw(); }; $("#la").onchange = e => { DR.layers.all = e.target.checked; draw(); }; $("#ls").onchange = e => { DR.layers.spots = e.target.checked; draw(); }; $("#lc").onchange = e => { DR.layers.chests = e.target.checked; draw(); };
   $("#dblur").oninput = e => { DR.blur = +e.target.value; draw(); }; $("#dalpha").oninput = e => { DR.alpha = +e.target.value / 100; draw(); };
 }
 
@@ -93,7 +94,7 @@ function mapShell() {
   $$("#dmodes button").forEach(b => b.onclick = () => { DR.mode = b.dataset.m; $$("#dmodes button").forEach(x => x.classList.toggle("on", x === b)); $("#dc").style.cursor = DR.mode === "move" ? "grab" : "crosshair"; });
   $("#dzi").onclick = () => zoomAt(0.5, 0.5, 1.4); $("#dzo").onclick = () => zoomAt(0.5, 0.5, 1 / 1.4);
   $("#dreset").onclick = () => { DR.z = 1; DR.ox = DR.oy = 0; draw(); };
-  $("#dclear").onclick = () => { DR.poly = DR.draft = DR.area = null; $("#darea").innerHTML = areaEmpty(); draw(); $$(".dr-row.on").forEach(r => r.classList.remove("on")); };
+  $("#dclear").onclick = () => { DR.poly = DR.draft = DR.area = DR.mark = null; $("#darea").innerHTML = areaEmpty(); draw(); $$(".dr-row.on").forEach(r => r.classList.remove("on")); };
   bindCanvas();
 }
 const areaEmpty = () => '<div class="hd"><h2>Selected area</h2></div><p class="mut">Pick <b>Box</b>, <b>Draw</b> or <b>Spot</b> and mark an area on the map.</p>';
@@ -138,6 +139,13 @@ function draw() {
   if (DR.layers.q) x.drawImage(heatLayer("q", DR.grid.q), px, py, W, W);
   x.filter = "none"; x.globalAlpha = 1;
   if (DR.layers.spots) spotsList().forEach(p => { const [sx, sy] = toPx(p.x, p.y); if (sx < -20 || sy < -20 || sx > S + 20 || sy > S + 20) return; x.beginPath(); x.arc(sx, sy, 3.5, 0, 7); x.fillStyle = "#fff"; x.fill(); x.strokeStyle = "#000"; x.lineWidth = 1; x.stroke(); if (DR.z >= 1.3 || spotsList().length <= 14) { x.font = "600 11px system-ui"; x.lineWidth = 3; x.strokeStyle = "#0009"; x.strokeText(p.name, sx + 6, sy + 4); x.fillStyle = "#fff"; x.fillText(p.name, sx + 6, sy + 4); } });
+  if (DR.layers.chests && DR.loot && DR.loot.sites) DR.loot.sites.forEach(c => {
+    const [sx, sy] = toPx(c.x, c.y); if (sx < -10 || sy < -10 || sx > S + 10 || sy > S + 10) return;
+    const t = clamp(c.rate, 0, 1), col = `rgb(${Math.round(70 + 185 * t)},${Math.round(220 - 150 * t)},${Math.round(110 - 40 * t)})`;   // green = rarely looted, red = looted almost every game
+    x.beginPath(); x.arc(sx, sy, Math.min(7, 2.4 + 1.2 * Math.sqrt(DR.z) + (c.chests > 1 ? 1.5 : 0)), 0, 7); x.fillStyle = col; x.fill(); x.lineWidth = 1.2; x.strokeStyle = "rgba(0,0,0,.85)"; x.stroke();
+  });
+  if (DR.mark) { const [mx, my] = toPx(DR.mark.x, DR.mark.y); x.beginPath(); x.arc(mx, my, DR.mark.r * S * DR.z, 0, 7); x.setLineDash([6, 4]); x.lineWidth = 2.5; x.strokeStyle = "#fff"; x.stroke(); x.setLineDash([]);
+    x.font = "700 12px system-ui"; x.lineWidth = 4; x.strokeStyle = "#000c"; x.strokeText(DR.mark.label, mx - 8, my - DR.mark.r * S * DR.z - 6); x.fillStyle = "#fff"; x.fillText(DR.mark.label, mx - 8, my - DR.mark.r * S * DR.z - 6); }
   const poly = DR.draft || DR.poly;
   if (poly && poly.length > 1) { x.beginPath(); poly.forEach(([u, v], i) => { const [a, b] = toPx(u, v); i ? x.lineTo(a, b) : x.moveTo(a, b); }); x.closePath(); x.fillStyle = "rgba(255,255,255,.14)"; x.fill(); x.strokeStyle = "#fff"; x.lineWidth = 2; x.setLineDash(DR.draft ? [5, 4] : []); x.stroke(); x.setLineDash([]); }
 }
@@ -193,6 +201,7 @@ function areaPanel(d, label) {
       ${kpi("Average finish", "top " + pc(a.avg_placement_pct), `everywhere top ${pc(e.avg_placement_pct)}`)}
       ${kpi("Early exits", pc(a.early_exit_rate), `everywhere ${pc(e.early_exit_rate)}`, a.early_exit_rate > e.early_exit_rate ? "bad" : "")}
       ${kpi("Wins", pc(a.win_rate, 1), `everywhere ${pc(e.win_rate, 1)}`)}</div>
+    ${lootBlock(d.loot)}
     <p class="small" style="margin:0 0 8px">Of all teams that qualified, <b>${pc(a.share_of_qualifier_landings, 1)}</b> landed here.${d.pois.length ? " Named spots inside: " + d.pois.map(p => `${esc(p[0])} (${p[1]})`).join(", ") + "." : ""}</p>
     ${Object.keys(d.by_game).length > 1 ? `<div class="small" style="margin-bottom:8px">By game: ${Object.entries(d.by_game).map(([g, n]) => `G${g} <b>${n}</b>`).join(" · ")}</div>` : ""}
     <h3>Best results from here</h3>${table(["Team", "Game", "Pts", "Place", "Final"], d.best.map(b => [esc(b.team), b.game, b.points, "#" + b.placement, b.rank ? "#" + nf(b.rank) : "-"]), ["", "n", "n", "n", "n"])}`;
@@ -208,4 +217,37 @@ function spotsTable() {
     rows.map(r => `<tr class="dr-row" data-n="${esc(r.name)}" style="cursor:pointer"><td><b>${esc(r.name)}</b></td><td class="n">${nf(r.landings)}</td><td class="n">${pc(r.share_of_landings, 1)}</td><td class="n">${pc(r.qualifier_share, 1)}</td><td class="n">${pc(r.share_of_qualifier_landings, 1)}</td><td class="n">${nd(r.avg_points)}</td><td class="n">top ${pc(r.avg_placement_pct)}</td><td class="n">${pc(r.early_exit_rate)}</td></tr>`).join("") + "</table></div></div>";
   $$("#dspots th").forEach(t => t.onclick = () => { DR.sortBy = t.dataset.s; spotsTable(); });
   $$("#dspots .dr-row").forEach(t => t.onclick = () => { const sp = spotsList().find(s => s.name === t.dataset.n); if (!sp) return; $$(".dr-row.on").forEach(r => r.classList.remove("on")); t.classList.add("on"); const r = Math.max(0.015, sp.r || 0.03); selectPoly(Array.from({ length: 28 }, (_, i) => [sp.x + r * Math.cos(i / 28 * 6.2832), sp.y + r * Math.sin(i / 28 * 6.2832)]), sp.name); $("#dc").scrollIntoView({ behavior: "smooth", block: "center" }); });
+}
+
+
+// ---- chests: where they are, how often they are looted early, and the best loot for the fewest players
+const lootBlock = l => !l ? `<p class="small mut">Chest positions are not known for this map yet.</p>` : !l.chests ? `<p class="small mut">No known chests in this area.</p>` :
+  `<h3>Loot here</h3><div class="kpis" style="grid-template-columns:repeat(2,1fr)">${kpi("Chests", nf(l.chests), `looted early in ${pc(l.lootage, 0)} of games`)}${kpi("Players per game", nd(l.players_per_game, 1), `${nd(l.teams_per_game, 1)} teams on average`)}${kpi("Chests per player", nd(l.chests_per_player, 2), `${nd(l.free_chests, 1)} chests still free on average`, l.chests_per_player >= 1 ? "good" : "")}</div>`;
+
+async function lootCard(first) {
+  const box = $("#dloot"); if (!box) return;
+  if (first || !DR.loot) { DR.loot = await j(`/api/drops/loot?window=${encodeURIComponent(DR.wid)}`); if (DR.loot.error) DR.loot = { sites: [], note: DR.loot.error }; draw(); }
+  if (!DR.loot.sites || !DR.loot.sites.length) { box.innerHTML = `<div class="card"><div class="hd"><h2>Best loot for the fewest players</h2></div><p class="mut">${esc(DR.loot.note || "Chest positions are not known for this map yet.")} The scheduled job adds matches every few hours.</p></div>`; return; }
+  const d = await j(`/api/drops/areas?window=${encodeURIComponent(DR.wid)}&top=${DR.top}&game=${DR.game}`);
+  if (d.error) { box.innerHTML = `<div class="card"><div class="hd"><h2>Best loot for the fewest players</h2></div><p class="err">${esc(d.error)}</p></div>`; return; }
+  DR.areas = d; renderLoot();
+}
+function renderLoot() {
+  const box = $("#dloot"), d = DR.areas; if (!box || !d) return;
+  const cols = [["label", "Area", 0], ["chests", "Chests", 1], ["lootage", "Looted early", 1], ["players_per_game", "Players / game", 1], ["score", "Loot score", 1], ["chests_per_player", "Chests per player", 1], ["free_chests", "Chests still free", 1], ["avg_points", "Pts / game", 1], ["qualifier_share", "Qualified share", 1]];
+  const key = DR.lootSort || "score", asc = ["players_per_game", "lootage"].includes(key);
+  const rows = d.areas.slice().sort((a, b) => key === "label" ? a.label.localeCompare(b.label) : asc ? a[key] - b[key] : b[key] - a[key]);
+  const best = d.areas[0];
+  box.innerHTML = `<div class="card"><div class="hd"><h2>Best loot for the fewest players</h2><span class="sub">${nf(DR.loot.chests)} chests found · lootage = share of games in which a chest was opened in the first minutes · ${nf(d.chest_matches)} matches</span></div>
+    ${best ? `<p style="margin:0 0 10px">Most loot for the fewest players: <b>area ${esc(best.label)}</b> with <b>${best.chests} chests</b> and only <b>${nd(best.players_per_game, 1)} players</b> landing per game (loot score ${nd(best.score, 2)} = chests ÷ (players + 1); chests there are looted early in ${pc(best.lootage, 0)} of games).</p>` : ""}
+    <div class="small" style="margin-bottom:8px">On average <b>${nd(d.teams_per_match, 1)}</b> teams (${nd(d.teams_per_match * d.team_size, 1)} players) land per game. Click a row to mark the area on the map, click a heading to sort. Letter and number are the map grid (A to J across, 1 to 10 down).</div>
+    <div class="scroll"><table><tr>${cols.map(([k, l, n]) => `<th class="${n ? "n" : ""}" data-s="${k}" style="cursor:pointer">${l}${key === k ? " ▾" : ""}</th>`).join("")}</tr>` +
+    rows.map(r => `<tr class="dr-row" data-l="${esc(r.label)}-${r.x}" style="cursor:pointer"><td><b>${esc(r.label)}</b></td><td class="n">${r.chests}</td><td class="n">${pc(r.lootage, 0)}</td><td class="n">${nd(r.players_per_game, 1)}</td><td class="n"><b>${nd(r.score, 2)}</b></td><td class="n">${nd(r.chests_per_player, 2)}</td><td class="n">${nd(r.free_chests, 1)}</td><td class="n">${nd(r.avg_points)}</td><td class="n">${pc(r.qualifier_share, 1)}</td></tr>`).join("") + "</table></div></div>";
+  $$("#dloot th").forEach(t => t.onclick = () => { DR.lootSort = t.dataset.s; renderLoot(); });
+  $$("#dloot .dr-row").forEach(t => t.onclick = () => {
+    const r = d.areas.find(a => `${a.label}-${a.x}` === t.dataset.l); if (!r) return; $$("#dloot .dr-row.on").forEach(x => x.classList.remove("on")); t.classList.add("on");
+    DR.mark = { x: r.x, y: r.y, r: r.r, label: r.label };
+    selectPoly(Array.from({ length: 32 }, (_, i) => [r.x + r.r * Math.cos(i / 32 * 6.2832), r.y + r.r * Math.sin(i / 32 * 6.2832)]), `Area ${r.label}`);
+    $("#dc").scrollIntoView({ behavior: "smooth", block: "center" });
+  });
 }

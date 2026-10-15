@@ -97,9 +97,7 @@ const confLabel = c => (CONFS.find(x => x[0] === c) || [0, Math.round(c * 100) +
 const gMin = p => { const t = SS.d.tempo; return !t || t.error ? null : lerp(t.by_place, clamp(p, 1, t.by_place.length) - 1); };
 function timeLeftMin() {
   const w = SS.w, now = Date.now() / 1000, start = w.status === "finished" || w.status === "upcoming" ? w.begin : clamp(now, w.begin, w.end);   // a finished or not yet started event counts as its full window
-  let left = (w.end - start) / 60;
-  if (w.status === "upcoming" && SS.played > 0) { const g = gMin(typicalPlace()); left -= SS.played * (g || 0); }   // "what if I had played N games": they already used their time
-  return Math.max(0, left);
+  return Math.max(0, (w.end - start) / 60);   // games left = format games minus games played; time is the real clock (a not-yet-started event assumes the whole window is still ahead)
 }
 // games you can start in the time left if you finish around placement p (a game may start right before the window closes)
 const gamesFit = (p, left) => { const T = gMin(p); return T ? Math.min(left, Math.ceil(timeLeftMin() / T)) : left; };
@@ -382,8 +380,8 @@ function renderStop() {
   else if (p0 >= 97) { cls = "stop"; head = "You are very likely already in"; body = `Even with no more games you have about <b>${nd(p0, 0)}%</b> to make ${goalName}. More games only protect against a late jump in the cutoff.`; }
   else if (pAll < 3) { cls = "hard"; head = `Very unlikely: ${pct1(pAll)}%`; body = `In the time you have (about ${med} more game${med === 1 ? "" : "s"}), your median finish is <b>${nf(Q[rem][1])}</b> points, and ${goalName} needs roughly ${nf(T)}. It would take an unusually strong run.`; }
   else if (sure > 0) { cls = "go"; head = `Play ${sure} more game${sure > 1 ? "s" : ""} to be 95% sure`; body = `Your chance of ${goalName} rises from <b>${pct1(p0)}%</b> now to <b>${nd(P[sure], 0)}%</b> after ${sure} more.${sure < rem ? ` After that, each extra game adds ${nd(marg[sure + 1])}% or less.` : ""}`; }
-  else if (dim > 1 && dim < rem) { cls = "go"; head = `Strong gains up to game ${dim - 1}, then it flattens`; body = `Your chance climbs from ${nd(p0, 0)}% to <b>${nd(P[dim - 1], 0)}%</b> over the next ${dim - 1} game${dim - 1 === 1 ? "" : "s"}; games after that add under 1.5% each. All ${rem}: <b>${nd(pAll, 0)}%</b>.`; }
-  else { cls = "go"; head = `Keep playing: ${nd(pAll, 0)}% with about ${rem} game${rem > 1 ? "s" : ""} left`; body = p1 - p0 < 2 && rem > 1 ? `One game alone adds little (${pct1(p0)}% to ${pct1(p1)}%): the chance builds over the whole set of about ${rem}. Points never go down, so playing on only costs time.` : `The next game lifts your chance from <b>${pct1(p0)}%</b> to <b>${pct1(p1)}%</b>. Points never go down, so playing on only costs time.`; }
+  else if (dim > 1 && dim < rem) { cls = "go"; head = `Strong gains up to game ${dim - 1}, then it flattens`; body = `Your chance climbs from ${nd(p0, 0)}% to <b>${nd(P[dim - 1], 0)}%</b> over the next ${dim - 1} game${dim - 1 === 1 ? "" : "s"}; games after that add under 1.5% each. All of them: <b>${nd(pAll, 0)}%</b>.`; }
+  else { cls = "go"; head = `Keep playing: ${nd(pAll, 0)}% with about ${med} game${med === 1 ? "" : "s"} left`; body = p1 - p0 < 2 && rem > 1 ? `One game alone adds little (${pct1(p0)}% to ${pct1(p1)}%): the chance builds over the whole set of about ${med}. Points never go down, so playing on only costs time.` : `The next game lifts your chance from <b>${pct1(p0)}%</b> to <b>${pct1(p1)}%</b>. Points never go down, so playing on only costs time.`; }
   const finalMed = Q[rem][1];
   el.innerHTML = `<div class="ctrl"><label style="margin:0">Play like</label><select id="slike" style="width:auto;max-width:100%;margin:0">${opts.map(x => `<option value="${x.key}" ${x.key === sel.key ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></div>
   <div class="verdict ${cls}"><div><div class="big">${head}</div><div>${body}</div></div></div>
@@ -498,7 +496,7 @@ function renderRec() {
   const w = SS.w, nowS = Date.now() / 1000, minPer = cur.min, spend = minPer ? Math.max(0, G - 1) * minPer : null, slack = spend != null ? left - spend : null;
   const gs = n => n + " game" + (n === 1 ? "" : "s");
   const timeTxt = left <= 0 ? "The window has closed." : w.status === "upcoming"
-    ? `Games can start from ${fmt(w.begin)} until ${hm(w.end)} (${fm(left)}); a game that starts before then still counts. ${gs(G)} at about ${fm(minPer) || "?"} each means the last one starts about ${fm(spend) || "?"} after the first${slack != null ? (slack >= 0 ? `, leaving ${fm(slack)} to spare. Start your first game by <b>${hm(w.end - spend * 60)}</b> at the latest to fit all ${G}.` : `, which is ${fm(-slack)} longer than the window, so only what fits is counted.`) : "."}`
+    ? `${SS.played > 0 ? "What-if: this assumes the whole window is still ahead of you. " : ""}Games can start from ${fmt(w.begin)} until ${hm(w.end)} (${fm(left)}); a game that starts before then still counts. ${gs(G)} at about ${fm(minPer) || "?"} each means the last one starts about ${fm(spend) || "?"} after the first${slack != null ? (slack >= 0 ? `, leaving ${fm(slack)} to spare. Start your first game by <b>${hm(w.end - spend * 60)}</b> at the latest to fit all ${G}.` : `, which is ${fm(-slack)} longer than the window, so only what fits is counted.`) : "."}`
     : `The window closes at <b>${hm(w.end)}</b> (${dur(left * 60)} left); a game that starts before then still counts. ${gs(G)} more at about ${fm(minPer) || "?"} each means the last one starts about ${fm(spend) || "?"} from now${slack != null ? (slack >= 0 ? `, so you have ${fm(slack)} of slack.` : `, which is more than the time left, so only what fits is counted.`) : "."}`;  const idx = [...new Set([Math.ceil(G / 4), Math.ceil(G / 2), Math.ceil(3 * G / 4), G])].filter(i => i >= 1);
   const cps = idx.map(i => `<span>game ${SS.played + i}: <b>${nf(SS.pts + ppg * i)}</b></span>`).join("");
   const sure = s.final || SS.aim ? T : (s.ladder || []).find(x => x.conf === 0.95)?.points ?? T;

@@ -1,4 +1,5 @@
 """Vercel entrypoint (FastAPI)."""
+import hashlib
 import hmac
 import os
 import time
@@ -17,7 +18,7 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
              "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
              "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
              "/api/accuracy": 300, "/api/players": 300, "/api/player": 300,
-             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/rivals": 30}
+             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/rivals": 30, "/api/calendar.ics": 300}
 
 
 @app.middleware("http")
@@ -167,6 +168,50 @@ def api_safety(window: str, rank: int):
 @app.get("/api/me")
 def api_me(window: str, name: str = "", account: str = ""):
     return _api(me.lookup, window, name, account or None)
+
+
+@app.get("/api/calendar.ics")
+def api_calendar(request: Request, region: str = "", family: str = "", category: str = "", q: str = "", window: str = "", favs: str = ""):
+    site = f"{request.url.scheme}://{request.headers.get('host', 'fn-game-analyzer.vercel.app')}"
+    try:
+        body = service.calendar_ics(site, region, family, category, q, window, favs)
+    except Exception as e:
+        return _err(e)
+    return Response(body, media_type="text/calendar; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="fn-tournaments.ics"'})
+
+
+@app.post("/api/feedback")
+async def api_feedback(req: Request):
+    """Anyone can send an idea or a bug; the owner reads them with the admin key. Rate limited per visitor."""
+    try:
+        body = await req.json()
+    except Exception:
+        return _err("Bad request")
+    text = str(body.get("text", "")).strip()[:1200]
+    if len(text) < 5:
+        return _err("Write a few words first.")
+    ip = (req.headers.get("x-forwarded-for", "") or "x").split(",")[0].strip()
+    key = "fb_rate:" + hashlib.sha1(ip.encode()).hexdigest()[:16]
+    rate = storage.kv_get(key) or {"t": [], }
+    now = time.time()
+    rate["t"] = [t for t in rate["t"] if now - t < 86400]
+    if rate["t"] and now - rate["t"][-1] < 30:
+        return _err("Please wait a few seconds before sending another.")
+    if len(rate["t"]) >= 10:
+        return _err("That is plenty for today, thank you.")
+    rate["t"].append(now)
+    storage.kv_set(key, rate)
+    items = storage.kv_get("feedback") or []
+    items.insert(0, {"at": now, "kind": str(body.get("kind", "idea"))[:12], "text": text, "page": str(body.get("page", ""))[:160]})
+    storage.kv_set("feedback", items[:300])
+    return {"ok": True}
+
+
+@app.get("/api/feedback")
+def api_feedback_list(x_admin_key: str = Header(default="")):
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return storage.kv_get("feedback") or []
 
 
 @app.get("/api/rivals")

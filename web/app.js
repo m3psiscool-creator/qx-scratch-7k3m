@@ -31,7 +31,8 @@ $("#mnav").innerHTML = MOBILE.map(k => { const [, l, i, h] = flat.find(x => x[0]
 $("#morebtn").onclick = e => {
   e.stopPropagation(); const old = $(".more-pop"); if (old) return old.remove();
   const d = document.createElement("div"); d.className = "more-pop";
-  d.innerHTML = flat.filter(x => !MOBILE.includes(x[0])).map(([k, l, i, h]) => `<a href="${h}">${icon(i)}${l}</a>`).join("");
+  d.innerHTML = flat.filter(x => !MOBILE.includes(x[0])).map(([k, l, i, h]) => `<a href="${h}">${icon(i)}${l}</a>`).join("") + `<a href="javascript:void 0" id="mfb">${icon("info")}Send feedback</a>`;
+  setTimeout(() => { const f = $("#mfb"); if (f) f.onclick = ev => { ev.stopPropagation(); d.remove(); feedbackPop(); }; });
   document.body.appendChild(d);
 };
 document.addEventListener("click", e => { const p = $(".more-pop"); if (p) p.remove(); });
@@ -89,6 +90,24 @@ renderAcct();
 (async () => { const old = store.get("epicname", ""); if (!ACCT && old) { try { const r = await j("/api/account?name=" + encodeURIComponent(old)); if (!r.error) { ACCT = { name: r.name, id: r.id }; store.set("acct", ACCT); renderAcct(); route(); } } catch (e) { } } store.set("epicname", ""); })();
 // one line about the player's own result in an event
 const meLine = (d, wid) => !d || d.error ? "" : d.found ? `<span class="dot" style="width:8px;height:8px;border-radius:50%;background:var(--good);display:inline-block"></span> <b>${esc(d.name)}</b> · rank <b>#${nf(d.rank)}</b> · <b>${nf(d.points)}</b> points · ${d.games_played} games${d.team && d.team.length ? " · with " + esc(d.team.join(", ")) : ""} <a href="#/t/${encodeURIComponent(wid)}/strategy">Your games ›</a>` : `<span class="mut">${esc(d.message || "")}</span>`;
+
+// ---------------------------------------------------------------- feedback from anyone (read by the owner on the Status page)
+function feedbackPop() {
+  const old = $(".acctpop"); if (old) old.remove();
+  const d = document.createElement("div"); d.className = "acctpop";
+  d.innerHTML = `<h3>Send feedback</h3><p class="small" style="margin:0 0 8px">Tell us what you want from the site, or what is broken. Nothing personal is collected.</p>
+    <select id="fb-kind" style="margin-bottom:8px"><option value="idea">An idea or a request</option><option value="bug">Something is broken</option><option value="data">The numbers look wrong</option></select>
+    <textarea id="fb-text" rows="4" maxlength="1200" placeholder="What would help you play better?" style="width:100%;font:inherit;padding:8px 11px;border-radius:10px;border:1px solid var(--line2);background:var(--sf);color:var(--tx);resize:vertical"></textarea>
+    <div class="chips" style="margin-top:10px"><button id="fb-send">Send</button><span id="fb-msg" class="small"></span></div>`;
+  document.body.appendChild(d); $("#fb-text").focus();
+  $("#fb-send").onclick = async () => {
+    const r = await j("/api/feedback", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind: $("#fb-kind").value, text: $("#fb-text").value, page: location.hash }) });
+    if (r.ok) { $("#fb-msg").innerHTML = '<span class="ok">Thank you, sent.</span>'; $("#fb-send").disabled = true; setTimeout(() => d.remove(), 1400); } else $("#fb-msg").innerHTML = `<span class="err">${esc(r.error || "Could not send")}</span>`;
+  };
+}
+if ($("#fbk")) $("#fbk").onclick = e => { e.stopPropagation(); feedbackPop(); };
+document.addEventListener("click", e => { const p = $(".acctpop"); if (p && $("#fb-text") && !e.target.closest(".acctpop")) p.remove(); });
+const calUrl = (o = {}) => "/api/calendar.ics?" + new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v))).toString();
 
 // ---------------------------------------------------------------- favourites (an event is starred in every region)
 const evKey = id => id.replace(/_(NAC|NAW|EU|BR|ASIA|ME|OCE)$/, "");
@@ -166,6 +185,8 @@ function evCard(w) {
 }
 
 // ---------------------------------------------------------------- Home
+const NEWS_VER = "2026-10-15";
+const NEWS = ["<b>Coach notes</b> on the Strategy tab: your games against finishers, with what to fix.", "<b>Which style gives the best chance?</b> Finishers grouped by elims, replayed from your next game.", "<b>Rivals</b>: the players around your rank in a live event.", "<b>Calendar</b>: add events with a 30 minute reminder. <b>Feedback</b>: tell us what you want."];
 let HOME_SIG = "";
 async function home(quiet) {
   const d = await j("/api/home" + (REGION ? "?region=" + REGION : ""));
@@ -188,12 +209,14 @@ async function home(quiet) {
   const favs = FAVS.size ? (await allWindows()).filter(w => isFav(w.window_id) && (!REGION || w.region === REGION) && w.status !== "not collected yet").sort((a, b) => rank(a) - rank(b)).slice(0, 6) : [];
   const nextUp = (d.upcoming || []).slice(0, 6);
   app.innerHTML = head("Live now" + (REGION ? " · " + REGION : ""), "Live leaderboards, predicted final cutoffs, and a strategy page for every event.") +
+    (store.get("seen_new", "") === NEWS_VER ? "" : `<div class="card" id="newscard"><div class="hd"><h2>What's new</h2><button class="sec chip" id="newsx">Got it</button></div><ul style="margin:0;padding-left:18px;line-height:1.6">${NEWS.map(n => `<li>${n}</li>`).join("")}</ul></div>`) +
     (ACCT ? "" : `<div class="card flat" style="display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Add your Epic account once</b><div class="small">Then your rank, points and games are checked automatically on every event, with no login.</div></div><button id="ap-open">Add my account</button></div>`) +
     (live || `<div class="card flat"><b>Nothing is live right now${REGION ? " in " + REGION : ""}.</b> <span class="mut">Plan ahead with the next events below.</span></div>`) +
     (favs.length ? `<h3 style="margin-top:22px">★ Your favourites</h3><div class="evgrid" style="margin-bottom:20px">${favs.map(evCard).join("")}</div>` : "") +
     `<h3 style="margin-top:22px">Starting soon</h3><div class="evgrid">${nextUp.map(evCard).join("") || '<div class="card flat mut">No upcoming events.</div>'}</div>
     <div class="card" style="margin-top:20px"><div class="hd"><h2>Just finished</h2></div>${table(["Ended", "Region", "Tournament", ""], d.finished.map(w => [fmt(w.end), w.region, star(w.window_id) + link(w.window_id, w.name), link(w.window_id, "Results ›", "predictions")]))}</div>`;
   countdowns();
+  if ($("#newsx")) $("#newsx").onclick = () => { store.set("seen_new", NEWS_VER); $("#newscard").remove(); };
   if ($("#ap-open")) $("#ap-open").onclick = e => { e.stopPropagation(); acctPop(); };
   if (ACCT) (async () => { for (const [w, i] of d.live.map((w, i) => [w, i]).filter(([w]) => ACTIVE.includes(w.status)).slice(0, REGION ? 8 : 4)) { const r = await fetchMe(w.window_id); const el = $("#mh" + i); if (el) el.innerHTML = meLine(r, w.window_id); } })();
   d.live.forEach(async (w, i) => {
@@ -280,7 +303,7 @@ async function tournament(id, tab) {
   app.innerHTML = `
   <div class="crumb"><a href="#/schedule">Schedule</a> › ${esc(w.region)}</div>
   <div class="card"><div class="hd" style="margin:0"><div><h1 style="font-size:1.45rem">${star(w.window_id)}${esc(w.name)}</h1>
-    <div class="chips" style="margin-top:8px"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div></div>
+    <div class="chips" style="margin-top:8px"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}${w.status === "upcoming" || ACTIVE.includes(w.status) ? `<a class="pill ac" href="${calUrl({ window: w.window_id })}" title="Download a calendar entry with a 30 minute reminder">＋ Calendar</a>` : ""}</div></div>
     <div class="small" style="text-align:right" id="cd"></div></div>${regionChips(w, tab)}<div class="mestrip" id="mestrip"></div><div id="sessions"></div></div>
   <div class="tabbar">${TABS.map(([k, label]) => `<a href="#/t/${encodeURIComponent(w.window_id)}/${k}" class="${k === tab ? "on" : ""}">${label}${k === "strategy" ? '<span class="new">NEW</span>' : ""}</a>`).join("")}</div>
   <div id="panel"></div>`;
@@ -444,12 +467,13 @@ async function boardLoad() {
 // ---------------------------------------------------------------- Schedule
 async function schedule() {
   const all = (await allWindows()).filter(w => ["upcoming", "live", "games finishing", "ended (collecting)"].includes(w.status));
-  app.innerHTML = head("Schedule", "Every live and upcoming window, with the rewards and how many games it runs.") + filterBar(all, { status: true }) + `<div id="sl"></div>`;
+  app.innerHTML = head("Schedule", "Every live and upcoming window, with the rewards and how many games it runs.", `<a class="btn sec" id="calbtn" href="#" title="Download these events with a 30 minute reminder">＋ Add to calendar</a>`) + filterBar(all, { status: true }) + `<div id="sl"></div>`;
   const draw = () => {
     const l = applyFilters(all).sort((a, b) => a.begin - b.begin);
     const days = {}; l.forEach(w => (days[fmtDay(w.begin)] ||= []).push(w));
     $("#sl").innerHTML = Object.entries(days).map(([d, ws]) => `<div class="card"><div class="hd"><h2>${esc(d)}</h2><span class="sub">${ws.length} windows</span></div>${table(["Start", "In", "Region", "Gamemode", "Type", "Tournament", "Games", "Rewards", "Paid", ""], ws.map(w => [hm(w.begin), w.status === "upcoming" ? `<span class="cd" data-cd="${w.begin}"></span>` : pill(w.status), w.region, esc(gm(w.category)), TYPE[w.family], star(w.window_id) + link(w.window_id, w.name), w.match_cap || "?", rewardSummary(w), w.payout_at ? hm(w.payout_at) : "-", link(w.window_id, "Plan ›", "strategy")]))}</div>`).join("") || '<div class="card empty">Nothing matches these filters.</div>';
     countdowns();
+    $("#calbtn").href = calUrl({ region: REGION, family: FILT.type, category: FILT.cls, q: FILT.q, favs: FILT.fav ? [...FAVS].join(",") : "" });
   };
   bindFilters(draw); draw(); every(1000, countdowns);
 }
@@ -633,7 +657,9 @@ async function status() {
    <h3>Last collector pass</h3><pre class="small" style="white-space:pre-wrap">${esc((s.last_tick || []).map(x => x.join(" ")).join("\n"))}</pre></div>
   ${s.login.logged_in ? "" : `<div class="card"><b>Epic login needed</b><p class="small">Log in to Epic in this browser, open <a href="${esc(a.login_url)}" target="_blank">this link</a>, copy the authorizationCode and paste it here.</p>
    <input id="code" placeholder="authorizationCode"><input id="key" type="password" placeholder="Admin key" style="margin-top:6px"><button id="lg" style="margin-top:10px">Save login</button> <span id="lm" class="small"></span></div>`}
-  <div class="card"><div class="hd"><h2>How the predictions work</h2></div><p class="small">Every player on the live leaderboard is replayed forward. Their remaining games (including the last queue that starts before the cutoff), points per game and chance of catching up come from players in the same spot at the same moment in earlier events <b>of the same gamemode</b>. The result is corrected using a back-test on those past events. Ranks beyond 700 are scaled from the stored thresholds (ranks 1000, 1500 … 10000). Unofficial data; estimates only.</p></div>`;
+  <div class="card"><div class="hd"><h2>Feedback from visitors</h2><span class="sub">owner only</span></div><div class="row"><div><input id="fk" type="password" placeholder="Admin key"></div><div style="flex:0"><button class="sec" id="fkb">Load</button></div></div><div id="fkl" style="margin-top:10px"></div></div>
+    <div class="card"><div class="hd"><h2>How the predictions work</h2></div><p class="small">Every player on the live leaderboard is replayed forward. Their remaining games (including the last queue that starts before the cutoff), points per game and chance of catching up come from players in the same spot at the same moment in earlier events <b>of the same gamemode</b>. The result is corrected using a back-test on those past events. Ranks beyond 700 are scaled from the stored thresholds (ranks 1000, 1500 … 10000). Unofficial data; estimates only.</p></div>`;
+  $("#fkb").onclick = async () => { const r = await j("/api/feedback", { headers: { "x-admin-key": $("#fk").value } }); $("#fkl").innerHTML = r.error ? `<span class="err">${esc(r.error)}</span>` : (r.length ? table(["When", "Kind", "Page", "Message"], r.map(x => [fmt(x.at), esc(x.kind), esc(x.page), esc(x.text)])) : '<p class="mut">Nothing yet.</p>'); };
   const lg = $("#lg");
   if (lg) lg.onclick = async () => {
     const r = await j("/api/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: $("#code").value.trim(), key: $("#key").value }) });

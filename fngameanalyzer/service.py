@@ -335,3 +335,43 @@ def sessions(window_id):
     idx = next((n for n, x in enumerate(items) if x["window_id"] == window_id), 0)
     lo = max(0, idx - 30)
     return {"key": key, "region": region, "goal_rank": goal, "index": idx - lo, "items": items[lo:idx + 12], "total": len(items)}
+
+
+# ---- calendar export (.ics) of upcoming and live windows, with a reminder 30 minutes before
+def _ics_text(x):
+    """Escape text for an iCalendar field."""
+    return str(x).replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+
+def _event_key(window_id):
+    import re
+    return re.sub(r"_(NAC|NAW|EU|BR|ASIA|ME|OCE)$", "", window_id)
+
+
+def calendar_ics(site, region="", family="", category="", q="", window="", favs=""):
+    if window:
+        wl = [w for w in list_windows() if w["window_id"] == window]
+    else:
+        keys = {k for k in favs.split(",") if k}
+        terms = q.lower().split()
+        wl = [w for w in list_windows() if w["status"] in ("upcoming", "live", "games finishing")
+              and (not region or w["region"] == region) and (not family or w["family"] == family)
+              and (not category or w["category"] == category)
+              and all(t in (w["name"] + " " + w["region"] + " " + w["category"]).lower() for t in terms)
+              and (not keys or _event_key(w["window_id"]) in keys)]
+    stamp = lambda t: time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(t))
+    now = stamp(time.time())
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//FN Game Analyzer//EN", "CALSCALE:GREGORIAN",
+             "X-WR-CALNAME:FN Game Analyzer tournaments"]
+    for w in wl[:120]:
+        goal = w.get("goal")
+        link = f"{site}/#/t/{w['window_id']}/strategy"
+        desc = (f"{w['category']} - {w.get('match_cap') or '?'} games" + (f" - goal: top {goal['rank']}" if goal else "")
+                + "\nPlan your strategy: " + link)
+        lines += ["BEGIN:VEVENT", f"UID:{w['window_id']}@fn-game-analyzer", f"DTSTAMP:{now}",
+                  f"DTSTART:{stamp(w['begin'])}", f"DTEND:{stamp(w['end'])}",
+                  "SUMMARY:" + _ics_text(f"{w['name']} ({w['region']})"), "DESCRIPTION:" + _ics_text(desc),
+                  "URL:" + link, "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Starts in 30 minutes",
+                  "TRIGGER:-PT30M", "END:VALARM", "END:VEVENT"]
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines) + "\r\n"

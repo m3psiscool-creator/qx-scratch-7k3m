@@ -100,7 +100,7 @@ console.log(`landings for ${rows.length} teams from ${finished.length} matches (
 
 if (DRY) { console.log(JSON.stringify(rows.slice(0, 5))); process.exit(0); }
 const code = (listing.playlist || '').match(/SourSpawn|BlastBerry|DashBerry|PiperBoot|JumpBear/i)?.[0] || '';
-const kind = /reload/i.test(listing.playlist || '') ? 'Reload map' : 'Battle Royale island';
+const kind = listing.game_type === 'reload' || /reload/i.test(listing.playlist || '') ? 'Reload map' : 'Battle Royale island';
 for (let i = 0; i < Math.max(rows.length, 1); i += 4000) {
   const chunk = rows.slice(i, i + 4000);
   const last = i + 4000 >= rows.length;

@@ -81,4 +81,5 @@ def matches(window_id, pages=100):
     done = set((storage.kv_get(DONE_KEY + window_id) or {}).get("sessions") or [])
     out = sorted(sessions.values(), key=lambda r: r["end"] or "")
     return {"window_id": window_id, "begin": w["begin"], "end": w["end"], "final": bool(w["final"]), "playlist": (w.get("meta") or {}).get("playlist"),
+            "game_type": (w.get("meta") or {}).get("game_type"),
             "sessions": out, "done": sorted(done & set(sessions)), "pages": total}

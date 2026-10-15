@@ -60,3 +60,7 @@ To add a map (when a new codename shows up in `/api/drops/info`):
 3. `tools/mapfit/fit_map.py <image prefix>` finds rotation, scale and centre and draws the landings over the picture for a visual check.
 4. `tools/mapfit/render_map.py <out dir>` writes the picture warped into the 0-1 frame; set k, L, cx, cy to the fitted values. Add it to `web/maps` and an entry to `drops.MAPS`.
 Nitemare Island fit: rotated 90 degrees, scale 1.56, centre (0.50, 0.54); 96% of landings fall on land and the hot spots sit on the towns.
+
+## Chests, lootage and crowding
+Not part of the upload format: the worker sends `chests: {size: 360, matches: N, cells: [[cell, matches that opened a chest there], ...]}` with each batch and the server keeps one running total per map (kv `chests:<codename>`). `reset: true` on the first batch of a run clears the rows, finished matches and chest totals of that tournament (`node worker/run.mjs <window> --reset`).
+A chest is not read from the replay (there are no chest objects). It is found as a burst of 5 to 9 loot pickups that appear within 0.6 s and 250 units of each other after the first 40 s, excluding bursts that match a player's elimination (inventory drop) in place and time. A chest site is a spot where this repeats in at least 5% of matches; its lootage rate is the share of matches in which it was opened early.

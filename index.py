@@ -268,12 +268,21 @@ def admin_probe(window: str, rank: int = 1, x_admin_key: str = Header(default=""
 
 
 @app.get("/api/admin/replay")
-def admin_replay(session: str, x_admin_key: str = Header(default="")):
+def admin_replay(session: str, max_ms: int = 0, x_admin_key: str = Header(default="")):
     """Owner/worker only: file list and signed download links of one tournament match replay."""
     if not _is_admin(x_admin_key):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     from fngameanalyzer import replays
-    return _api(replays.links, session)
+    return _api(replays.links, session, max_ms)
+
+
+@app.get("/api/admin/matches")
+def admin_matches(window: str, pages: int = 100, x_admin_key: str = Header(default="")):
+    """Owner/worker only: every match of a tournament window with its teams, and which are already turned into landings."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    from fngameanalyzer import replays
+    return _api(replays.matches, window, max(1, min(pages, 100)))
 
 
 @app.get("/api/sessions")

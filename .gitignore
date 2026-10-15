@@ -6,3 +6,9 @@ auth.json
 
 .vercel
 .env*
+
+# replay worker build output
+worker/landings/out/
+worker/landings/bin/
+worker/landings/obj/
+parser/

@@ -14,8 +14,8 @@ const wStr = (s) => {
   return Buffer.concat([w32(s.length + 1), Buffer.from(s, 'utf8'), Buffer.from([0])]);
 };
 
-export async function getLinks(session, key = process.env.ADMIN_KEY) {
-  const r = await fetch(`${SITE}/api/admin/replay?session=${session}`, { headers: { 'x-admin-key': key } });
+export async function getLinks(session, key = process.env.ADMIN_KEY, maxMs = 0) {
+  const r = await fetch(`${SITE}/api/admin/replay?session=${session}${maxMs ? `&max_ms=${maxMs}` : ''}`, { headers: { 'x-admin-key': key } });
   const j = await r.json();
   if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
@@ -43,8 +43,13 @@ async function fetchBuf(url, tries = 4) {
 // chunk framing as the game writes it: type (0 header, 1 data, 2 checkpoint, 3 event), size, payload
 function chunk(type, payload) { return Buffer.concat([w32(type), w32(payload.length), payload]); }
 
-export async function buildReplay(session, key) {
-  const { meta, files } = await getLinks(session, key);
+// opts.maxMs: only the first part of the match (landings happen in the first minutes): data chunks that start before
+// maxMs and nothing else, which is a small fraction of the download.
+export async function buildReplay(session, key, opts = {}) {
+  const { meta: full, files } = await getLinks(session, key, opts.maxMs);
+  const meta = opts.maxMs
+    ? { ...full, DataChunks: (full.DataChunks || []).filter((c) => c.Time1 < opts.maxMs), Checkpoints: [], Events: [], LengthInMS: Math.min(full.LengthInMS, opts.maxMs) }
+    : full;
   const get = (name) => {
     const f = files[name];
     if (!f || !f.url) throw new Error(`no link for ${name}`);
@@ -84,8 +89,8 @@ export async function getEvents(session, key) {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('replay.mjs')) {
-  const [session, out = `${process.argv[2]}.replay`] = process.argv.slice(2);
-  const { buffer, meta } = await buildReplay(session);
+  const [session, out = `${process.argv[2]}.replay`, maxMs = '0'] = process.argv.slice(2);
+  const { buffer, meta } = await buildReplay(session, undefined, { maxMs: Number(maxMs) });
   writeFileSync(out, buffer);
   console.log(`wrote ${out}: ${buffer.length} bytes, ${meta.DataChunks?.length} data chunks, ${meta.Checkpoints?.length} checkpoints, ${meta.Events?.length} events`);
 }

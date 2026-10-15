@@ -103,5 +103,32 @@ class DropsTest(unittest.TestCase):
         self.assertAlmostEqual(saved["map"]["pois"][0]["x"], 0.5)
 
 
+class DropsLoaderTest(unittest.TestCase):
+    def _load(self, body, rec, kv):
+        final = {"window_id": "w", "final": 0, "players": [], "meta": {"rules": RULES}}
+        with (mock.patch.object(storage, "get_window", return_value=final),
+              mock.patch.object(storage, "drops_replace", create=True),
+              mock.patch.object(storage, "drop_map_get", side_effect=lambda w: rec.get("m"), create=True),
+              mock.patch.object(storage, "drop_map_set", side_effect=lambda w, d: rec.update(m=d), create=True),
+              mock.patch.object(storage, "kv_get", side_effect=kv.get),
+              mock.patch.object(storage, "kv_set", side_effect=kv.__setitem__)):
+            return drops.ingest(body)
+
+    def test_background_map_adds_up_and_sessions_are_remembered(self):
+        rec, kv = {}, {}
+        row = {"game": 1, "team": "t1", "x": 0.5, "y": 0.5, "placement": 3, "points": 10}
+        self._load({"window_id": "w", "drops": [row], "map": {"name": "M", "base": {"cells": [[5, 2], [7, 1]]}}, "sessions_done": ["s1"]}, rec, kv)
+        self._load({"window_id": "w", "drops": [row], "append": True, "map": {"base": {"cells": [[5, 3]]}}, "sessions_done": ["s2"]}, rec, kv)
+        self.assertEqual(rec["m"]["base"], {"5": 5, "7": 1})          # counts add up across batches
+        self.assertEqual(rec["m"]["name"], "M")                       # a later batch without a name keeps it
+        self.assertEqual(kv["drops_done:w"]["sessions"], ["s1", "s2"])
+
+    def test_batch_with_only_finished_sessions_is_accepted(self):
+        rec, kv = {}, {}
+        out = self._load({"window_id": "w", "drops": [], "sessions_done": ["s9"]}, rec, kv)
+        self.assertEqual(out["stored"], 0)
+        self.assertEqual(kv["drops_done:w"]["sessions"], ["s9"])
+
+
 if __name__ == "__main__":
     unittest.main()

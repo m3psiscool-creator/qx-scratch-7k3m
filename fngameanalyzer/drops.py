@@ -12,6 +12,7 @@ import numpy as np
 from . import classify, insights, rules, service, storage
 
 GRID = 96
+BASE = 128           # resolution of the background map drawn from player movement
 _cache = {}          # window_id -> (time, arrays); a tournament is a few tens of thousands of rows
 CACHE_TTL = 300
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
@@ -174,7 +175,7 @@ def ingest(body):
     if not w:
         raise ValueError("Unknown window_id")
     raw = body.get("drops") or []
-    if not isinstance(raw, list) or not raw:
+    if not isinstance(raw, list) or (not raw and not body.get("sessions_done")):
         raise ValueError("drops must be a non-empty list")
     if len(raw) > 20000:
         raise ValueError("Send at most 20,000 rows per request; use append for the rest.")
@@ -204,27 +205,48 @@ def ingest(body):
         if not (math.isfinite(x) and math.isfinite(y)) or not (0 <= x <= 1 and 0 <= y <= 1):
             skipped += 1
             continue
-        team = str(d.get("team") or "")[:120]
+        team = str(d.get("team") or "")[:140]
         place = int(d.get("placement") or 0)
         pts = d.get("points")
         if pts is None and rl and d.get("elims") is not None:
             pts = rules.game_points(rl, {rules.STATS[0]: place, rules.STATS[1]: int(d["elims"]), rules.STATS[2]: 1 if d.get("win") else 0})
         rank = int(d.get("rank") or 0) or min((rank_of[t] for t in team.split("+") if t in rank_of), default=0)
         rows.append((int(d.get("game") or 1), team, x, y, str(d.get("poi") or "")[:60], place, int(pts or 0), rank, 1 if d.get("win") else 0))
-    if not rows:
+    if not rows and not body.get("sessions_done"):
         raise ValueError("No usable rows (coordinates must be inside the map).")
-    storage.drops_replace(wid, rows, append=bool(body.get("append")))
+    if rows:
+        storage.drops_replace(wid, rows, append=bool(body.get("append")))
     m = body.get("map")
     if isinstance(m, dict):
-        pois_ = []
-        for p in (m.get("pois") or [])[:200]:
-            try:
-                px, py = unit(float(p["x"]), float(p["y"]))
-                pois_.append({"name": str(p["name"])[:60], "x": px, "y": py, "r": float(p.get("r") or 0.03)})
-            except (KeyError, TypeError, ValueError):
-                continue
-        img = str(m.get("image") or "")
-        storage.drop_map_set(wid, {"name": str(m.get("name") or "")[:80], "image": img if img.startswith("https://") else "", "pois": pois_,
-                                   "credit": str(m.get("credit") or "")[:120]})
+        old = (storage.drop_map_get(wid) if hasattr(storage, "drop_map_get") else None) or {}
+        pois_ = old.get("pois") or []
+        if m.get("pois"):
+            pois_ = []
+            for p in (m.get("pois") or [])[:200]:
+                try:
+                    px, py = unit(float(p["x"]), float(p["y"]))
+                    pois_.append({"name": str(p["name"])[:60], "x": px, "y": py, "r": float(p.get("r") or 0.03)})
+                except (KeyError, TypeError, ValueError):
+                    continue
+        img = str(m.get("image") or old.get("image") or "")
+        rec = {"name": str(m.get("name") or old.get("name") or "")[:80], "image": img if img.startswith("https://") else "", "pois": pois_,
+               "credit": str(m.get("credit") or old.get("credit") or "")[:120]}
+        # a map drawn from where players moved (no outside image needed): cells of a BASE x BASE grid with a visit count
+        base = dict(old.get("base") or {})
+        add = m.get("base")
+        if isinstance(add, dict) and isinstance(add.get("cells"), list):
+            for cell, n in add["cells"][:BASE * BASE]:
+                if 0 <= int(cell) < BASE * BASE:
+                    base[str(int(cell))] = base.get(str(int(cell)), 0) + int(n)
+        if base:
+            rec["base"] = base
+            rec["base_size"] = BASE
+        storage.drop_map_set(wid, rec)
+    done = body.get("sessions_done")
+    if isinstance(done, list):
+        k = "drops_done:" + wid
+        cur = set((storage.kv_get(k) or {}).get("sessions") or [])
+        cur |= {str(s)[:40] for s in done[:2000]}
+        storage.kv_set(k, {"sessions": sorted(cur)})
     _cache.pop(wid, None)
     return {"ok": True, "stored": len(rows), "skipped": skipped}

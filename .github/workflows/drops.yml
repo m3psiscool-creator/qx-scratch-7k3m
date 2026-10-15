@@ -1,0 +1,41 @@
+name: drops
+# Reads the replays of recent tournaments and loads landing spots into the Dropspots tab.
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      window:
+        description: "Window id (empty = pick recent windows automatically)"
+        required: false
+      limit:
+        description: "Matches to process per window"
+        required: false
+        default: "40"
+concurrency: drops
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "10.0.x" }
+      - name: Get the replay parser (pinned)
+        run: |
+          git clone https://github.com/Shiqan/FortniteReplayDecompressor parser
+          git -C parser checkout 76f74c1
+      - name: Build the landing tool
+        run: dotnet build worker/landings/landings.csproj -c Release -o worker/landings/out -nologo -v q
+      - name: Process replays
+        env:
+          ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+          LANDINGS_DLL: ${{ github.workspace }}/worker/landings/out/landings.dll
+        run: |
+          limit="${{ github.event.inputs.limit || '40' }}"
+          if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 4)"; fi
+          for w in $wins; do
+            node worker/run.mjs "$w" --limit "$limit" || echo "window $w failed"
+          done

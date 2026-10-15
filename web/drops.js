@@ -35,7 +35,7 @@ async function loadDrops(wid) {
   DR.info = info; DR.top = info.goal ? info.goal.rank : 100;
   tool.innerHTML = infoCard(info) + (info.landings ? `<div id="dcontrols"></div><div id="dmap"></div><div id="dspots"></div>` : noData(info));
   if (!info.landings) return;
-  DR.imgUrl = info.map && info.map.image || ""; DR.img = null;
+  DR.imgUrl = info.map && info.map.image || ""; DR.img = null; DR.base = info.map && info.map.base ? buildBase(info.map.base, info.map.base_size || 128) : null;
   if (DR.imgUrl) { const im = new Image(); im.onload = () => { DR.img = im; draw(); }; im.src = DR.imgUrl; }
   await refresh(true);
 }
@@ -115,11 +115,19 @@ function heatLayer(key, sparse) {
   sparse.forEach(([cell, cnt]) => { const a = Math.min(1, Math.sqrt(cnt / Math.max(1, top))); im.data.set([rgb[0], rgb[1], rgb[2], Math.round(255 * a)], cell * 4); });
   x.putImageData(im, 0, 0); return DR.heat[key] = c;
 }
+// A background drawn from where players moved after landing: the shape of the island appears from the traffic itself.
+function buildBase(cells, size) {
+  const c = document.createElement("canvas"); c.width = c.height = size; const g = c.getContext("2d"), im = g.createImageData(size, size);
+  const vals = Object.values(cells), mx = Math.log(1 + Math.max(...vals, 1));
+  for (const [k, n] of Object.entries(cells)) { const i = +k * 4, a = Math.min(1, Math.log(1 + n) / mx); im.data[i] = 150; im.data[i + 1] = 165; im.data[i + 2] = 190; im.data[i + 3] = Math.round(30 + 190 * a); }
+  g.putImageData(im, 0, 0); return c;
+}
 function draw() {
   const c = $("#dc"); if (!c || !DR.grid) return; if (c.dataset.s != DR.S) sizeCanvas();
   const x = c.getContext("2d"), S = DR.S, [px, py] = toPx(0, 0), W = S * DR.z;
   x.clearRect(0, 0, S, S); x.fillStyle = cssv("--sf2"); x.fillRect(0, 0, S, S);
   if (DR.img) x.drawImage(DR.img, px, py, W, W);
+  else if (DR.base) { x.imageSmoothingEnabled = true; x.drawImage(DR.base, px, py, W, W); x.fillStyle = cssv("--mut"); x.font = "600 11px system-ui"; x.fillText("Map drawn from where players moved", px + 10, py + 18); }
   else { x.strokeStyle = cssv("--line"); x.lineWidth = 1; for (let i = 0; i <= 10; i++) { x.beginPath(); x.moveTo(px + W * i / 10, py); x.lineTo(px + W * i / 10, py + W); x.moveTo(px, py + W * i / 10); x.lineTo(px + W, py + W * i / 10); x.stroke(); } x.fillStyle = cssv("--mut"); x.font = "600 12px system-ui"; x.fillText("No map image loaded: coordinates run 0 to 1", px + 10, py + 20); }
   x.imageSmoothingEnabled = true; x.filter = DR.blur ? `blur(${DR.blur * DR.z / 2}px)` : "none"; x.globalAlpha = DR.alpha;
   if (DR.layers.all) x.drawImage(heatLayer("all", DR.grid.all), px, py, W, W);

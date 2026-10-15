@@ -20,7 +20,7 @@ setInterval(() => { countdowns(); const c = $("#clock"); if (c) c.textContent = 
 // ---------------------------------------------------------------- shell: navigation, theme, region
 const NAV = [
   { g: "", items: [["home", "Home", "home", "#/"]] },
-  { g: "Plan", items: [["strategy", "Strategy", "target", "#/strategy"], ["me", "My results", "user", "#/me"], ["schedule", "Schedule", "cal", "#/schedule"], ["fncs", "FNCS", "trophy", "#/fncs"]] },
+  { g: "Plan", items: [["strategy", "Strategy", "target", "#/strategy"], ["me", "My results", "user", "#/me"], ["drops", "Dropspots", "map", "#/drops"], ["schedule", "Schedule", "cal", "#/schedule"], ["fncs", "FNCS", "trophy", "#/fncs"]] },
   { g: "Research", items: [["archive", "Archive", "archive", "#/archive"], ["classes", "Gamemodes", "layers", "#/classes"], ["players", "Players", "user", "#/players"]] },
   { g: "Site", items: [["accuracy", "Accuracy", "gauge", "#/accuracy"], ["status", "Status", "gear", "#/status"]] },
 ];
@@ -186,7 +186,7 @@ function evCard(w) {
 
 // ---------------------------------------------------------------- Home
 const NEWS_VER = "2026-10-15";
-const NEWS = ["<b>Coach notes</b> on the Strategy tab: your games against finishers, with what to fix.", "<b>Which style gives the best chance?</b> Finishers grouped by elims, replayed from your next game.", "<b>Rivals</b>: the players around your rank in a live event.", "<b>Calendar</b>: add events with a 30 minute reminder. <b>Feedback</b>: tell us what you want."];
+const NEWS = ["<b>Coach notes</b> on the Strategy tab: your games against finishers, with what to fix.", "<b>Which style gives the best chance?</b> Finishers grouped by elims, replayed from your next game.", "<b>Calendar</b>: add events with a 30 minute reminder. <b>Feedback</b>: tell us what you want."];
 let HOME_SIG = "";
 async function home(quiet) {
   const d = await j("/api/home" + (REGION ? "?region=" + REGION : ""));
@@ -698,6 +698,7 @@ async function route() {
     else if (page === "players") await players();
     else if (page === "player") await playerPage(arg);
     else if (page === "me") await myPage();
+    else if (page === "drops") await dropsPage(arg);
     else if (page === "fncs") await fncs();
     else if (page === "accuracy") await accuracy();
     else if (page === "status") await status();

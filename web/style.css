@@ -239,6 +239,21 @@ details.tv[open] summary{margin-bottom:8px}
 .banner a{font-weight:700}
 @media(max-width:900px){.banner{margin:10px 14px 0}}
 
+/* ---------- dropspots ---------- */
+.dr-layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:16px;align-items:start}
+.dr-layout>.card{margin:0}
+.dr-main>.card{margin:0 0 16px}
+.dr-list{max-height:640px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.dr-item{display:flex;flex-direction:column;gap:1px;padding:8px 11px;border-radius:10px;border:1px solid var(--line);background:var(--sf2);color:var(--tx)}
+.dr-item:hover{text-decoration:none;border-color:var(--line2)}.dr-item.on{border-color:var(--ac);background:var(--ac-soft)}
+.dr-item b{font-size:.88rem;line-height:1.25}.dr-item small{font-size:.74rem}
+.dr-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(330px,1fr);gap:16px;margin:0 0 16px}
+.dr-grid>.card{margin:0}
+.dr-canvas{background:var(--sf2);border-radius:12px;overflow:hidden;line-height:0}
+.dr-canvas canvas{display:block;width:100%}
+.dr-row.on td{background:var(--ac-soft)}
+@media(max-width:1000px){.dr-layout{grid-template-columns:minmax(0,1fr)}.dr-list{max-height:260px}.dr-grid{grid-template-columns:minmax(0,1fr)}}.dr-layout>*,.dr-grid>*,.dr-main{min-width:0}
+
 /* ---------- sessions of an event ---------- */
 .sess{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
 .sess-h{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}

@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS predictions(
 CREATE INDEX IF NOT EXISTS pred_win ON predictions(window_id, rank, ts);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS names(account_id TEXT PRIMARY KEY, name TEXT);
+CREATE TABLE IF NOT EXISTS drop_maps(window_id TEXT PRIMARY KEY, d TEXT);
+CREATE TABLE IF NOT EXISTS drops(
+ window_id TEXT, game INTEGER, team TEXT, x REAL, y REAL, poi TEXT,
+ placement INTEGER, points INTEGER, rank INTEGER, win INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS drops_win ON drops(window_id, game);
 """
 ALTERS = ["ALTER TABLE windows ADD COLUMN IF NOT EXISTS deep TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS category TEXT",
@@ -560,18 +565,6 @@ def player_events(account_id):
     return out
 
 
-def player_style_sql(ids, category):
-    """How these players usually play in one gamemode: elims per game, average finish, wins, from their top-1000 finishes."""
-    if not ids:
-        return {}
-    with db() as c:
-        rows = c.execute(f"""WITH rows AS ({_PR_ROWS} AND w.category = %s)
-                             SELECT r->>0, count(*), sum((r->>3)::float), sum((r->>5)::float), avg(NULLIF(r->>6, 'null')::float), sum((r->>4)::float)
-                             FROM rows WHERE r->>0 = ANY(%s) GROUP BY 1""", (category, list(ids))).fetchall()
-    return {a: {"events": n, "elims_pg": round(e / g, 2) if g else None, "avg_place": round(p, 1) if p is not None else None, "wins": int(w or 0)}
-            for a, n, g, e, p, w in rows}
-
-
 def player_event_counts(ids):
     if not ids:
         return {}
@@ -602,3 +595,36 @@ def status_counts():
                                 count(*) FILTER (WHERE final = 0 AND end_ts < %s) FROM windows""",
                       (now, now, now, now)).fetchone()
     return {"finished": r[0], "live": r[1], "upcoming": r[2], "not collected yet": r[3]}
+
+
+# ---- landing locations (where each team dropped in each game of a tournament)
+def drops_replace(window_id, rows, append=False):
+    """rows: (game, team, x, y, poi, placement, points, rank, win). x and y are 0-1 across the map image."""
+    with db() as c:
+        if not append:
+            c.execute("DELETE FROM drops WHERE window_id=%s", (window_id,))
+        with c.cursor() as cur:
+            cur.executemany("INSERT INTO drops(window_id,game,team,x,y,poi,placement,points,rank,win) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                            [(window_id, *r) for r in rows])
+
+
+def drops_rows(window_id):
+    with db() as c:
+        return c.execute("SELECT game,team,x,y,poi,placement,points,rank,win FROM drops WHERE window_id=%s", (window_id,)).fetchall()
+
+
+def drops_available():
+    """window_id -> (landings, games) for every tournament that has landing data."""
+    with db() as c:
+        return {r[0]: (r[1], r[2]) for r in c.execute("SELECT window_id, count(*), count(DISTINCT game) FROM drops GROUP BY 1").fetchall()}
+
+
+def drop_map_get(window_id):
+    with db() as c:
+        r = c.execute("SELECT d FROM drop_maps WHERE window_id=%s", (window_id,)).fetchone()
+    return json.loads(r[0]) if r else None
+
+
+def drop_map_set(window_id, d):
+    with db() as c:
+        c.execute("INSERT INTO drop_maps(window_id,d) VALUES(%s,%s) ON CONFLICT(window_id) DO UPDATE SET d=excluded.d", (window_id, json.dumps(d)))

@@ -7,7 +7,7 @@ import time
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from fngameanalyzer import auth, collector, config, insights, me, service, storage, strategy
+from fngameanalyzer import auth, collector, config, drops, insights, me, service, storage, strategy
 
 app = FastAPI()
 
@@ -18,7 +18,7 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
              "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
              "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
              "/api/accuracy": 300, "/api/players": 300, "/api/player": 300,
-             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/rivals": 30, "/api/calendar.ics": 300, "/api/health": 30}
+             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/pois": 120, "/api/calendar.ics": 300, "/api/health": 30}
 
 
 @app.middleware("http")
@@ -71,6 +71,11 @@ def lib_js():
 @app.get("/strategy.js")
 def strategy_js():
     return _file("strategy.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/drops.js")
+def drops_js():
+    return _file("drops.js", "application/javascript; charset=utf-8")
 
 
 @app.get("/style.css")
@@ -214,9 +219,43 @@ def api_feedback_list(x_admin_key: str = Header(default="")):
     return storage.kv_get("feedback") or []
 
 
-@app.get("/api/rivals")
-def api_rivals(window: str, rank: int):
-    return _api(strategy.rivals, window, rank)
+@app.get("/api/drops/events")
+def api_drops_events():
+    return _api(drops.events)
+
+
+@app.get("/api/drops/info")
+def api_drops_info(window: str):
+    return _api(drops.map_info, window)
+
+
+@app.get("/api/drops/grid")
+def api_drops_grid(window: str, top: int = 100, game: int = 0):
+    return _api(drops.grid, window, max(1, top), game)
+
+
+@app.get("/api/drops/pois")
+def api_drops_pois(window: str, top: int = 100, game: int = 0):
+    return _api(drops.pois, window, max(1, top), game)
+
+
+@app.get("/api/drops/area")
+def api_drops_area(window: str, poly: str, top: int = 100, game: int = 0):
+    def f():
+        pts = [p.split(",") for p in poly.split(";") if p][:80]
+        return drops.area(window, [[float(x), float(y)] for x, y in pts], max(1, top), game)
+    return _api(f)
+
+
+@app.post("/api/admin/drops")
+async def admin_drops(req: Request, x_admin_key: str = Header(default="")):
+    """Owner only: load landing rows for one tournament (see docs/dropspots-data.md)."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        return drops.ingest(await req.json())
+    except Exception as e:
+        return _err(e)
 
 
 @app.get("/api/sessions")

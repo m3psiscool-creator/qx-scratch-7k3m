@@ -280,40 +280,6 @@ def safety(window_id, rank):
             "history_events": (r.get("prior") or {}).get("n") or r.get("history_events")}
 
 
-# ---------------------------------------------------------------- rivals: the players around a rank in a live event
-def rivals(window_id, rank, span=8):
-    t = _target(window_id)
-    if t["final"]:
-        raise ValueError("Rivals are shown while an event is live.")
-    snaps = storage.snapshots(window_id, last=1)
-    if not snaps:
-        raise ValueError("No live board yet.")
-    snap = snaps[0]
-    board = storage.kv_get("board:" + window_id)
-    players = board["players"] if board and abs(board["ts"] - snap["ts"]) < 180 else None
-    n = len(players) if players else min(60, len(snap["points"]))
-    rank = max(1, min(int(rank), n))
-    lo, hi = max(1, rank - span), min(n, rank + span)
-    cat = classify.of(t)
-    cap = (t.get("meta") or {}).get("match_cap") or 0
-    ids = [a for r in range(lo, hi + 1) for a in (players[r - 1] if players else [])]
-    names = insights._name_map(ids) if ids else {}
-    form = storage.player_form_sql(ids, cat) if ids else {}
-    style = storage.player_style_sql(ids, cat) if hasattr(storage, "player_style_sql") and ids else {}
-    mine = snap["points"][rank - 1]
-    rows = []
-    for r in range(lo, hi + 1):
-        accts = players[r - 1] if players else []
-        pts, g = snap["points"][r - 1], snap["games"][r - 1]
-        st = [style[a] for a in accts if a in style]
-        rows.append({"rank": r, "points": pts, "games": g, "ppg": round(pts / g, 1) if g else None, "gap": round(pts - mine),
-                     "games_left": max(0, cap - g) if cap else None, "me": r == rank,
-                     "players": [{"id": a, "name": names.get(a, a[:8]), **form.get(a, {})} for a in accts],
-                     "elims_pg": round(sum(x["elims_pg"] for x in st if x["elims_pg"] is not None) / max(1, len([x for x in st if x["elims_pg"] is not None])), 2) if st else None,
-                     "avg_place": round(sum(x["avg_place"] for x in st if x["avg_place"] is not None) / max(1, len([x for x in st if x["avg_place"] is not None])), 1) if st else None})
-    return {"window_id": window_id, "rank": rank, "age_s": round(time.time() - snap["ts"]), "rows": rows, "named": bool(players)}
-
-
 # ---------------------------------------------------------------- which past events count as history
 def peers(target, rows, min_same=4, limit=14):
     """Previous events of the same gamemode and format. The same region's events come first; other regions are added

@@ -24,8 +24,8 @@ Hosted site that predicts the points needed for any rank (1-10,000) in Fortnite 
 - Known limits: Epic endpoints are unofficial; only the top 1000 players are stored per event (ranks 1001-10000 are thresholds only); sessionHistory is capped (11 games on some events).
 
 ## Strategy layer (added Oct 2026)
-- `strategy.py` feeds the Strategy tab: `/api/scoring`, `/profile` (finisher bands, per-game sequences, styles), `/pace`, `/safety`, `/ladder`, `/tempo` (minutes per game by placement from consecutive game end times; a stored game time is the player's elimination time), `/rivals`; `me.py` looks a player up by Epic name on the public leaderboard (`/api/me`, `/api/account`); `service.sessions` (`/api/sessions`) lists the rounds/editions of an event in a region; `/api/calendar.ics`, `/api/feedback` (owner reads with the admin key), `/api/health` (banner).
-- Front end: `lib.js` (helpers, Chart.js theme, zoom/click wiring), `strategy.js` (recommendation, plan, simulation, coach notes, rivals), `app.js` (pages, router, account chip, banner). Charts use `mk()`; animations are off on purpose (Chart.js errors when a click redraws a chart).
+- `strategy.py` feeds the Strategy tab: `/api/scoring`, `/profile` (finisher bands, per-game sequences, styles), `/pace`, `/safety`, `/ladder`, `/tempo` (minutes per game by placement from consecutive game end times; a stored game time is the player's elimination time); `me.py` looks a player up by Epic name on the public leaderboard (`/api/me`, `/api/account`); `service.sessions` (`/api/sessions`) lists the rounds/editions of an event in a region; `/api/calendar.ics`, `/api/feedback` (owner reads with the admin key), `/api/health` (banner).
+- Front end: `lib.js` (helpers, Chart.js theme, zoom/click wiring), `strategy.js` (recommendation, plan, simulation, coach notes), `app.js` (pages, router, account chip, banner). Charts use `mk()`; animations are off on purpose (Chart.js errors when a click redraws a chart).
 - Timing facts that drive the plan: games left = format games minus games played; games that fit = time left / minutes per game at your placement (a game may start right before the window closes). Finishers' points fall with game number, so checkpoints and the simulation follow real sequences, not an even split.
 - Tests: `python -m unittest discover -s tests`.
 
@@ -37,3 +37,7 @@ Hosted site that predicts the points needed for any rank (1-10,000) in Fortnite 
 ## Roadmap ideas not built
 - Real gameplay telemetry (landing spots, rotations, fights): Osirion's public API or replay parsing. Needs a terms check first; plan-aware drop advice ("which drop fits your target rank, time and style") is the differentiator.
 - Clock-time advice ("when to queue") was tested and rejected: later games score more only because deep runs end later, so survival and clock time cannot be separated.
+
+## Dropspots (landing data)
+- Tab `#/drops[/window]` (`web/drops.js`, `drops.py`, `/api/drops/*`): heatmaps of where teams landed (qualified = final rank within the top N, versus everyone), a game filter, drawn areas (box, freehand, named spot) with the stats of the teams that landed there, and a comparison table of named spots. It also states which playlist/map an event uses (Epic's event data only gives the playlist id).
+- **No landing data exists in Epic's leaderboard.** Rows are loaded by the owner with `POST /api/admin/drops` or `scripts/import_drops.py` (format in `docs/dropspots-data.md`); tables `drops` and `drop_maps`. Sources: replay parsing or a provider such as Osirion's API (account, key and paid credits). Osirion and the map APIs could not be reached from the build environment, so no provider integration was written or tested.

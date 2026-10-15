@@ -228,3 +228,24 @@ class DropsLoaderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MapFitTest(unittest.TestCase):
+    def test_auto_fit_recovers_a_known_placement(self):
+        known = {"mask": "raw-tigerranch"}
+        fit = {"k": 3, "L": 1.55, "cx": 0.48, "cy": 0.52}
+        m = drops._oriented_mask("raw-tigerranch", 3)
+        rng = np.random.default_rng(5)
+        xs, ys = [], []
+        while len(xs) < 1500:    # landings spread evenly over the land of the picture
+            u, v = rng.random(2)
+            if m[int(v * m.shape[0]), int(u * m.shape[0])]:
+                xs.append((u - 0.5) * fit["L"] + fit["cx"])
+                ys.append((v - 0.5) * fit["L"] + fit["cy"])
+        got = drops._auto_fit("TigerRanch", known, {"x": np.array(xs, dtype=np.float32), "y": np.array(ys, dtype=np.float32)})
+        self.assertIsNotNone(got)
+        self.assertEqual(got["k"], 3)
+        self.assertLess(abs(got["cx"] - 0.48) + abs(got["cy"] - 0.52), 0.04)
+
+    def test_too_few_landings_give_no_fit(self):
+        self.assertIsNone(drops._auto_fit("TigerRanch", {"mask": "raw-tigerranch"}, {"x": np.zeros(50, dtype=np.float32), "y": np.zeros(50, dtype=np.float32)}))

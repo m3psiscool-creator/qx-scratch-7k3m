@@ -33,6 +33,26 @@ MAPS = {
     "BR": {"name": "Battle Royale island", "image": "/maps/br-island.jpg", "mask": "br-island", "min_on_land": 0.85,
            "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)"},
 }
+# Maps read straight from the game files (the minimap texture Epic ships, see tools/mapfit/mapdump): the raw picture is sent as it is
+# and the page turns it into the 0-1 frame with "fit" = {k: quarter turns counter-clockwise, L: width of the picture in frames,
+# cx, cy: centre of the picture in the frame}. A map with a fit that was measured is listed here; a map without one is fitted
+# from its real landings once enough exist (_auto_fit) and shown only when that fit is clear.
+_RAW = {"BlastBerry": ("raw-blastberry", "BlastBerry", {"k": 0, "L": 1.55, "cx": 0.515, "cy": 0.435}, 0.86),
+        "DashBerry": ("raw-dashberry", "DashBerry", None, None),
+        "ForbiddenBlastBerry": ("raw-forbiddenblastberry", "Forbidden BlastBerry", None, None),
+        "MatchMist": ("raw-matchmist", "MatchMist", None, None),
+        "PunchBerry": ("raw-punchberry", "PunchBerry", None, None),
+        "RopeSmile": ("raw-ropesmile", "RopeSmile", None, None),
+        "TigerRanch": ("raw-tigerranch", "TigerRanch", None, None),
+        "TimberStake": ("raw-timberstake", "TimberStake", None, None)}
+for _c, (_f, _n, _fit, _min) in _RAW.items():
+    MAPS[_c] = {"name": _n, "raw": "/maps/%s.jpg" % _f, "mask": _f, "credit": "Map: %s, Epic Games (map texture from the game files)" % _n}
+    if _fit:
+        MAPS[_c]["fit"] = _fit
+    if _min:
+        MAPS[_c]["min_on_land"] = _min
+CODENAMES = ("ForbiddenBlastBerry", "SourSpawn", "BlastBerry", "DashBerry", "PiperBoot", "JumpBear", "MatchMist", "PunchBerry", "RopeSmile",
+             "TigerRanch", "TimberStake")
 MIN_ON_LAND = 0.93     # a registered picture is only shown while at least this share of the real landings is on its land
 _masks = {}
 
@@ -48,12 +68,99 @@ def _land_mask(name):
     return _masks[name]
 
 
-def picture_check(window_id, known):
+_oriented = {}
+
+
+def _oriented_mask(name, k):
+    if (name, k) not in _oriented:
+        _oriented[(name, k)] = np.rot90(_land_mask(name), k)
+    return _oriented[(name, k)]
+
+
+def _hits(m, fit, x, y):
+    n = m.shape[0]
+    iu = (x - fit["cx"]) / fit["L"] + 0.5
+    iv = (y - fit["cy"]) / fit["L"] + 0.5
+    ok = (iu >= 0) & (iu < 1) & (iv >= 0) & (iv < 1)
+    return m[np.clip((iv * n).astype(int), 0, n - 1), np.clip((iu * n).astype(int), 0, n - 1)] & ok
+
+
+def _on_land(m, fit, x, y):
+    """Share of the points (frame coordinates) that fall on land of a raw picture placed with fit."""
+    return float(_hits(m, fit, x, y).mean())
+
+
+def _loglik(m, fit, x, y):
+    """Mean log-likelihood of the landings if they are spread evenly over the picture's land (a picture that is too big or too small scores low)."""
+    return float(np.log((_hits(m, fit, x, y).astype(float) + 0.02) / (m.mean() * fit["L"] ** 2 + 0.02)).mean())
+
+
+def _auto_fit(code, known, a):
+    """Find how a raw map picture sits in the frame from real landings: 4 quarter turns x centre, the width fixed at the
+    1.55 every Reload map has. Accepted only when one turn is clearly better than the others and the landings lie on land."""
+    x, y = a["x"].astype(float), a["y"].astype(float)
+    if len(x) < 300:
+        return None
+    if len(x) > 6000:
+        i = np.random.default_rng(1).choice(len(x), 6000, replace=False)
+        x, y = x[i], y[i]
+    best = {}
+    for k in range(4):
+        m = _oriented_mask(known["mask"], k)
+        top = None
+        for cx in np.arange(0.35, 0.651, 0.025):
+            for cy in np.arange(0.35, 0.651, 0.025):
+                f = {"k": k, "L": 1.55, "cx": round(float(cx), 3), "cy": round(float(cy), 3)}
+                sc = _loglik(m, f, x, y)
+                if top is None or sc > top[0]:
+                    top = (sc, f)
+        best[k] = top
+    order = sorted(best.values(), key=lambda t: -t[0])
+    gap = order[0][0] - order[1][0]
+    f = order[0][1]
+    m = _oriented_mask(known["mask"], f["k"])
+    top = (order[0][0], f)
+    for L in np.arange(1.50, 1.601, 0.01):
+        for cx in np.arange(f["cx"] - 0.025, f["cx"] + 0.0251, 0.005):
+            for cy in np.arange(f["cy"] - 0.025, f["cy"] + 0.0251, 0.005):
+                g = {"k": f["k"], "L": round(float(L), 3), "cx": round(float(cx), 3), "cy": round(float(cy), 3)}
+                sc = _loglik(m, g, x, y)
+                if sc > top[0]:
+                    top = (sc, g)
+    share = _on_land(m, top[1], x, y)
+    if gap < 0.05 or share < known.get("min_on_land", MIN_ON_LAND) - 0.03:
+        return None
+    return {**top[1], "on_land": round(share, 3), "gap": round(gap, 3), "n": int(len(x))}
+
+
+def _fit_of(code, known, window_id):
+    """The fit of a raw picture: the measured one, the one stored from an earlier tournament, or one found now from the landings."""
+    if known.get("fit"):
+        return known["fit"]
+    saved = storage.kv_get("mapfit:" + code)
+    if saved:
+        return saved
+    try:
+        a = _arrays(window_id)
+    except ValueError:
+        return None
+    f = _auto_fit(code, known, a)
+    if f:
+        storage.kv_set("mapfit:" + code, f)
+    return f
+
+
+def picture_check(window_id, known, code=None):
     """Share of this tournament's landings that fall on land of the registered picture (None: no landings to test with)."""
     try:
         a = _arrays(window_id)
     except ValueError:
         return None
+    if known.get("raw"):
+        fit = _fit_of(code, known, window_id)
+        if not fit:
+            return None
+        return _on_land(_oriented_mask(known["mask"], fit["k"]), fit, a["x"].astype(float), a["y"].astype(float))
     m = _land_mask(known["mask"])
     n = m.shape[0]
     ix = np.clip((a["x"] * n).astype(int), 0, n - 1)
@@ -69,19 +176,31 @@ def map_info(window_id):
     playlist = meta.get("playlist") or ""
     reload_ = meta.get("game_type") == "reload"
     build = " zb" not in " " + classify.of(w)
-    codename = next((t for t in ("SourSpawn", "BlastBerry", "DashBerry", "PiperBoot", "JumpBear") if t.lower() in playlist.lower()), None)
+    codename = next((t for t in CODENAMES if t.lower() in playlist.lower()), None)
     label = "Reload map" if reload_ else "Battle Royale island"
     rec = storage.drop_map_get(window_id) if hasattr(storage, "drop_map_get") else None
     known = MAPS.get(codename) or (MAPS["BR"] if not reload_ and meta.get("game_type") == "br" else None)
     check = None
     if known:   # a known map picture wins over the background drawn from player movement, but only while the landings agree with it
         rec = {**(rec or {}), **known}
-        share = picture_check(window_id, known) if known.get("mask") else None
+        share = picture_check(window_id, known, codename) if known.get("mask") else None
         need = known.get("min_on_land", MIN_ON_LAND)
+        n_land = len(_arrays(window_id)["x"]) if share is not None else 0
+        slack = 1.64 * math.sqrt(max(share, 0.0) * (1 - share) / max(n_land, 1)) if share is not None else 0   # a small sample may fall a little short by chance
         check = {"on_land": None if share is None else round(share, 3), "min": need,
-                 "status": "untested" if share is None else "ok" if share >= need else "mismatch"}
+                 "status": "untested" if share is None else "ok" if share + slack >= need else "mismatch"}
+        if known.get("raw"):   # a raw game texture is only shown once its place in the frame is known and the landings agree with it
+            fit = _fit_of(codename, known, window_id) if check["status"] == "ok" else None
+            if fit:
+                rec["image"] = known["raw"]
+                rec["fit"] = {k: fit[k] for k in ("k", "L", "cx", "cy")}
+            else:
+                rec["image"] = ""
+                rec["name"] = ""
+                rec.pop("credit", None)
+            rec.pop("raw", None)
         if check["status"] == "mismatch":   # wrong map picture: never show it
-            rec = {k: v for k, v in rec.items() if k not in ("image", "name", "credit")}
+            rec = {k: v for k, v in rec.items() if k not in ("image", "name", "credit", "fit")}
             rec["image"] = ""
             rec["name"] = ""
         rec.pop("mask", None)
@@ -336,7 +455,7 @@ def ingest(body):
 def _code(w):
     import re
     pl = (w.get("meta") or {}).get("playlist") or ""
-    m = re.search(r"SourSpawn|BlastBerry|DashBerry|PiperBoot|JumpBear", pl, re.I)
+    m = re.search("|".join(CODENAMES), pl, re.I)
     return m.group(0) if m else pl
 
 

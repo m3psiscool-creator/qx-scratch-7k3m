@@ -36,8 +36,18 @@ async function loadDrops(wid) {
   tool.innerHTML = infoCard(info) + (info.landings ? `<div id="dcontrols"></div><div id="dmap"></div><div id="dloot"></div><div id="dspots"></div>` : noData(info));
   if (!info.landings) return;
   DR.imgUrl = info.map && info.map.image || ""; DR.img = null; DR.base = null;
-  if (DR.imgUrl) { const im = new Image(); im.onload = () => { DR.img = im; draw(); }; im.src = DR.imgUrl; }
+  if (DR.imgUrl) { const im = new Image(); im.onload = () => { DR.img = info.map.fit ? warp(im, info.map.fit) : im; draw(); }; im.src = DR.imgUrl; }
   await refresh(true);
+}
+// A raw map texture from the game files, put into the 0-1 frame of the landings: turned k quarter turns counter-clockwise,
+// L frames wide, centred on (cx, cy). The sea around it takes the colour of the picture's corner.
+function warp(im, f) {
+  const S = 1600, c = document.createElement("canvas"); c.width = c.height = S;
+  const x = c.getContext("2d"), t = document.createElement("canvas"); t.width = t.height = 1; const tx = t.getContext("2d");
+  tx.drawImage(im, 0, 0, 8, 8, 0, 0, 1, 1); const p = tx.getImageData(0, 0, 1, 1).data; x.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`; x.fillRect(0, 0, S, S);
+  x.imageSmoothingQuality = "high"; x.translate(f.cx * S, f.cy * S); x.rotate(-f.k * Math.PI / 2);
+  x.drawImage(im, -f.L * S / 2, -f.L * S / 2, f.L * S, f.L * S);
+  return c;
 }
 function infoCard(i) {
   const m = i.map;

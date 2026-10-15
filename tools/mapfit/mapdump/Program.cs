@@ -21,7 +21,11 @@ Console.WriteLine("mounted dynamic: " + n + ", files: " + provider.Files.Count);
 var rx = new System.Text.RegularExpressions.Regex(pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 int c = 0;
 foreach (var f in provider.Files.Keys) if (rx.IsMatch(f)) { Console.WriteLine(f); if (++c > 400) break; }
-if (args.Length > 4)
+if (args.Length > 4 && args[4].StartsWith("json:"))
+{
+    Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(provider.LoadPackage(args[4].Substring(5)).GetExports(), Newtonsoft.Json.Formatting.Indented));
+}
+else if (args.Length > 4)
 {
     foreach (var spec in args[4].Split(','))
     {

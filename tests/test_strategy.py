@@ -68,11 +68,48 @@ class AnyRankTest(unittest.TestCase):
         mid = service._interp_deep(pts[999], deep, 1250)
         self.assertTrue(600 < mid < pts[999])                                           # between rank 1000 and rank 1500
 
-    def test_top_x_must_be_in_range(self):
-        for bad in (0, -5, 10001):
+    def test_nonsense_ranks_are_refused_but_too_deep_ones_are_clamped(self):
+        for bad in (0, -5):
             with mock.patch.object(storage, "get_window", return_value={"window_id": "w", "final": 0}):
                 with self.assertRaises(ValueError):
                     service._run_predict("w", bad)
+        with mock.patch.object(storage, "get_window", return_value={"window_id": "w", "final": 0}):
+            with self.assertRaises(service._Beyond) as c:
+                service._run_predict("w", 10001)
+        self.assertEqual(c.exception.eff, 10000)
+
+
+class NeverRefuseTest(unittest.TestCase):
+    def test_widens_to_similar_gamemodes_without_being_asked(self):
+        seen = []
+
+        def fake(window_id, top, entrants=None):
+            seen.append(model.approx())
+            if not model.approx():
+                raise service.NoHistory("none")
+            return {"rank": top, "low": 1, "likely": 2, "safe": 3, "method": "history"}
+        with mock.patch.object(service, "_run_predict", fake):
+            r = service.run_predict("w", 800)
+        self.assertEqual(seen, [False, True])           # same gamemode first, similar gamemodes second
+        self.assertTrue(r["similar_modes"])
+        self.assertEqual(r["likely"], 2)
+
+    def test_rank_deeper_than_the_field_gives_the_last_place_estimate(self):
+        def fake(window_id, top, entrants=None):
+            if top > 300:
+                raise service._Beyond(300, "last place")
+            return {"rank": top, "low": 5, "likely": 6, "safe": 7, "method": "history"}
+        with mock.patch.object(service, "_run_predict", fake):
+            r = service.run_predict("w", 800)
+        self.assertEqual((r["rank"], r["likely"], r["note"]), (800, 6, "last place"))
+
+    def test_only_with_no_history_anywhere_is_there_an_error(self):
+        def fake(window_id, top, entrants=None):
+            raise service.NoHistory("none")
+        with mock.patch.object(service, "_run_predict", fake):
+            with self.assertRaises(ValueError) as c:
+                service.run_predict("w", 800)
+        self.assertNotIn("Tick", str(c.exception))
 
 
 class EventTypesTest(unittest.TestCase):

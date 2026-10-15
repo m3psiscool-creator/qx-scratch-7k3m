@@ -342,7 +342,6 @@ async function tabPredictions(w, open) {
     <div class="row"><div><label>Top X (1 – 10,000)</label><input id="x" type="number" min="1" max="10000" value="${TTOP}"></div>
     <div><label>Entrants (optional)</label><input id="e" type="number" min="1" placeholder="auto"></div>
     <div style="flex:0"><button id="go">Predict</button></div></div>
-    <label style="margin-top:10px;display:flex;gap:8px;align-items:center;font-weight:500"><input id="ap" type="checkbox"> Allow similar gamemodes when this gamemode has no history (approximate)</label>
     <div class="chips" style="margin-top:10px">${presets.map(p => `<button class="chip" data-r="${p}">Top ${p.toLocaleString()}</button>`).join("")}</div>
     <div id="pred"></div></div>
   <div class="card" id="bubblecard" style="display:none"><div class="hd"><h2>Bubble: who is in the race</h2></div><div id="bubble"></div></div>
@@ -370,15 +369,18 @@ async function tabLeaderboard(w, open) {
 async function predictInto(el, rank, o = {}) {
   if (!el || !TW) return;
   if (!o.quiet) el.innerHTML = '<p class="mut">Calculating…</p>';
-  const q = new URLSearchParams({ window: TW.window_id, top: rank, entrants: o.entrants || "", approx: o.approx ? 1 : 0 });
+  const q = new URLSearchParams({ window: TW.window_id, top: rank, entrants: o.entrants || "" });
   const d = await j("/api/predict?" + q);
   if (d.error) return el.innerHTML = `<p class="${o.compact ? "mut" : "err"}">${esc(d.error)}</p>`;
   if (o.compact) {
-    el.innerHTML = `<div class="kpis">${kpi("Low (~5%)", nf(d.low))}${kpi("Most likely", nf(d.likely), "", "hero")}${kpi("Safe (~95%)", nf(d.safe))}</div>` + miniEvidence(d);
+    el.innerHTML = `<div class="kpis">${kpi("Low (~5%)", nf(d.low))}${kpi("Most likely", nf(d.likely), "", "hero")}${kpi("Safe (~95%)", nf(d.safe))}</div>` + miniEvidence(d) + noteLine(d);
     return;
   }
   const row = (l, r, b) => `<tr><td>${l}</td><td class="n">${nf(r.low)}</td><td class="n" style="${b ? "font-weight:800;font-size:1.15rem" : ""}">${nf(r.likely)}</td><td class="n">${nf(r.safe)}</td></tr>`;
-  el.innerHTML = `<div class="scroll" style="margin-top:12px"><table><tr><th>Rank</th><th class="n">Low</th><th class="n">Most likely</th><th class="n">Safe (~95%)</th></tr>${row("Top " + nf(d.rank), d, 1)}${(d.cutoffs || []).map(c => row("Top " + c.rank + " <small>(advance)</small>", c)).join("")}</table></div>${evidence(d)}`;
+  el.innerHTML = `<div class="scroll" style="margin-top:12px"><table><tr><th>Rank</th><th class="n">Low</th><th class="n">Most likely</th><th class="n">Safe (~95%)</th></tr>${row("Top " + nf(d.rank), d, 1)}${(d.cutoffs || []).map(c => row("Top " + c.rank + " <small>(advance)</small>", c)).join("")}</table></div>${noteLine(d)}${evidence(d)}`;
+}
+function noteLine(d) {   // why the answer is not the plain one: last place of a small field, or the closest gamemodes were used
+  return (d.note ? `<p class="small">${esc(d.note)}</p>` : "") + (d.similar_modes ? `<p class="small">No past event of this exact gamemode yet, so this estimate comes from the closest gamemodes.</p>` : "");
 }
 function miniEvidence(d) {
   const lv = d.live, p = d.parts || {};
@@ -388,7 +390,7 @@ function miniEvidence(d) {
 }
 async function predict(quiet) {
   const x = Math.min(10000, Math.max(1, Math.round(+$("#x").value || TTOP || 1))); TTOP = x; $("#x").value = x;   // any whole number from 1 to 10,000
-  await predictInto($("#pred"), x, { entrants: $("#e").value, approx: $("#ap").checked, quiet });
+  await predictInto($("#pred"), x, { entrants: $("#e").value, quiet });
 }
 function evidence(d) {
   const p = d.parts || {}, lv = d.live, sn = d.snapshots, pcx = x => Math.round(x * 100) + "%";
@@ -405,7 +407,7 @@ async function bubble() {
   if (!TW || !ACTIVE.includes(TW.status)) return;
   const card = $("#bubblecard"); if (!card) return;
   const goal = (+$("#x").value > 0 && +$("#x").value <= 700) ? +$("#x").value : (TW.goal ? Math.min(TW.goal.rank, 700) : 100);
-  const b = await j(`/api/bubble?window=${encodeURIComponent(TW.window_id)}&rank=${goal}&approx=${$("#ap").checked ? 1 : 0}`);
+  const b = await j(`/api/bubble?window=${encodeURIComponent(TW.window_id)}&rank=${goal}`);
   card.style.display = "block";
   if (b.error) { $("#bubble").innerHTML = `<p class="mut">${esc(b.error)}</p>`; return; }
   const col = p => p >= 0.8 ? "var(--good)" : p >= 0.4 ? "var(--warn)" : "var(--mut)";
@@ -671,7 +673,7 @@ async function status() {
   ${s.login.logged_in ? "" : `<div class="card"><b>Epic login needed</b><p class="small">Log in to Epic in this browser, open <a href="${esc(a.login_url)}" target="_blank">this link</a>, copy the authorizationCode and paste it here.</p>
    <input id="code" placeholder="authorizationCode"><input id="key" type="password" placeholder="Admin key" style="margin-top:6px"><button id="lg" style="margin-top:10px">Save login</button> <span id="lm" class="small"></span></div>`}
   <div class="card"><div class="hd"><h2>Feedback from visitors</h2><span class="sub">owner only</span></div><div class="row"><div><input id="fk" type="password" placeholder="Admin key"></div><div style="flex:0"><button class="sec" id="fkb">Load</button></div></div><div id="fkl" style="margin-top:10px"></div></div>
-    <div class="card"><div class="hd"><h2>How the predictions work</h2></div><p class="small">Every player on the live leaderboard is replayed forward. Their remaining games (including the last queue that starts before the cutoff), points per game and chance of catching up come from players in the same spot at the same moment in earlier events <b>of the same gamemode</b>. The result is corrected using a back-test on those past events. Ranks beyond 700 are scaled from the stored thresholds (ranks 1000, 1500 … 10000). Unofficial data; estimates only.</p></div>`;
+    <div class="card"><div class="hd"><h2>How the predictions work</h2></div><p class="small">Every player on the live leaderboard is replayed forward. Their remaining games (including the last queue that starts before the cutoff), points per game and chance of catching up come from players in the same spot at the same moment in earlier events <b>of the same gamemode</b> (the closest gamemodes when there is none yet). The result is corrected using a back-test on those past events. Ranks beyond 700 are scaled from the stored thresholds (ranks 1000, 1500 … 10000). Unofficial data; estimates only.</p></div>`;
   $("#fkb").onclick = async () => { const r = await j("/api/feedback", { headers: { "x-admin-key": $("#fk").value } }); $("#fkl").innerHTML = r.error ? `<span class="err">${esc(r.error)}</span>` : (r.length ? table(["When", "Kind", "Page", "Message"], r.map(x => [fmt(x.at), esc(x.kind), esc(x.page), esc(x.text)])) : '<p class="mut">Nothing yet.</p>'); };
   const lg = $("#lg");
   if (lg) lg.onclick = async () => {

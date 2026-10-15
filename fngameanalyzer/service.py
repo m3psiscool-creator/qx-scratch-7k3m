@@ -64,12 +64,37 @@ def list_windows():
                                      else -w["begin"]))
 
 
+class NoHistory(ValueError):
+    """Nothing comparable in the history searched so far (the caller widens the search)."""
+
+
+class _Beyond(Exception):
+    """The asked rank is deeper than the field: predict the last place instead (eff) and say so (note)."""
+    def __init__(self, eff, note):
+        self.eff, self.note = eff, note
+
+
 def run_predict(window_id, top, entrants=None, approx=False):
-    model._ctx.approx = bool(approx)
-    try:
-        return _run_predict(window_id, top, entrants)
-    finally:
-        model._ctx.approx = False
+    """Best estimate available: past events of the same gamemode and format first, then the same gamemode, then similar
+    gamemodes. The caller never has to ask for the wider search (the old `approx` switch is accepted and ignored)."""
+    last = None
+    for wide in (False, True):
+        model._ctx.approx = wide
+        try:
+            try:
+                r = _run_predict(window_id, top, entrants)
+            except _Beyond as b:
+                r = _run_predict(window_id, b.eff, entrants)
+                r["rank"], r["note"] = top, b.note
+            if wide and not r.get("final"):
+                r["similar_modes"] = True
+                r["method"] = ((r.get("method") or "").rstrip(". ") + " · no past event of this exact gamemode, so this uses the closest gamemodes").lstrip(" ·")
+            return r
+        except NoHistory as e:
+            last = e
+        finally:
+            model._ctx.approx = False
+    raise ValueError("There is not enough finished history anywhere yet to estimate this event.") from last
 
 
 MAX_TOP = 10000
@@ -79,8 +104,10 @@ def _run_predict(window_id, top, entrants=None):
     target = storage.get_window(window_id)
     if not target:
         raise ValueError("Unknown window")
-    if not isinstance(top, int) or top < 1 or top > MAX_TOP:
-        raise ValueError(f"Top X must be a whole number from 1 to {MAX_TOP:,}")
+    if not isinstance(top, int) or top < 1:
+        raise ValueError("Enter a whole number of 1 or more")
+    if top > MAX_TOP:
+        raise _Beyond(MAX_TOP, "The deepest rank this site follows is 10,000; showing that rank.")
     finished = _history(target)
     if target["final"]:   # already happened: show the real result, not a prediction
         def actual(rank):
@@ -100,14 +127,11 @@ def _run_predict(window_id, top, entrants=None):
     entrants = entrants or (snap or {}).get("entrants")
     field = entrants or (snap or target).get("entrants")
     if field and top > field:
-        raise ValueError(f"Only {field:,} teams {'played' if target['final'] else 'have entered so far'}, so there is no rank {top:,}. "
-                         "Try a smaller number" + ("" if target["final"] else " or fill in a larger expected field under Entrants") + ".")
+        raise _Beyond(field, f"This event has {field:,} teams {'' if target['final'] else 'so far '}so this rank is last place; showing the points of the last-place team.")
     if not field:   # field size unknown yet: use what past events of this format had
         sizes = sorted(w["entrants"] for w in model.comparable(target, finished) if w.get("entrants"))
         if sizes and top > sizes[-1] * 1.15:
-            raise ValueError(f"Past events of this format ({classify.of(target)}, same game count and scoring) had {sizes[0]:,} to {sizes[-1]:,} teams "
-                             f"(typically about {sizes[len(sizes) // 2]:,}), so rank {top:,} is outside the field. Try a rank up to about {sizes[-1]:,}, "
-                             "or enter the expected number of teams under Entrants.")
+            raise _Beyond(int(sizes[-1]), f"Events of this format had at most about {sizes[-1]:,} teams, so this rank is last place; showing the points of the last-place team.")
     if top > 700:
         d = deep_predict(target, finished, snap, top)
         d["snapshot_age_s"] = round(time.time() - snap["ts"]) if snap else None
@@ -115,12 +139,9 @@ def _run_predict(window_id, top, entrants=None):
         return d
     r = model.predict(target, finished, top, entrants, snap, {})
     if r and not model.approx() and not r["prior"] and not (r.get("live") or {}).get("learned"):
-        r = None   # strict: a gamemode with no history gets no estimate rather than a crude guess
+        r = None   # first pass: only the same gamemode; run_predict then widens to similar gamemodes
     if not r:
-        cat = classify.of(target)
-        n = sum(1 for w in finished if classify.of(w) == cat and w["family"] == target["family"])
-        raise ValueError(f"No usable '{cat}' history yet ({n} finished events of that gamemode). "
-                         "Tick 'Allow similar gamemodes' to estimate from the nearest other gamemodes.")
+        raise NoHistory("no usable history yet")
     cur = (r.get("live") or {}).get("current")
     if cur:   # a rank's score never falls
         for k in ("low", "likely", "safe"):
@@ -224,12 +245,25 @@ def deep_predict(target, finished, snap, rank):
                     "method": f"live points at this rank scaled by the predicted growth of rank {ref} (approximate)",
                     "history_events": len(hist)}
     vals = sorted(v for v in (_interp_deep(w["points"][999] if len(w["points"]) > 999 else 0, w.get("deep") or {}, rank, w["points"]) for w in hist) if v)
+    exact = bool(vals)
+    if not vals:   # no event of this exact format: same gamemode with any format
+        loose = [w for w in finished if classify.of(w) == cat and len(w["points"]) >= min(rank, 1000) and (rank <= 1000 or (w.get("deep") and len(w["points"]) >= 1000))]
+        vals = sorted(v for v in (_interp_deep(w["points"][999] if len(w["points"]) > 999 else 0, w.get("deep") or {}, rank, w["points"]) for w in loose) if v)
+        hist = loose
+    if not vals and model.approx():   # similar gamemodes: same team size first, then anything with data at this rank
+        mode = (target.get("meta") or {}).get("mode")
+        ok = [w for w in finished if len(w["points"]) >= min(rank, 1000) and (rank <= 1000 or (w.get("deep") and len(w["points"]) >= 1000))]
+        for pool in ([w for w in ok if (w.get("meta") or {}).get("mode") == mode], ok):
+            vals = sorted(v for v in (_interp_deep(w["points"][999] if len(w["points"]) > 999 else 0, w.get("deep") or {}, rank, w["points"]) for w in pool) if v)
+            hist = pool
+            if vals:
+                break
     if not vals:
-        raise ValueError(f"No finished '{cat}' event with the same format (game count and scoring) has data around rank {rank} yet")
+        raise NoHistory("no event with data at this rank yet")
     q = lambda f: vals[min(len(vals) - 1, int(f * len(vals)))]
     return {"rank": rank, "low": round(q(0.1)), "likely": round(statistics.median(vals)),
             "safe": round(q(0.9)), "current": None, "history_events": len(vals),
-            "method": f"past {cat} events at this rank (no live board yet)"}
+            "method": f"past {cat} events at this rank (no live board yet)" + ("" if exact else ", events of the same gamemode with another format")}
 
 
 def thresholds(window_id):
@@ -289,21 +323,24 @@ def bubble_view(window_id, goal=None, approx=False):
     if target["final"]:
         raise ValueError("This event has finished; there is no race left.")
     goal = goal or (goal_of(target["meta"]) or {}).get("rank") or 100
-    if goal > 700:
-        raise ValueError("The bubble table works up to rank 700 (beyond that only thresholds are stored).")
+    goal = min(goal, 700)   # the race table is built around the cutoff; deeper goals show the table at 700
     last = storage.snapshots(window_id, last=1)
     if not last:
         raise ValueError("No live board yet.")
     snap = last[0]
     board = storage.kv_get("board:" + window_id)
     players = board["players"] if board and abs(board["ts"] - snap["ts"]) < 5 else None
-    model._ctx.approx = bool(approx)
-    try:
-        res = sim.bubble(target, snap, _history(target), goal, players)
-    finally:
-        model._ctx.approx = False
+    res = None
+    for wide in (False, True):   # same gamemode first, then similar gamemodes, without being asked
+        model._ctx.approx = wide
+        try:
+            res = sim.bubble(target, snap, _history(target), goal, players)
+        finally:
+            model._ctx.approx = False
+        if res:
+            break
     if not res:
-        raise ValueError(f"No usable '{classify.of(target)}' history yet for a simulation. Tick 'Allow similar gamemodes' to estimate from the nearest gamemodes.")
+        raise ValueError("There is not enough finished history anywhere yet to simulate this race.")
     prob = res["prob"]
     pts, games = snap["points"], snap["games"]
     rows = [i for i in range(len(pts)) if 0.02 <= prob[i] <= 0.985 or abs(i + 1 - goal) <= 3][:80]

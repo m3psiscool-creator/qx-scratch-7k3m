@@ -73,7 +73,7 @@ async function loadRank(quiet) {
   if (quiet && sig === SS.sig) return;   // nothing moved: leave the charts alone instead of redrawing them
   SS.sig = sig; SS.d.safety = safe; renderPersonal();
   const target = safe && !safe.error ? safe.likely : 0;
-  const pace = r <= 1000 ? await j(`/api/pace?window=${id}&rank=${r}${target ? "&target=" + target : ""}`) : { error: "Pace curves need a rank inside the stored top 1,000." };
+  const pace = await j(`/api/pace?window=${id}&rank=${Math.min(r, 1000)}${target ? "&target=" + target : ""}`);   // deeper ranks follow the curve of the deepest ranks with per-game data
   await pProf;
   if (SS.tok !== mine) return;
   SS.d.pace = pace; renderPersonal();
@@ -242,7 +242,7 @@ function renderFin() {
   if (!pr || pr.error) { el.innerHTML = `<div class="card empty">${esc(pr ? pr.error : "")}</div>`; return; }
   const f = pr.focus, bands = pr.bands;
   const lab = b => `#${b.from}–${b.to}`, all = [{ ...f, name: `Around #${pr.rank}` }, ...bands.map(b => ({ ...b, name: "Top " + lab(b) }))];
-  el.innerHTML = `${pr.clamped ? `<p class="small">Per-game data only exists for the top 1,000, so this shows ranks around #${pr.rank}.</p>` : ""}
+  el.innerHTML = `${pr.clamped ? `<p class="small">Game-by-game detail for a rank this deep comes from the closest ranks (around #${pr.rank}).</p>` : ""}
   <div class="kpis">${kpi("Around #" + pr.rank, nd(f.pts_per_game), "points per game", "hero")}${kpi("Avg placement", nd(f.avg_place), "top-10 in " + pc(f.top10_rate) + " of games")}${kpi("Elims / game", nd(f.elims_per_game), "elims are " + pc(f.split.elim) + " of points")}${kpi("Win rate", pc(f.win_rate, 1), "top 5 in " + pc(f.top5_rate))}${kpi("Consistency", "± " + nd(f.sd), "points spread per game")}</div>
   <p class="small" style="margin:-4px 0 14px">Source: ${esc(pr.note)} ${f.players} players, ${f.games} games. ${pr.own ? "" : "Scored with this event's rules."}</p>
   <div class="grid g2">${chartCard("c-split", "Where the points come from", "Average points per game, by rank band", {})}${chartCard("c-plc", "How they finish", "Share of games by placement", {})}</div>

@@ -387,7 +387,7 @@ function miniEvidence(d) {
   return `<p class="small"><span class="pill up">FROM HISTORY</span> ${p.history ? "based on " + (d.prior?.n || "?") + " comparable past events" : esc(d.method || "")}</p>`;
 }
 async function predict(quiet) {
-  const x = +$("#x").value; TTOP = x;
+  const x = Math.min(10000, Math.max(1, Math.round(+$("#x").value || TTOP || 1))); TTOP = x; $("#x").value = x;   // any whole number from 1 to 10,000
   await predictInto($("#pred"), x, { entrants: $("#e").value, approx: $("#ap").checked, quiet });
 }
 function evidence(d) {

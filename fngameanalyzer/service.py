@@ -72,10 +72,15 @@ def run_predict(window_id, top, entrants=None, approx=False):
         model._ctx.approx = False
 
 
+MAX_TOP = 10000
+
+
 def _run_predict(window_id, top, entrants=None):
     target = storage.get_window(window_id)
     if not target:
         raise ValueError("Unknown window")
+    if not isinstance(top, int) or top < 1 or top > MAX_TOP:
+        raise ValueError(f"Top X must be a whole number from 1 to {MAX_TOP:,}")
     finished = _history(target)
     if target["final"]:   # already happened: show the real result, not a prediction
         def actual(rank):
@@ -93,6 +98,16 @@ def _run_predict(window_id, top, entrants=None):
         last = storage.snapshots(window_id, last=1)
         snap = last[0] if last else None
     entrants = entrants or (snap or {}).get("entrants")
+    field = entrants or (snap or target).get("entrants")
+    if field and top > field:
+        raise ValueError(f"Only {field:,} teams {'played' if target['final'] else 'have entered so far'}, so there is no rank {top:,}. "
+                         "Try a smaller number" + ("" if target["final"] else " or fill in a larger expected field under Entrants") + ".")
+    if not field:   # field size unknown yet: use what past events of this format had
+        sizes = sorted(w["entrants"] for w in model.comparable(target, finished) if w.get("entrants"))
+        if sizes and top > sizes[-1] * 1.15:
+            raise ValueError(f"Past events of this format ({classify.of(target)}, same game count and scoring) had {sizes[0]:,} to {sizes[-1]:,} teams "
+                             f"(typically about {sizes[len(sizes) // 2]:,}), so rank {top:,} is outside the field. Try a rank up to about {sizes[-1]:,}, "
+                             "or enter the expected number of teams under Entrants.")
     if top > 700:
         d = deep_predict(target, finished, snap, top)
         d["snapshot_age_s"] = round(time.time() - snap["ts"]) if snap else None
@@ -194,9 +209,9 @@ def _interp_deep(points_1000, deep, rank, points=None):
 def deep_predict(target, finished, snap, rank):
     """Estimate for a rank beyond the stored board (1001-10000)."""
     cat = classify.of(target)
-    hist = [w for w in finished if classify.of(w) == cat and w["family"] == target["family"]
-            and w["window_id"] != target["window_id"] and w.get("deep")
-            and len(w["points"]) >= 1000]
+    # same gamemode AND same format (game count + scoring), same region first: a 12-game event says nothing about a 6-game one
+    hist = [w for w in model.comparable(target, finished)
+            if len(w["points"]) >= min(rank, 1000) and (rank <= 1000 or (w.get("deep") and len(w["points"]) >= 1000))]
     if snap and snap.get("deep"):
         now_r = _interp_deep(snap["points"][min(999, len(snap["points"]) - 1)], snap["deep"], rank, snap["points"])
         ref = min(500, len(snap["points"]))   # the simulation is only trustworthy well inside the board
@@ -208,9 +223,9 @@ def deep_predict(target, finished, snap, rank):
                     "safe": k(base["safe"]), "current": round(now_r),
                     "method": f"live points at this rank scaled by the predicted growth of rank {ref} (approximate)",
                     "history_events": len(hist)}
-    vals = sorted(v for v in (_interp_deep(w["points"][999], w["deep"], rank) for w in hist) if v)
+    vals = sorted(v for v in (_interp_deep(w["points"][999] if len(w["points"]) > 999 else 0, w.get("deep") or {}, rank, w["points"]) for w in hist) if v)
     if not vals:
-        raise ValueError(f"No stored thresholds around rank {rank} for gamemode '{cat}' yet")
+        raise ValueError(f"No finished '{cat}' event with the same format (game count and scoring) has data around rank {rank} yet")
     q = lambda f: vals[min(len(vals) - 1, int(f * len(vals)))]
     return {"rank": rank, "low": round(q(0.1)), "likely": round(statistics.median(vals)),
             "safe": round(q(0.9)), "current": None, "history_events": len(vals),

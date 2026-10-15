@@ -57,6 +57,24 @@ class ScoringTest(unittest.TestCase):
         self.assertEqual(a, "ReloadCashCup_DuosZB")
 
 
+class AnyRankTest(unittest.TestCase):
+    def test_ranks_inside_the_stored_board_are_read_directly(self):
+        pts = [1000 - i for i in range(1000)]
+        self.assertEqual(service._interp_deep(pts[999], {}, 800, pts), pts[799])       # rank 800 comes straight from the board
+
+    def test_ranks_between_thresholds_are_interpolated(self):
+        pts = [5000 - 4 * i for i in range(1000)]                                       # rank 1000 has 1004 points
+        deep = {"1500": {"points": 600}, "2000": {"points": 300}}
+        mid = service._interp_deep(pts[999], deep, 1250)
+        self.assertTrue(600 < mid < pts[999])                                           # between rank 1000 and rank 1500
+
+    def test_top_x_must_be_in_range(self):
+        for bad in (0, -5, 10001):
+            with mock.patch.object(storage, "get_window", return_value={"window_id": "w", "final": 0}):
+                with self.assertRaises(ValueError):
+                    service._run_predict("w", bad)
+
+
 class CalendarTest(unittest.TestCase):
     def test_text_is_escaped(self):
         self.assertEqual(service._ics_text("a,b;c\nd"), "a\\,b\\;c\\nd")

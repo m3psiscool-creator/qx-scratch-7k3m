@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import os
+import re
 import time
 
 from fastapi import FastAPI, Header, Request
@@ -71,6 +72,19 @@ def lib_js():
 @app.get("/strategy.js")
 def strategy_js():
     return _file("strategy.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/maps/{name}")
+def map_image(name: str):
+    """Map pictures for the Dropspots tab (files in web/maps, fixed names only)."""
+    if not re.fullmatch(r"[a-z0-9\-]+\.(jpg|png)", name):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    path = os.path.join(WEB, "maps", name)
+    if not os.path.isfile(path):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    with open(path, "rb") as f:
+        return Response(f.read(), media_type="image/jpeg" if name.endswith(".jpg") else "image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/drops.js")

@@ -74,7 +74,7 @@ function controls() {
   $("#dcontrols").innerHTML = `<div class="card"><div class="row" style="align-items:flex-end">
     <div style="flex:1"><label>Qualified = finished top…</label><input id="dtop" type="number" min="1" max="10000" value="${DR.top}"></div>
     <div style="flex:1"><label>Game</label><select id="dgame"><option value="0">All games</option>${DR.grid ? "" : ""}</select></div>
-    <div style="flex:2"><label>Layers</label><div class="chips"><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lq" checked> <span style="color:var(--s1)">● Qualified</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="la" checked> <span style="color:var(--s2)">● Everyone</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="ls" checked> Named spots</label></div></div></div>
+    <div style="flex:2"><label>Layers</label><div class="chips"><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lq" checked> <span style="color:#3aa0ff">● Qualified</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="la" checked> <span style="color:#ffb02e">● Everyone</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="ls" checked> Named spots</label></div></div></div>
     <div class="chips" style="margin-top:8px"><small>Quick pick:</small>${chips.map(c => `<button class="chip ${c === DR.top ? "on" : ""}" data-t="${c}">${c === goal ? "★ " : ""}Top ${c.toLocaleString()}</button>`).join("")}</div>
     <div class="row" style="margin-top:10px;align-items:center"><div><label>Heat spread</label><input id="dblur" type="range" min="0" max="16" value="${DR.blur}" style="padding:0;min-height:0"></div><div><label>Heat strength</label><input id="dalpha" type="range" min="20" max="100" value="${Math.round(DR.alpha * 100)}" style="padding:0;min-height:0"></div></div></div>`;
   const sel = $("#dgame"); (DR.grid.games || []).forEach(g => sel.insertAdjacentHTML("beforeend", `<option value="${g}">Game ${g}</option>`));
@@ -111,8 +111,12 @@ function heatLayer(key, sparse) {
   if (DR.heat[key]) return DR.heat[key];
   const n = DR.grid.size, c = document.createElement("canvas"); c.width = c.height = n; const x = c.getContext("2d"), im = x.createImageData(n, n);
   const counts = sparse.map(s => s[1]).sort((a, b) => a - b), top = counts.length ? counts[Math.min(counts.length - 1, Math.floor(counts.length * 0.985))] : 1;
-  const rgb = key === "q" ? [57, 135, 229] : [232, 121, 63];
-  sparse.forEach(([cell, cnt]) => { const a = Math.min(1, Math.sqrt(cnt / Math.max(1, top))); im.data.set([rgb[0], rgb[1], rgb[2], Math.round(255 * a)], cell * 4); });
+  // Colour ramps that stay readable on top of a detailed map picture: everyone = yellow to red, qualified = cyan to blue.
+  const lo = key === "q" ? [40, 225, 255] : [255, 214, 40], hi = key === "q" ? [30, 70, 255] : [255, 40, 30];
+  sparse.forEach(([cell, cnt]) => {
+    const a = Math.min(1, Math.sqrt(cnt / Math.max(1, top)));
+    im.data.set([lo[0] + (hi[0] - lo[0]) * a, lo[1] + (hi[1] - lo[1]) * a, lo[2] + (hi[2] - lo[2]) * a, Math.round(255 * Math.min(1, 0.4 + 0.75 * a))], cell * 4);
+  });
   x.putImageData(im, 0, 0); return DR.heat[key] = c;
 }
 // A background drawn from where players moved after landing: the shape of the island appears from the traffic itself.
@@ -126,7 +130,7 @@ function draw() {
   const c = $("#dc"); if (!c || !DR.grid) return; if (c.dataset.s != DR.S) sizeCanvas();
   const x = c.getContext("2d"), S = DR.S, [px, py] = toPx(0, 0), W = S * DR.z;
   x.clearRect(0, 0, S, S); x.fillStyle = cssv("--sf2"); x.fillRect(0, 0, S, S);
-  if (DR.img) x.drawImage(DR.img, px, py, W, W);
+  if (DR.img) { x.drawImage(DR.img, px, py, W, W); x.fillStyle = "rgba(8,10,16,0.38)"; x.fillRect(px, py, W, W); }   // dimmed so the heat stands out
   else if (DR.base) { x.imageSmoothingEnabled = true; x.drawImage(DR.base, px, py, W, W); x.fillStyle = cssv("--mut"); x.font = "600 11px system-ui"; x.fillText("Map drawn from where players moved", px + 10, py + 18); }
   else { x.strokeStyle = cssv("--line"); x.lineWidth = 1; for (let i = 0; i <= 10; i++) { x.beginPath(); x.moveTo(px + W * i / 10, py); x.lineTo(px + W * i / 10, py + W); x.moveTo(px, py + W * i / 10); x.lineTo(px + W, py + W * i / 10); x.stroke(); } x.fillStyle = cssv("--mut"); x.font = "600 12px system-ui"; x.fillText("No map image loaded: coordinates run 0 to 1", px + 10, py + 20); }
   x.imageSmoothingEnabled = true; x.filter = DR.blur ? `blur(${DR.blur * DR.z / 2}px)` : "none"; x.globalAlpha = DR.alpha;

@@ -49,3 +49,14 @@ python scripts/import_drops.py landings.json
 
 Heatmaps of everyone and of the teams that qualified (final rank within the top N you choose), a game filter, drawn
 areas (rectangle or freehand) with the stats of the teams that landed inside them, and a comparison of the named spots.
+
+## Map pictures
+Landings are stored as 0-1 coordinates across a square that is the same for every event (world units -55000..55000; u = world Y, v = -world X, set by `MAP_BOUNDS` in `worker/run.mjs`).
+A map picture must be drawn in that same square. `drops.MAPS` lists the maps that have one, by the codename in the playlist id (`SourSpawn` = Nitemare Island), and `/maps/<name>.jpg` serves it.
+
+To add a map (when a new codename shows up in `/api/drops/info`):
+1. Download the map's overview image (the Fortnite Wiki has one per Reload map: `File:<Map> - Island - Fortnite Reload.png`, API `fortnite.fandom.com/api.php`).
+2. `tools/mapfit/identify_map.py <window>` tells which candidate image the landings fit best (share of landings on land); check with names seen in the replay data (e.g. "Estate" for Nitemare's Estranged Estate).
+3. `tools/mapfit/fit_map.py <image prefix>` finds rotation, scale and centre and draws the landings over the picture for a visual check.
+4. `tools/mapfit/render_map.py <out dir>` writes the picture warped into the 0-1 frame; set k, L, cx, cy to the fitted values. Add it to `web/maps` and an entry to `drops.MAPS`.
+Nitemare Island fit: rotated 90 degrees, scale 1.56, centre (0.50, 0.54); 96% of landings fall on land and the hot spots sit on the towns.

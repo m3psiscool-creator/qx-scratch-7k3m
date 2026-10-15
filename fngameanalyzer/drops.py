@@ -19,6 +19,15 @@ HEX32 = re.compile(r"^[0-9a-f]{32}$")
 
 
 # ---------------------------------------------------------------- what map is this event played on
+# Maps we have a picture for, by the codename in the playlist id. The picture is drawn in the same 0-1 frame as the
+# landings (north-up is NOT assumed: it is the picture rotated/scaled to match the game's own coordinates, see
+# docs/dropspots-data.md "Map pictures"). Picture: Epic Games' overview image of the map, via the Fortnite Wiki.
+MAPS = {
+    "SourSpawn": {"name": "Nitemare Island", "image": "/maps/nitemare-island.jpg",
+                  "credit": "Map: Nitemare Island, Epic Games (overview image from the Fortnite Wiki)"},
+}
+
+
 def map_info(window_id):
     w = storage.get_window(window_id)
     if not w:
@@ -30,6 +39,10 @@ def map_info(window_id):
     codename = next((t for t in ("SourSpawn", "BlastBerry", "DashBerry", "PiperBoot", "JumpBear") if t.lower() in playlist.lower()), None)
     label = "Reload map" if reload_ else "Battle Royale island"
     rec = storage.drop_map_get(window_id) if hasattr(storage, "drop_map_get") else None
+    known = MAPS.get(codename)
+    if known:   # a known map picture wins over the background drawn from player movement
+        rec = {**(rec or {}), **known}
+        rec.pop("base", None)
     avail = storage.drops_available() if hasattr(storage, "drops_available") else {}
     return {"window_id": window_id, "name": service.pretty(w.get("event_id") or "", window_id), "region": w["region"],
             "begin": w["begin"], "end": w["end"], "final": bool(w["final"]),

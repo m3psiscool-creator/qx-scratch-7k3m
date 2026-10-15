@@ -22,3 +22,18 @@ Hosted site that predicts the points needed for any rank (1-10,000) in Fortnite 
 - Secrets live in Vercel env (ADMIN_KEY, CRON_SECRET) and the Neon DB; Epic login is done on the Status page. Re-login only if the collector is idle >8h.
 - Deploy: `npx vercel deploy --prod --scope james-projects-996f2671` (CLI is logged in as m3psisgood-2280), also pushes to GitHub.
 - Known limits: Epic endpoints are unofficial; only the top 1000 players are stored per event (ranks 1001-10000 are thresholds only); sessionHistory is capped (11 games on some events).
+
+## Strategy layer (added Oct 2026)
+- `strategy.py` feeds the Strategy tab: `/api/scoring`, `/profile` (finisher bands, per-game sequences, styles), `/pace`, `/safety`, `/ladder`, `/tempo` (minutes per game by placement from consecutive game end times; a stored game time is the player's elimination time), `/rivals`; `me.py` looks a player up by Epic name on the public leaderboard (`/api/me`, `/api/account`); `service.sessions` (`/api/sessions`) lists the rounds/editions of an event in a region; `/api/calendar.ics`, `/api/feedback` (owner reads with the admin key), `/api/health` (banner).
+- Front end: `lib.js` (helpers, Chart.js theme, zoom/click wiring), `strategy.js` (recommendation, plan, simulation, coach notes, rivals), `app.js` (pages, router, account chip, banner). Charts use `mk()`; animations are off on purpose (Chart.js errors when a click redraws a chart).
+- Timing facts that drive the plan: games left = format games minus games played; games that fit = time left / minutes per game at your placement (a game may start right before the window closes). Finishers' points fall with game number, so checkpoints and the simulation follow real sequences, not an even split.
+- Tests: `python -m unittest discover -s tests`.
+
+## Operations lessons
+- **Never run local code that uses the production Epic login** (`auth.Session`, `/api/me`, `/api/account`, the collector). The refresh token rotates on every use; the live login died on Oct 14 2026 while local tests were also using it (cause not proven). Local test servers must stub `auth.Session` (see how `serve.py` in a scratch folder does it) and intercept `/api/me` in browser tests. Re-login (Status page) is the only fix and needs the owner's Epic authorization code.
+- `auth_bad` in kv marks a refused login; `auth.bearer` then waits 10 minutes before calling Epic again. The site shows a banner when the collector has not run for 15 minutes or the login is invalid.
+- Do not read other players' Epic data by account id: Epic returns 403 for anything but your own account; the public leaderboard (`Epic.find_entry`) is the only way.
+
+## Roadmap ideas not built
+- Real gameplay telemetry (landing spots, rotations, fights): Osirion's public API or replay parsing. Needs a terms check first; plan-aware drop advice ("which drop fits your target rank, time and style") is the differentiator.
+- Clock-time advice ("when to queue") was tested and rejected: later games score more only because deep runs end later, so survival and clock time cannot be separated.

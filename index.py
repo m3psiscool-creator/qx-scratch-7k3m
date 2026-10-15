@@ -18,7 +18,7 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
              "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
              "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
              "/api/accuracy": 300, "/api/players": 300, "/api/player": 300,
-             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/rivals": 30, "/api/calendar.ics": 300}
+             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/rivals": 30, "/api/calendar.ics": 300, "/api/health": 30}
 
 
 @app.middleware("http")
@@ -237,6 +237,18 @@ def api_tempo(window: str):
 @app.get("/api/ladder")
 def api_ladder(window: str):
     return _api(strategy.ladder, window)
+
+
+@app.get("/api/health")
+def health():
+    """Tiny, CDN-cached check for the site banner: is the collector running and is the Epic login valid?"""
+    try:
+        tick = storage.kv_get("last_tick")
+        s = auth.status()
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:80]}
+    idle = round(time.time() - tick["at"]) if tick else None
+    return {"ok": bool(s.get("logged_in")) and (idle is not None and idle < 900), "logged_in": bool(s.get("logged_in")), "idle_s": idle}
 
 
 @app.get("/api/status")

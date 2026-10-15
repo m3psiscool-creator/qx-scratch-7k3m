@@ -20,7 +20,7 @@ setInterval(() => { countdowns(); const c = $("#clock"); if (c) c.textContent = 
 // ---------------------------------------------------------------- shell: navigation, theme, region
 const NAV = [
   { g: "", items: [["home", "Home", "home", "#/"]] },
-  { g: "Plan", items: [["strategy", "Strategy", "target", "#/strategy"], ["schedule", "Schedule", "cal", "#/schedule"], ["fncs", "FNCS", "trophy", "#/fncs"]] },
+  { g: "Plan", items: [["strategy", "Strategy", "target", "#/strategy"], ["me", "My results", "user", "#/me"], ["schedule", "Schedule", "cal", "#/schedule"], ["fncs", "FNCS", "trophy", "#/fncs"]] },
   { g: "Research", items: [["archive", "Archive", "archive", "#/archive"], ["classes", "Gamemodes", "layers", "#/classes"], ["players", "Players", "user", "#/players"]] },
   { g: "Site", items: [["accuracy", "Accuracy", "gauge", "#/accuracy"], ["status", "Status", "gear", "#/status"]] },
 ];
@@ -603,16 +603,29 @@ async function players() {
   const t = await j("/api/players");
   $("#tp").innerHTML = (t.error || !t.length) ? '<p class="mut">Not enough data yet.</p>' : table(["#", "Player", "Events", "Avg top %", "Best"], t.map((p, i) => [i + 1, `<a href="#/player/${p.id}">${esc(p.name)}</a>`, p.events, p.avg_top_pct + "%", "#" + p.best]), ["", "", "n", "n", "n"]);
 }
-async function playerPage(id) {
+// "My results": the same data as a player page, for the account added in the top bar, with how you are trending
+async function myPage() {
+  if (!ACCT) { app.innerHTML = head("My results", "Your finishes across every collected event, and how you are trending.") + `<div class="card empty">Add your Epic account once (top right) and your results appear here.<br><br><button id="ap-open2">Add my account</button></div>`; $("#ap-open2").onclick = e => { e.stopPropagation(); acctPop(); }; return; }
+  return playerPage(ACCT.id, true);
+}
+async function playerPage(id, mine) {
   const d = await j("/api/player?id=" + encodeURIComponent(id));
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
   const ev = d.events.slice().reverse();
-  app.innerHTML = `<div class="crumb"><a href="#/players">Players</a> ›</div>` + head(esc(d.name), `${d.events.length} top-1000 finishes recorded`) +
+  if (mine && !ev.length) { app.innerHTML = head("My results", esc(d.name)) + `<div class="card empty">No top-1,000 finishes recorded yet for ${esc(d.name)}.<br>The site stores ranks 1 to 1,000 of every collected event, so results appear once you finish that high. Your live rank in a current event shows on the event page.</div>`; return; }
+  const ppg = e => e.games ? e.points / e.games : null, avg = a => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
+  const recent = ev.slice(-5).map(ppg).filter(x => x != null), before = ev.slice(-10, -5).map(ppg).filter(x => x != null);
+  const trend = recent.length >= 2 && before.length >= 2 ? avg(recent) - avg(before) : null;
+  const mineKpis = mine ? `<div class="kpis">${kpi("Finishes", d.events.length, "top 1,000 in collected events", "hero")}${kpi("Best rank", "#" + nf(Math.min(...ev.map(e => e.rank))))}${kpi("Median rank", "#" + nf(med(ev.map(e => e.rank).sort((a, b) => a - b))))}${kpi("Points per game, last 5", nd(avg(recent)), trend == null ? "" : (trend >= 0 ? "+" : "") + nd(trend) + " vs the 5 before", trend != null && trend >= 0 ? "good" : trend != null ? "bad" : "")}${kpi("Wins", ev.reduce((s, e) => s + (e.wins || 0), 0))}</div>` : "";
+  app.innerHTML = (mine ? "" : `<div class="crumb"><a href="#/players">Players</a> ›</div>`) + head(mine ? "My results" : esc(d.name), mine ? `${esc(d.name)} · ${d.events.length} top-1000 finishes recorded` : `${d.events.length} top-1000 finishes recorded`) + mineKpis +
     `<div class="card"><div class="hd"><h2>By gamemode</h2></div>${table(["Gamemode", "Events", "Best", "Median", "Avg top %", "Pts / game", "Wins", "Elims / game"], d.summary.map(s => [esc(gm(s.category)), s.events, "#" + s.best_rank, "#" + s.median_rank, s.avg_top_pct + "%", s.pts_per_game ?? "-", s.wins, s.elims_per_game ?? "-"]), ["", "n", "n", "n", "n", "n", "n", "n"])}</div>
     <div class="grid g2">${chartCard("pr1", "Finishing rank by event", "higher is better", { table: false })}${chartCard("pr2", "Points per game by event", "", { table: false })}</div>
+    <div class="grid g2">${chartCard("pr3", "Eliminations per game by event", "how aggressive", { table: false })}${chartCard("pr4", "Average placement by event", "1 is best", { table: false })}</div>
     <div class="card"><div class="hd"><h2>Events</h2></div>${table(["Date", "Event", "Region", "Gamemode", "Rank", "Points", "Games", "Avg place", "Wins"], d.events.map(e => [fmt(e.end), link(e.window_id, e.name), e.region, esc(gm(e.category)), "#" + e.rank, nf(e.points), e.games, e.avg_place ?? "-", e.wins]), ["", "", "", "", "n", "n", "n", "n", "n"])}</div>`;
   const lab = ev.map(e => new Date(e.end * 1000).toLocaleDateString([], { month: "short", day: "numeric" }));
   mk($("#pr1"), { type: "line", data: { labels: lab, datasets: [{ label: "Rank", data: ev.map(e => e.rank), borderColor: SER(0), backgroundColor: SER(0), pointRadius: 3 }] }, options: { scales: { y: { reverse: true, type: "logarithmic", title: { text: "Rank (log, 1 at the top)" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => ev[c[0].dataIndex].name, label: c => "Rank #" + nf(c.parsed.y) } } } } });
+  mk($("#pr3"), { type: "bar", data: { labels: lab, datasets: [{ label: "Elims per game", data: ev.map(e => e.games ? +(e.elims / e.games).toFixed(2) : null), backgroundColor: SER(1) }] }, options: { plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => ev[c[0].dataIndex].name } } }, scales: { y: { beginAtZero: true } } } });
+  mk($("#pr4"), { type: "line", data: { labels: lab, datasets: [{ label: "Average placement", data: ev.map(e => e.avg_place), borderColor: SER(2), backgroundColor: SER(2), pointRadius: 3 }] }, options: { scales: { y: { reverse: true, title: { text: "Placement (1 = best)" } } }, plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => ev[c[0].dataIndex].name } } } } });
   mk($("#pr2"), { type: "bar", data: { labels: lab, datasets: [{ label: "Points per game", data: ev.map(e => e.games ? +(e.points / e.games).toFixed(1) : null), backgroundColor: SER(0) }] }, options: { plugins: { legend: { display: false }, tooltip: { callbacks: { title: c => ev[c[0].dataIndex].name } } }, scales: { y: { beginAtZero: true } } } });
 }
 
@@ -684,6 +697,7 @@ async function route() {
     else if (page === "class") await classPage(arg);
     else if (page === "players") await players();
     else if (page === "player") await playerPage(arg);
+    else if (page === "me") await myPage();
     else if (page === "fncs") await fncs();
     else if (page === "accuracy") await accuracy();
     else if (page === "status") await status();
@@ -693,8 +707,8 @@ async function route() {
 // live data health: tell visitors when the collector is paused (Epic login expired or no pass for a while)
 async function checkHealth() {
   try {
-    const s = await j("/api/status"), el = $("#banner"); if (!el) return;
-    const idle = s.last_tick_age_s, down = s.logged_in === false || (idle != null && idle > 900);
+    const s = await j("/api/health"), el = $("#banner"); if (!el || s.error) return;
+    const idle = s.idle_s, down = s.logged_in === false || (idle != null && idle > 900);
     el.hidden = !down;
     if (down) el.innerHTML = `<b>Live data is paused.</b> ${s.logged_in === false ? "The Epic login behind the collector needs renewing" : "The collector has not run for " + Math.round(idle / 60) + " minutes"}${idle != null ? " (last update " + ago(idle) + ")" : ""}. Boards and live predictions may be out of date; stored history still works. <a href="#/status">Status</a>`;
   } catch (e) { }

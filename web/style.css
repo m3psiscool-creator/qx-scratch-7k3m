@@ -303,6 +303,7 @@ pre{background:var(--sf2);padding:10px;border-radius:10px;overflow:auto}
   .g2,.g3,.g4,.g5{grid-template-columns:minmax(0,1fr)}
   h1{font-size:1.35rem}
   .top .rgsel span{display:none}
+  #clock{display:none}
   .gsearch{order:5;flex-basis:100%;max-width:none}.top{flex-wrap:wrap}
   .anchbar{position:static}
   .cv{height:260px}.cv.tall{height:320px}

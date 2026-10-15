@@ -80,6 +80,14 @@ small,.small{font-size:.82rem;color:var(--mut)}
 .top .sp{flex:1}
 .rgsel{display:flex;align-items:center;gap:6px;color:var(--mut);font-size:.8rem;font-weight:600}
 .rgsel select{width:auto;margin:0;padding:6px 10px;border-radius:99px;background:var(--sf)}
+.acctbtn{display:flex;align-items:center;gap:7px;max-width:210px;padding:6px 13px;min-height:36px;border-radius:99px;background:var(--sf);color:var(--tx2);border:1px solid var(--line);font-weight:700;font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
+.acctbtn:hover{background:var(--sf2)}.acctbtn.on{color:var(--tx)}
+.acctbtn .dot{width:8px;height:8px;border-radius:50%;background:var(--good);flex:none}
+.acctbtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9;flex:none}
+.acctpop{position:fixed;top:60px;right:14px;z-index:70;width:min(340px,calc(100vw - 28px));background:var(--sf);border:1px solid var(--line2);border-radius:14px;box-shadow:var(--shadow);padding:14px}
+.mestrip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.86rem;color:var(--tx2);margin-top:10px}
+.mestrip:empty{display:none}
+.mestrip b{color:var(--tx)}
 .iconbtn{width:36px;height:36px;padding:0;display:grid;place-items:center;border-radius:99px;background:var(--sf);color:var(--tx2);border:1px solid var(--line);cursor:pointer;margin:0}
 .iconbtn:hover{background:var(--sf2)}
 .iconbtn svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
@@ -222,6 +230,29 @@ details.tv[open] summary{margin-bottom:8px}
 .verdict{display:flex;gap:14px;align-items:center;border-radius:14px;padding:14px 16px;margin:12px 0}
 .verdict .big{font-size:1.3rem;font-weight:800;line-height:1.2}
 .verdict.go{background:var(--good-bg)}.verdict.stop{background:var(--warn-bg)}.verdict.hard{background:var(--bad-bg)}
+
+/* ---------- recommended strategy ---------- */
+.rec{background:var(--sf);border:1px solid var(--ac);border-radius:16px;padding:18px;margin:0 0 16px}
+.rec .tag{display:inline-flex;gap:6px;align-items:center;font-size:.72rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ac)}
+.rec .tag svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sbar button{white-space:nowrap}
+.rec .headline{font-size:1.4rem;font-weight:800;line-height:1.25;margin:6px 0 4px;letter-spacing:-.01em}
+.rec .sub2{color:var(--tx2);margin:0 0 14px}
+.styles,.tiers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:0 0 4px}
+.style,.tier{border:1px solid var(--line);border-radius:12px;padding:11px 13px;background:var(--sf2);text-align:left;color:var(--tx);cursor:pointer;min-height:0;font-weight:500}
+.style:hover,.tier:hover{border-color:var(--line2);background:var(--sf2)}
+.style.on,.tier.on{border-color:var(--ac);background:var(--ac-soft)}
+.style b,.tier b{display:block;font-size:.76rem;color:var(--mut);font-weight:700;letter-spacing:.02em}
+.style .big,.tier .big{font-size:1.08rem;font-weight:800;margin:2px 0}
+.rec .rtag{font-size:.66rem;font-weight:800;background:var(--ac);color:var(--ac-tx);border-radius:99px;padding:1px 7px;margin-left:6px;vertical-align:1px}
+.steps{list-style:none;padding:0;margin:16px 0 0}
+.steps li{display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.steps .n{width:22px;height:22px;border-radius:7px;background:var(--ac);color:var(--ac-tx);display:grid;place-items:center;font-weight:800;font-size:.75rem;flex:none;margin-top:1px}
+.steps b.k{display:block;font-size:.78rem;color:var(--mut);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.cps{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.cps span{background:var(--sf2);border:1px solid var(--line);border-radius:9px;padding:3px 10px;font-variant-numeric:tabular-nums;font-size:.86rem}
+.cps span.done{border-color:var(--good);color:var(--good)}
+@media(max-width:640px){.styles,.tiers{grid-template-columns:1fr}}
 
 /* ---------- skeleton, empty ---------- */
 .skel{border-radius:12px;background:linear-gradient(90deg,var(--sf2),var(--sf3),var(--sf2));background-size:200% 100%;animation:sk 1.3s infinite;min-height:60px}

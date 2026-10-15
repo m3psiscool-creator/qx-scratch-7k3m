@@ -54,6 +54,42 @@ const rgSel = $("#rg");
 rgSel.value = REGION; rgSel.onchange = () => setRegion(rgSel.value);
 function setRegion(r) { REGION = r; store.set("region", r); rgSel.value = r; route(); }
 
+// ---------------------------------------------------------------- the player's Epic account: chosen once, checked everywhere
+let ACCT = store.get("acct", null);   // {name, id}
+const MEC = {};                       // results per event, kept 45 seconds so pages share one lookup
+async function fetchMe(wid, force) {
+  if (!ACCT) return null;
+  const c = MEC[wid]; if (c && !force && Date.now() - c.t < 45000) return c.d;
+  let d; try { d = await j(`/api/me?window=${encodeURIComponent(wid)}&name=${encodeURIComponent(ACCT.name)}&account=${ACCT.id}`); } catch (e) { d = { error: "Could not reach the site." }; }
+  MEC[wid] = { t: Date.now(), d }; return d;
+}
+function renderAcct() { const b = $("#acct"); b.classList.toggle("on", !!ACCT); b.innerHTML = ACCT ? `<span class="dot"></span>${esc(ACCT.name)}` : `${icon("user")}<span>Add my Epic account</span>`; }
+function acctPop(edit) {
+  const old = $(".acctpop"); if (old) { old.remove(); if (!edit) return; }
+  const d = document.createElement("div"); d.className = "acctpop";
+  d.innerHTML = ACCT && !edit ? `<h3>Your Epic account</h3><p style="margin:0 0 12px"><b>${esc(ACCT.name)}</b><br><small>Checked automatically on the home page and every event page.</small></p><div class="chips"><button class="sec" id="ap-change">Change</button><button class="sec" id="ap-clear">Remove</button></div>`
+    : `<h3>${ACCT ? "Change account" : "Add your Epic account"}</h3><p class="small" style="margin:0 0 8px">Type your Epic display name once. The site reads your points and games from the public leaderboard and checks them automatically. No password or login is needed.</p><input id="ap-name" placeholder="Epic display name" autocomplete="off" value="${esc(ACCT ? ACCT.name : "")}"><div class="chips" style="margin-top:10px"><button id="ap-save">Save</button><span id="ap-msg" class="small"></span></div>`;
+  document.body.appendChild(d);
+  const save = async () => {
+    const name = $("#ap-name").value.trim(); if (!name) return;
+    $("#ap-msg").textContent = "Checking…";
+    const r = await j("/api/account?name=" + encodeURIComponent(name));
+    if (r.error) { $("#ap-msg").innerHTML = `<span class="err">${esc(r.error)}</span>`; return; }
+    ACCT = { name: r.name, id: r.id }; store.set("acct", ACCT); Object.keys(MEC).forEach(k => delete MEC[k]);
+    d.remove(); renderAcct(); route();
+  };
+  if ($("#ap-save")) { $("#ap-save").onclick = save; $("#ap-name").addEventListener("keydown", e => { if (e.key === "Enter") save(); }); setTimeout(() => $("#ap-name").focus(), 50); }
+  if ($("#ap-change")) $("#ap-change").onclick = () => acctPop(true);
+  if ($("#ap-clear")) $("#ap-clear").onclick = () => { ACCT = null; store.set("acct", null); Object.keys(MEC).forEach(k => delete MEC[k]); d.remove(); renderAcct(); route(); };
+}
+$("#acct").onclick = e => { e.stopPropagation(); acctPop(); };
+document.addEventListener("click", e => { const p = $(".acctpop"); if (p && !e.target.closest(".acctpop") && !e.target.closest("#acct")) p.remove(); });
+renderAcct();
+// an account typed in the old Strategy box: keep it without asking again
+(async () => { const old = store.get("epicname", ""); if (!ACCT && old) { try { const r = await j("/api/account?name=" + encodeURIComponent(old)); if (!r.error) { ACCT = { name: r.name, id: r.id }; store.set("acct", ACCT); renderAcct(); route(); } } catch (e) { } } store.set("epicname", ""); })();
+// one line about the player's own result in an event
+const meLine = (d, wid) => !d || d.error ? "" : d.found ? `<span class="dot" style="width:8px;height:8px;border-radius:50%;background:var(--good);display:inline-block"></span> <b>${esc(d.name)}</b> · rank <b>#${nf(d.rank)}</b> · <b>${nf(d.points)}</b> points · ${d.games_played} games${d.team && d.team.length ? " · with " + esc(d.team.join(", ")) : ""} <a href="#/t/${encodeURIComponent(wid)}/strategy">Your games ›</a>` : `<span class="mut">${esc(d.message || "")}</span>`;
+
 // ---------------------------------------------------------------- favourites (an event is starred in every region)
 const evKey = id => id.replace(/_(NAC|NAW|EU|BR|ASIA|ME|OCE)$/, "");
 const isFav = id => FAVS.has(evKey(id));
@@ -147,16 +183,19 @@ async function home(quiet) {
       ${goal ? `<div class="kpis" style="margin-top:14px">${kpi("Goal: top " + nf(goal), nf(w.now[goal]), "points right now")}${kpi("Predicted final", pr ? nf(pr.likely) : "…", pr ? "range " + nf(pr.low) + " – " + nf(pr.safe) : "calculating", "hero")}<div class="kpi"><div class="l">Goal cutoff, recent trend</div><div class="cv spark"><canvas id="sp${i}"></canvas></div></div></div>` : ""}
       <div class="grid g2"><div><h3>Leaders</h3>${table(["#", "Player", "Pts", "G"], w.top.map(t => [t.rank, esc(t.players.join(" + ")), nf(t.points), t.games]), ["", "", "n", "n"])}</div>
       <div><h3>Cutoffs: now → predicted final</h3>${table(["Rank", "Now", "Predicted"], rows, ["", "n", "n"])}</div></div>
-      <div class="chips" style="margin-top:12px"><a class="btn" href="#/t/${encodeURIComponent(w.window_id)}/strategy">Strategy ›</a><a class="btn sec" href="#/t/${encodeURIComponent(w.window_id)}/predictions">Predictions</a></div></div>`;
+      <div class="mestrip" id="mh${i}"></div><div class="chips" style="margin-top:12px"><a class="btn" href="#/t/${encodeURIComponent(w.window_id)}/strategy">Strategy ›</a><a class="btn sec" href="#/t/${encodeURIComponent(w.window_id)}/predictions">Predictions</a></div></div>`;
   }).join("");
   const favs = FAVS.size ? (await allWindows()).filter(w => isFav(w.window_id) && (!REGION || w.region === REGION) && w.status !== "not collected yet").sort((a, b) => rank(a) - rank(b)).slice(0, 6) : [];
   const nextUp = (d.upcoming || []).slice(0, 6);
   app.innerHTML = head("Live now" + (REGION ? " · " + REGION : ""), "Live leaderboards, predicted final cutoffs, and a strategy page for every event.") +
+    (ACCT ? "" : `<div class="card flat" style="display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Add your Epic account once</b><div class="small">Then your rank, points and games are checked automatically on every event, with no login.</div></div><button id="ap-open">Add my account</button></div>`) +
     (live || `<div class="card flat"><b>Nothing is live right now${REGION ? " in " + REGION : ""}.</b> <span class="mut">Plan ahead with the next events below.</span></div>`) +
     (favs.length ? `<h3 style="margin-top:22px">★ Your favourites</h3><div class="evgrid" style="margin-bottom:20px">${favs.map(evCard).join("")}</div>` : "") +
     `<h3 style="margin-top:22px">Starting soon</h3><div class="evgrid">${nextUp.map(evCard).join("") || '<div class="card flat mut">No upcoming events.</div>'}</div>
     <div class="card" style="margin-top:20px"><div class="hd"><h2>Just finished</h2></div>${table(["Ended", "Region", "Tournament", ""], d.finished.map(w => [fmt(w.end), w.region, star(w.window_id) + link(w.window_id, w.name), link(w.window_id, "Results ›", "predictions")]))}</div>`;
   countdowns();
+  if ($("#ap-open")) $("#ap-open").onclick = e => { e.stopPropagation(); acctPop(); };
+  if (ACCT) (async () => { for (const [w, i] of d.live.map((w, i) => [w, i]).filter(([w]) => ACTIVE.includes(w.status)).slice(0, REGION ? 8 : 4)) { const r = await fetchMe(w.window_id); const el = $("#mh" + i); if (el) el.innerHTML = meLine(r, w.window_id); } })();
   d.live.forEach(async (w, i) => {
     const goal = w.goal ? w.goal.rank : null; if (!goal || !$("#sp" + i)) return;
     const s = await j("/api/series?window=" + encodeURIComponent(w.window_id)), rows = (s.points || []);
@@ -220,12 +259,14 @@ async function tournament(id, tab) {
   <div class="crumb"><a href="#/schedule">Schedule</a> › ${esc(w.region)}</div>
   <div class="card"><div class="hd" style="margin:0"><div><h1 style="font-size:1.45rem">${star(w.window_id)}${esc(w.name)}</h1>
     <div class="chips" style="margin-top:8px"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div></div>
-    <div class="small" style="text-align:right" id="cd"></div></div>${regionChips(w, tab)}</div>
+    <div class="small" style="text-align:right" id="cd"></div></div>${regionChips(w, tab)}<div class="mestrip" id="mestrip"></div></div>
   <div class="tabbar">${TABS.map(([k, label]) => `<a href="#/t/${encodeURIComponent(w.window_id)}/${k}" class="${k === tab ? "on" : ""}">${label}${k === "strategy" ? '<span class="new">NEW</span>' : ""}</a>`).join("")}</div>
   <div id="panel"></div>`;
   const tick = () => { const t = w.begin - Date.now() / 1000, e = w.end - Date.now() / 1000; $("#cd") && ($("#cd").innerHTML = t > 0 ? `starts in <b class="cd">${dur(t)}</b>` : e > 0 ? `games can start for <b class="cd">${dur(e)}</b>` : ""); };
   tick(); every(1000, tick);
   const open = w.status === "upcoming" || ACTIVE.includes(w.status);
+  const stripMe = async force => { if (!ACCT || w.status === "upcoming") return; const r = await fetchMe(w.window_id, force); const el = $("#mestrip"); if (el) el.innerHTML = meLine(r, w.window_id); };
+  stripMe(); if (open) every(180000, () => stripMe(true));   // your own result, checked automatically on every event page
   if (tab === "overview") await tabOverview(w, open);
   else if (tab === "strategy") await tabStrategy(w, open);
   else if (tab === "predictions") await tabPredictions(w, open);

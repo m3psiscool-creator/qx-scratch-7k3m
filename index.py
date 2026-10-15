@@ -17,7 +17,7 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
              "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
              "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
              "/api/accuracy": 300, "/api/players": 300, "/api/player": 300,
-             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30}
+             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600}
 
 
 @app.middleware("http")
@@ -165,8 +165,13 @@ def api_safety(window: str, rank: int):
 
 
 @app.get("/api/me")
-def api_me(window: str, name: str):
-    return _api(me.lookup, window, name)
+def api_me(window: str, name: str = "", account: str = ""):
+    return _api(me.lookup, window, name, account or None)
+
+
+@app.get("/api/account")
+def api_account(name: str):
+    return _api(me.account, name)
 
 
 @app.get("/api/tempo")

@@ -24,9 +24,18 @@ def _resolve(epic, name):
     return r["id"], r["name"]
 
 
-def lookup(window_id, name):
+def account(name):
+    """Check an Epic display name once and return its account id (the site then remembers it in the browser)."""
     name = (name or "").strip()
     if len(name) < 3 or len(name) > 32:
+        raise ValueError("Type your Epic display name (3 to 32 characters).")
+    acct, shown = _resolve(Epic(auth.Session()), name)
+    return {"id": acct, "name": shown}
+
+
+def lookup(window_id, name, account_id=None):
+    name = (name or "").strip()
+    if not account_id and (len(name) < 3 or len(name) > 32):
         raise ValueError("Type your Epic display name (3 to 32 characters).")
     t = storage.get_window(window_id)
     if not t:
@@ -34,7 +43,10 @@ def lookup(window_id, name):
     if time.time() < t["begin"]:
         return {"found": False, "name": name, "message": "This event has not started yet, so there are no results to read."}
     epic = Epic(auth.Session())
-    acct, shown = _resolve(epic, name)
+    if account_id and len(account_id) == 32 and all(c in "0123456789abcdef" for c in account_id):
+        acct, shown = account_id, (storage.names_get([account_id]).get(account_id) or name or account_id[:8])   # already checked when it was saved
+    else:
+        acct, shown = _resolve(epic, name)
     key = f"me:{window_id}:{acct}"
     cached = storage.kv_get(key)
     ttl = 3600 if t["final"] else 60

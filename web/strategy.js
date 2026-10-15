@@ -15,11 +15,11 @@ let SS = null;                 // state of the open Strategy tab
 const own = {};                // charts by section so one section can redraw alone
 const put = (sec, c) => { (own[sec] ||= []).push(c); return c; };
 const drop = sec => { (own[sec] || []).forEach(c => { try { c.destroy(); } catch (e) { } }); own[sec] = []; };
-const saveSS = () => store.set("sp:" + SS.w.window_id, { rank: SS.rank, conf: SS.conf, played: SS.played, pts: SS.pts, aim: SS.aim, like: SS.like });
+const saveSS = () => store.set("sp:" + SS.w.window_id, { rank: SS.rank, conf: SS.conf, auto: SS.confAuto, played: SS.played, pts: SS.pts, aim: SS.aim, like: SS.like });
 
 async function tabStrategy(w, open) {
   const saved = store.get("sp:" + w.window_id, {});
-  SS = { w, rank: saved.rank || (w.goal ? w.goal.rank : 100), conf: saved.conf || 0.8, played: saved.played || 0, pts: saved.pts || 0, aim: saved.aim || 0, like: saved.like || "focus", d: {}, name: store.get("epicname", ""), me: null };
+  SS = { w, rank: saved.rank || (w.goal ? w.goal.rank : 100), conf: saved.conf || 0.8, confAuto: saved.auto !== false, style: "rec", played: saved.played || 0, pts: saved.pts || 0, aim: saved.aim || 0, like: saved.like || "focus", d: {}, me: null };
   const presets = [...new Set([...(w.goal ? [w.goal.rank] : []), 1, 10, 50, 100, 250, 500, 1000, 2500, 5000])].sort((a, b) => a - b);
   const sec = (n, id, t, s) => `<div class="sec-title" id="${id}"><span class="num">${n}</span><div><h2>${t}</h2><div class="sub">${s}</div></div></div>`;
   $("#panel").innerHTML = `
@@ -32,33 +32,34 @@ async function tabStrategy(w, open) {
       <div><label>Aim for (optional)</label><input id="saim" type="number" min="0" placeholder="points" value="${SS.aim || ""}"></div>
       <div style="flex:0"><button id="sgo">Update</button></div>
     </div>
-    <div class="row" style="margin-top:10px"><div style="flex:2;min-width:220px"><label>My Epic name <span style="font-weight:500">(reads your points and games from the public leaderboard; no login needed)</span></label><input id="sme" placeholder="Epic display name" value="${esc(SS.name)}"></div><div style="flex:0"><button class="sec" id="smeb">Find me</button></div><div id="smemsg" class="small" style="flex:3;align-self:center;min-width:200px"></div></div>
+    <div class="row" style="margin-top:10px;align-items:center">${ACCT ? `<div style="flex:2;min-width:220px">Your account: <b>${esc(ACCT.name)}</b> <small>· read from the leaderboard and checked automatically</small></div><div style="flex:0"><button class="sec" id="smeb">Check now</button></div>` : `<div style="flex:2;min-width:220px"><b>No Epic account added.</b> <small>Add it once and your points and games load on every event, with no login.</small></div><div style="flex:0"><button class="sec" id="smeadd">Add my account</button></div>`}<div id="smemsg" class="small" style="flex:3;min-width:200px"></div></div>
     <div class="chips" style="margin-top:10px"><small>Quick pick:</small>${presets.map(p => `<button class="chip ${p === SS.rank ? "on" : ""}" data-sr="${p}">${w.goal && w.goal.rank === p ? "★ " : ""}Top ${p.toLocaleString()}</button>`).join("")}</div>
 
   </div>
-    <div class="anchbar"><a href="#s-plan" data-a="s-plan">1 Plan</a><a href="#s-scoring" data-a="s-scoring">2 Scoring</a><a href="#s-fin" data-a="s-fin">3 Finishers</a><a href="#s-pace" data-a="s-pace">4 Pace</a><a href="#s-me" data-a="s-me">5 Your games</a><a href="#s-safe" data-a="s-safe">6 Safety</a><a href="#s-stop" data-a="s-stop">7 Keep playing?</a></div>
+    <div id="p-rec"></div>
+  <div class="anchbar"><a href="#s-plan" data-a="s-plan">1 Plan</a><a href="#s-scoring" data-a="s-scoring">2 Scoring</a><a href="#s-fin" data-a="s-fin">3 Finishers</a><a href="#s-pace" data-a="s-pace">4 Pace</a><a href="#s-me" data-a="s-me">5 Your games</a><a href="#s-safe" data-a="s-safe">6 Safety</a><a href="#s-stop" data-a="s-stop">7 Keep playing?</a></div>
   ${sec(1, "s-plan", "Your plan", "How many points to aim for, and the ways to get there")}<div id="p-plan">${skel(2, 160)}</div>
   ${sec(2, "s-scoring", "What the scoring rewards", "Points per placement and per elimination in this event")}<div id="p-scoring">${skel(1, 160)}</div>
   ${sec(3, "s-fin", "What finishers actually did", "Per-game numbers of real players, from the closest finished event of this gamemode")}<div id="p-fin">${skel(2, 200)}</div>
   ${sec(4, "s-pace", "Pace tracker", "Where you should be after each game")}<div id="p-pace">${skel(1, 260)}</div>
-  ${sec(5, "s-me", "Your games", "Read from the leaderboard by your Epic name")}<div id="p-me"><div class="card empty">Type your Epic name above and press <b>Find me</b> to load your points and every game you have played here.</div></div>
+  ${sec(5, "s-me", "Your games", "Read from the leaderboard by your Epic name")}<div id="p-me"><div class="card empty">Add your Epic account (top right, or the button above) once and your points and every game you have played here load automatically.</div></div>
   ${sec(6, "s-safe", "Safety margin", "How much cushion each level of certainty costs")}<div id="p-safe">${skel(1, 260)}</div>
   ${sec(7, "s-stop", "Keep playing or stop?", "Your chance of reaching the cutoff as you play more games")}<div id="p-stop">${skel(1, 260)}</div>`;
   // controls
-  const readPersonal = () => { SS.conf = +$("#sconf").value; SS.played = clamp(+$("#spl").value || 0, 0, 99); SS.pts = Math.max(0, +$("#spt").value || 0); SS.aim = Math.max(0, +$("#saim").value || 0); saveSS(); };
+  const readPersonal = () => { if (+$("#sconf").value !== SS.conf) SS.confAuto = false; SS.conf = +$("#sconf").value; SS.played = clamp(+$("#spl").value || 0, 0, 99); SS.pts = Math.max(0, +$("#spt").value || 0); SS.aim = Math.max(0, +$("#saim").value || 0); saveSS(); };
   const apply = async () => { const r = clamp(Math.round(+$("#sx").value || SS.rank), 1, 10000); const changed = r !== SS.rank; SS.rank = r; readPersonal(); $$("[data-sr]").forEach(b => b.classList.toggle("on", +b.dataset.sr === r)); if (changed) await loadRank(); else renderPersonal(); };
   $("#sgo").onclick = apply;
-  const goMe = () => { SS.name = $("#sme").value.trim(); store.set("epicname", SS.name); loadMe(); };
-  $("#smeb").onclick = goMe; $("#sme").addEventListener("keydown", e => { if (e.key === "Enter") goMe(); });
+  if ($("#smeb")) $("#smeb").onclick = () => loadMe(false, true);
+  if ($("#smeadd")) $("#smeadd").onclick = e => { e.stopPropagation(); acctPop(); };
   ["sx", "sconf", "spl", "spt", "saim"].forEach(id => $("#" + id).addEventListener(id === "sconf" ? "change" : "change", apply));
   $$("[data-sr]").forEach(b => b.onclick = () => { $("#sx").value = b.dataset.sr; apply(); });
   $$(".anchbar a").forEach(a => a.onclick = e => { e.preventDefault(); $("#" + a.dataset.a).scrollIntoView({ behavior: "smooth" }); });
   // data that does not depend on the rank
   j("/api/scoring?window=" + encodeURIComponent(w.window_id)).then(s => { SS.d.scoring = s; renderScoring(); renderPersonal(); });
   j("/api/tempo?window=" + encodeURIComponent(w.window_id)).then(t => { SS.d.tempo = t; renderPersonal(); });
-  if (SS.name) loadMe();
+  if (ACCT) loadMe();
   await loadRank();
-  if (open) { every(120000, () => loadRank(true)); every(180000, () => { if (SS.me && SS.me.found) loadMe(true); }); }
+  if (open) { every(120000, () => loadRank(true)); every(180000, () => { if (ACCT) loadMe(true, true); }); }
 }
 
 async function loadRank(quiet) {
@@ -77,7 +78,7 @@ async function loadRank(quiet) {
   if (SS.tok !== mine) return;
   SS.d.pace = pace; renderPersonal();
 }
-function renderPersonal() { renderPlan(); renderPace(); renderMe(); renderSafe(); renderStop(); }
+function renderPersonal() { renderRec(); renderPlan(); renderPace(); renderMe(); renderSafe(); renderStop(); }
 
 // the cutoff to aim for at the chosen certainty
 function aimPoints(conf) {
@@ -410,18 +411,17 @@ function renderStop() {
 }
 
 // ---------------------------------------------------------------- 5 your games (read by Epic name from the public leaderboard)
-async function loadMe(quiet) {
+async function loadMe(quiet, force) {
   const msg = $("#smemsg"), mine = ++SS.metok || (SS.metok = 1);
-  if (!SS.name) { if (msg) msg.textContent = "Type your Epic name first."; return; }
-  if (msg && !quiet) msg.innerHTML = '<span class="mut">Looking you up on the leaderboard… this can take up to 20 seconds.</span>';
-  let d;
-  try { d = await j(`/api/me?window=${encodeURIComponent(SS.w.window_id)}&name=${encodeURIComponent(SS.name)}`); } catch (e) { d = { error: "Could not reach the site." }; }
-  if (SS.metok !== mine || !$("#sme")) return;
-  if (d.error) { if (msg) msg.innerHTML = `<span class="err">${esc(d.error)}</span>`; return; }
+  if (!ACCT) return;
+  if (msg && !quiet) msg.innerHTML = '<span class="mut">Checking your results on the leaderboard… this can take up to 20 seconds.</span>';
+  const d = await fetchMe(SS.w.window_id, force);
+  if (SS.metok !== mine || !$("#p-me")) return;
+  if (!d || d.error) { if (msg) msg.innerHTML = `<span class="err">${esc(d ? d.error : "No answer")}</span>`; return; }
   SS.me = d;
   if (d.found) {
     SS.played = d.games_played; SS.pts = Math.round(d.points); $("#spl").value = SS.played; $("#spt").value = SS.pts; saveSS();
-    if (msg) msg.innerHTML = `<span class="ok">Found ${esc(d.name)}: rank #${nf(d.rank)}, ${nf(d.points)} points, ${d.games_played} games. Read ${hm(d.updated)}.</span>`;
+    if (msg) msg.innerHTML = `<span class="ok">${esc(d.name)}: rank #${nf(d.rank)}, ${nf(d.points)} points, ${d.games_played} games. Checked ${hm(d.updated)}.</span>`;
   } else if (msg) msg.innerHTML = `<span class="mut">${esc(d.message || "Not found.")}</span>`;
   renderPersonal();
 }
@@ -445,4 +445,86 @@ function renderMe() {
   put("me", mk($("#c-me2"), { type: "line", data: { labels: lab, datasets: [{ label: "Placement", data: gs.map(g => g.placement), borderColor: SER(1), backgroundColor: SER(1), pointRadius: 4, borderWidth: 2.5 }] }, options: { scales: { x: { title: { text: "Game" } }, y: { reverse: true, min: 1, title: { text: "Placement (1 = best)" } } }, plugins: { legend: { display: false }, refLines: { lines: f ? [{ axis: "y", value: f.avg_place, label: "finishers " + nd(f.avg_place), color: cssv("--tx2"), right: true, dash: [2, 4] }] : [] }, tooltip: { callbacks: { title: c => "Game " + c[0].label, label: c => "Finished #" + c.parsed.y } } } } }));
   const better = f && m.pts_per_game >= f.pts_per_game;
   $("#me-take").innerHTML = f ? take(better ? "good" : "", `You are averaging <b>${nd(m.pts_per_game)}</b> points a game against <b>${nd(f.pts_per_game)}</b> for finishers around #${pr.rank}${ppg ? `, and you need <b>${nd(ppg)}</b> from here over about ${Gt} more games` : ""}. Your average finish is <b>${nd(m.avg_place)}</b> with <b>${nd(m.elims_per_game)}</b> elims a game (finishers: ${nd(f.avg_place)} and ${nd(f.elims_per_game)}). Plan, pace and the keep-playing simulation now use your real games.`) : "";
+}
+
+// ---------------------------------------------------------------- recommended strategy (top of the tab)
+// Built from everything below: the predicted cutoff, how many games the time left allows, the scoring, what real
+// finishers did, and (when your account is added) your own games.
+const fm = m => m == null ? "" : Math.round(m) + " min";
+const sdOf = a => { if (a.length < 2) return 0; const m = a.reduce((s, x) => s + x, 0) / a.length; return Math.sqrt(a.reduce((s, x) => s + (x - m) ** 2, 0) / a.length); };
+function renderRec() {
+  const el = $("#p-rec"); if (!el) return;
+  const sc = SS.d.scoring, pr = SS.d.profile, s = SS.d.safety, tp = SS.d.tempo && !SS.d.tempo.error ? SS.d.tempo : null;
+  const shell = inner => { el.innerHTML = `<div class="rec"><div class="tag">${icon("bolt")} Recommended strategy</div>${inner}</div>`; };
+  if (!sc || !pr || !s) { shell('<div class="skel" style="height:140px;margin-top:12px"></div>'); return; }
+  if (sc.error || pr.error) { el.innerHTML = ""; return; }
+  const f = pr.focus, cap = capOf(), remCap = Math.max(0, cap - SS.played), left = timeLeftMin(), scat = f.scatter || [];
+  const gTyp = gamesFit(typicalPlace(), remCap);
+  // ---- how realistic is each certainty level, with the games that fit in the time left
+  const ladder = !SS.aim && !s.final && !s.error && s.ladder ? [0.5, 0.8, 0.95].map(c => ({ conf: c, pts: s.ladder.find(x => x.conf === c).points })) : null;
+  const reach = pts => scat.length ? scat.filter(a => SS.pts + a[2] * gamesFit(a[0], remCap) >= pts).length / scat.length : null;
+  let tiers = null, recConf = null;
+  if (ladder) {
+    tiers = ladder.map(t => ({ ...t, ppg: gTyp ? Math.max(0, t.pts - SS.pts) / gTyp : Infinity, share: reach(t.pts) }));
+    const ok = tiers.filter(t => t.share != null && t.share >= 0.35);
+    recConf = ok.length ? ok[ok.length - 1].conf : 0.5;
+    if (SS.confAuto && SS.conf !== recConf) { SS.conf = recConf; const sel = $("#sconf"); if (sel) sel.value = recConf; setTimeout(renderPersonal, 0); }
+  }
+  const T = aimPoints();
+  if (T == null) { shell(`<p class="sub2">${esc(s.error || "No cutoff estimate yet.")} Type a number in "Aim for" above and a plan appears here.</p>`); return; }
+  // ---- search playstyles (average placement p, average elims e) that reach the target in the games that fit
+  const lobby = Math.min(tp ? tp.lobby : sc.placement.length + 1, 45), maxE = sc.per_elim ? Math.min(Math.max(sc.elim_cap || 8, 3), 12) : 0;
+  const PS = Array.from({ length: lobby * 2 - 1 }, (_, i) => 1 + i * 0.5), ES = Array.from({ length: Math.round(maxE * 4) + 1 }, (_, i) => i / 4);
+  const ev = (p, e) => { const G = gamesFit(p, remCap), ppg = ptsAtPlace(sc, p) + ptsAtElims(sc, e); return { p, e, G, ppg, total: SS.pts + ppg * G, min: gMin(p) }; };
+  const fe = f.elims_per_game, fp = f.avg_place, sde = Math.max(0.75, sdOf(scat.map(a => a[1]))), sdp = Math.max(1.5, sdOf(scat.map(a => a[0])));
+  let rec = null, bd = Infinity;
+  for (const p of PS) for (const e of ES) { const r = ev(p, e); if (r.total >= T) { const d = ((e - fe) / sde) ** 2 + ((p - fp) / sdp) ** 2; if (d < bd) { bd = d; rec = r; } } }
+  const worst = e => { let b = null; for (const p of PS) { const r = ev(p, e); if (r.total >= T) b = r; } return b; };   // the worst average finish that still reaches the target
+  const eLo = maxE ? clamp(Math.round(fe * 0.5 * 4) / 4, 0.5, maxE) : 0, eHi = maxE ? clamp(Math.round((fe + Math.max(2, fe * 0.6)) * 4) / 4, 1, maxE) : 0;
+  const styles = { survive: maxE ? worst(eLo) : null, rec, aggro: maxE ? worst(eHi) : null };
+  if (!sc.per_elim) styles.survive = styles.aggro = null;
+  const key = styles[SS.style] ? SS.style : "rec", cur = styles[key];
+  const confTxt = SS.aim ? "your aim" : s.final ? "the final cutoff" : confLabel(SS.conf).toLowerCase();
+  const tierHtml = tiers ? `<div style="margin:12px 0 4px"><div class="small" style="margin-bottom:6px"><b>1 · Choose your certainty.</b> With ${fm(left)} left, about ${gTyp} game${gTyp === 1 ? "" : "s"} fit at a typical finisher's placement. Share = finishers near #${pr.rank} who reached the points at their own pace.${tiers.every(t => t.share != null && t.share < 0.35) ? " <b>Every level is a stretch</b>, so the lowest is the most realistic." : ""}</div><div class="tiers">${tiers.map(t => `<button class="tier ${t.conf === SS.conf ? "on" : ""}" data-tier="${t.conf}"><b>${confLabel(t.conf)}${t.conf === recConf ? '<span class="rtag">best fit</span>' : ""}</b><div class="big">${nf(t.pts)}</div><small>${isFinite(t.ppg) ? nd(t.ppg) + " a game" : "no time left"} · ${t.share == null ? "?" : pc(t.share)} reach it</small></button>`).join("")}</div></div>` : "";
+  if (!cur) {
+    // nothing reaches the target: say so and find what does
+    const best = tiers ? [...tiers].reverse().find(t => { for (const p of PS) for (const e of ES) if (ev(p, e).total >= t.pts) return true; return false; }) : null;
+    shell(`<div class="headline">${nf(T)} points is out of reach in the time left</div><p class="sub2">Even winning every game with plenty of elims, about ${gamesFit(1, remCap)} games cannot add up to ${nf(T)}. ${best ? `The highest level still reachable is <b>${confLabel(best.conf)}</b> at ${nf(best.pts)} points.` : "Lower your aim, or pick a lower rank."}</p>${tierHtml}`);
+    bindRec(); return;
+  }
+  // ---- the plan for the chosen style
+  const need = Math.max(0, T - SS.pts), G = cur.G, ppg = cur.ppg, name = { survive: "Survive", rec: "Recommended", aggro: "Aggressive" };
+  const card = k => { const r = styles[k]; if (!r) return `<button class="style" disabled style="opacity:.5"><b>${name[k]}</b><div class="big">Not possible</div><small>cannot reach it this way</small></button>`; return `<button class="style ${k === key ? "on" : ""}" data-style="${k}"><b>${name[k]}${k === "rec" ? '<span class="rtag">closest to finishers</span>' : ""}</b><div class="big">Top ${Math.max(1, Math.round(r.p))} · ${nd(r.e, 1)} elims</div><small>${nd(r.ppg, 0)} points a game · ${r.G} game${r.G === 1 ? "" : "s"}${r.min ? " · " + fm(r.min) + " each" : ""}</small></button>`; };
+  const w = SS.w, nowS = Date.now() / 1000, minPer = cur.min, spend = minPer ? Math.max(0, G - 1) * minPer : null, slack = spend != null ? left - spend : null;
+  const gs = n => n + " game" + (n === 1 ? "" : "s");
+  const timeTxt = left <= 0 ? "The window has closed." : w.status === "upcoming"
+    ? `Games can start from ${fmt(w.begin)} until ${hm(w.end)} (${fm(left)}); a game that starts before then still counts. ${gs(G)} at about ${fm(minPer) || "?"} each means the last one starts about ${fm(spend) || "?"} after the first${slack != null ? (slack >= 0 ? `, leaving ${fm(slack)} to spare. Start your first game by <b>${hm(w.end - spend * 60)}</b> at the latest to fit all ${G}.` : `, which is ${fm(-slack)} longer than the window, so only what fits is counted.`) : "."}`
+    : `The window closes at <b>${hm(w.end)}</b> (${dur(left * 60)} left); a game that starts before then still counts. ${gs(G)} more at about ${fm(minPer) || "?"} each means the last one starts about ${fm(spend) || "?"} from now${slack != null ? (slack >= 0 ? `, so you have ${fm(slack)} of slack.` : `, which is more than the time left, so only what fits is counted.`) : "."}`;  const idx = [...new Set([Math.ceil(G / 4), Math.ceil(G / 2), Math.ceil(3 * G / 4), G])].filter(i => i >= 1);
+  const cps = idx.map(i => `<span>game ${SS.played + i}: <b>${nf(SS.pts + ppg * i)}</b></span>`).join("");
+  const sure = s.final || SS.aim ? T : (s.ladder || []).find(x => x.conf === 0.95)?.points ?? T;
+  const m = SS.me && SS.me.found && SS.me.games_played >= 1 ? SS.me : null;
+  let mine = "";
+  if (m) {
+    const gap = ppg - m.pts_per_game;
+    if (gap <= 0) mine = `You are averaging <b>${nd(m.pts_per_game)}</b> points a game, above the <b>${nd(ppg)}</b> this plan needs. Keep your style and protect your placement.`;
+    else { let dp = null; for (let d = 0.5; d < lobby; d += 0.5) if (ptsAtPlace(sc, Math.max(1, m.avg_place - d)) - ptsAtPlace(sc, m.avg_place) >= gap) { dp = d; break; }
+      mine = `You are averaging <b>${nd(m.pts_per_game)}</b> points a game (place ${nd(m.avg_place)}, ${nd(m.elims_per_game)} elims) and this plan needs <b>${nd(ppg)}</b>. Close the ${nd(gap)}-point gap with about <b>${sc.per_elim ? nd(gap / sc.per_elim) + " more elims a game" : "better placements"}</b>${dp && sc.per_elim ? `, or by finishing about ${nd(dp)} places higher` : ""}.`; }
+  }
+  const steps = [
+    ["Playstyle", `${["survive", "rec", "aggro"].map(card).join("").replace(/^/, '<div class="styles" style="margin-top:6px">') + "</div>"}<div class="small" style="margin-top:6px">${key === "survive" ? "Fewer elims, so you must place deeper. You play fewer games because you survive longer." : key === "aggro" ? "More elims and earlier deaths: shorter games, so more of them fit, but placement points are lower." : `Real finishers near #${pr.rank} average place ${nd(fp)} with ${nd(fe)} elims; this is the nearest style that reaches the target.`} Click a style to compare, or use <a href="#explore" onclick="document.getElementById('explore').scrollIntoView({behavior:'smooth'});return false">Try a playstyle</a>.</div>`],
+    ["Time", timeTxt],
+    ["Checkpoints", `Your total points should read about: <div class="cps">${cps}</div><div class="small" style="margin-top:6px">If you are more than one game's worth (${nd(ppg, 0)}) behind a checkpoint, move to the <b>Aggressive</b> style; if you are ahead, protect your placement.</div>`],
+    ["When to stop", `Once you pass <b>${nf(sure)}</b> points you are about 95% sure${SS.aim ? "" : " of the rank"}, and more games add little. ${tiers ? `The 95% level costs ${nf(tiers[2].pts - tiers[0].pts)} more points than a coin flip.` : ""}`],
+  ];
+  if (mine) steps.push(["You", mine]);
+  shell(`<div class="headline">Aim for ${nf(T)} points: about ${G} game${G === 1 ? "" : "s"} at ${nd(ppg, 0)} points each</div>
+    <p class="sub2">Play for <b>top ${Math.max(1, Math.round(cur.p))}</b> with about <b>${nd(cur.e, 1)} elims</b> a game${need !== T ? ` (you already have ${nf(SS.pts)})` : ""}. That is ${SS.aim ? "your own aim" : s.final ? "the final cutoff" : "the " + confTxt + " level for top " + nf(SS.rank)}, ${f.pts_per_game ? (ppg > f.pts_per_game * 1.1 ? `${Math.round((ppg / f.pts_per_game - 1) * 100)}% harder than what finishers near #${pr.rank} averaged (${nd(f.pts_per_game, 0)})` : ppg < f.pts_per_game * 0.9 ? `easier than what finishers near #${pr.rank} averaged (${nd(f.pts_per_game, 0)})` : `about what finishers near #${pr.rank} averaged (${nd(f.pts_per_game, 0)})`) : ""}.</p>
+    ${tierHtml}
+    <ol class="steps">${steps.map(([k, html], i) => `<li><span class="n">${i + (tiers ? 2 : 1)}</span><div style="min-width:0;flex:1"><b class="k">${k}</b>${html}</div></li>`).join("")}</ol>
+    <details class="tv" style="margin-top:8px"><summary>Where these numbers come from</summary><div class="small" style="margin-top:6px">Cutoff: ${s.final ? "the final result" : SS.aim ? "your own aim" : `the model's prediction for top ${nf(SS.rank)} (${nf(s.low)} to ${nf(s.safe)}, ${confLabel(SS.conf).toLowerCase()} = ${nf(T)})`}. Games: ${tp ? `how long a game lasts at each finishing place, measured from ${nf(tp.samples)} real consecutive games` : "the format limit (game lengths unknown)"}, within the ${fm(left)} left. Points: this event's scoring rules. Style: ${scat.length} real finishers around #${pr.rank} (${esc(pr.note)})${m ? `. Your own ${m.games_played} games from the leaderboard.` : "."}</div></details>`);
+  bindRec();
+}
+function bindRec() {
+  $$("#p-rec [data-tier]").forEach(b => b.onclick = () => { SS.conf = +b.dataset.tier; SS.confAuto = false; const sel = $("#sconf"); if (sel) sel.value = SS.conf; saveSS(); renderPersonal(); });
+  $$("#p-rec [data-style]").forEach(b => b.onclick = () => { SS.style = b.dataset.style; renderRec(); });
 }

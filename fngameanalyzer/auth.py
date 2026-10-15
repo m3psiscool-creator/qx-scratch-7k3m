@@ -89,6 +89,9 @@ class Session:
         if d.get("access_token") and time.time() < d["expires_at"] - 300:
             m.update(tok=d["access_token"], exp=d["expires_at"])
             return d["access_token"]
+        bad = storage.kv_get("auth_bad")
+        if bad and bad > d.get("saved_at", 0) and time.time() - bad < 600:   # Epic just refused this login: do not hammer it every minute
+            raise NotLoggedIn("Epic login expired, log in again on the Status page")
         with storage.locked("auth"):  # another run may have refreshed while we waited
             d = load()
             if d.get("access_token") and time.time() < d["expires_at"] - 300:

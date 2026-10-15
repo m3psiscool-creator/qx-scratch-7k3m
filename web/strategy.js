@@ -332,18 +332,22 @@ function simStop(o) {
   for (let i = 0; i < S; i++) {
     cuts[i] = o.cut.fixed != null ? o.cut.fixed : Math.expm1(o.cut.mu + o.cut.sd * gauss(R));
     let draw, t = 0, tot = o.pts, g = 0; totals[0][i] = tot;
+    // Every run replays one real finisher's games from your next game number onward, so the usual fall in points as the
+    // session goes on (about 58 on game 1 down to about 35 by game 5 for top finishers) is kept instead of averaged away.
+    const pl = o.players.length ? o.players[(R() * o.players.length) | 0] : null;
+    const at = k => { if (!pl) return o.pooled[(R() * o.pooled.length) | 0]; return pl[o.played + k - 1] || pl[(R() * pl.length) | 0]; };
     if (o.mode !== "band" && o.own && o.own.games && o.own.games.length) {   // your real games, shrunk toward finisher form while you have few
       const og = o.own.games, w = og.length / (og.length + (o.mode === "own" ? 0 : PRIOR_GAMES));
-      draw = () => (R() < w ? og[(R() * og.length) | 0] : o.pooled[(R() * o.pooled.length) | 0]);
+      draw = k => (R() < w ? og[(R() * og.length) | 0] : at(k));
     }
-    else if (o.mode === "band" && o.players.length) { const pl = o.players[(R() * o.players.length) | 0]; draw = () => pl[(R() * pl.length) | 0]; }
+    else if (o.mode === "band") draw = at;
     else {
-      const n = o.own ? o.own.n : 1, k = o.mode === "own" ? 0 : PRIOR_GAMES, post = (n * (o.own ? o.own.mean : pm) + k * pm) / (n + k), se = o.sd / Math.sqrt(n + k);
-      const sc = Math.max(0.15, post + se * gauss(R)) / pm;
-      draw = () => { const x = o.pooled[(R() * o.pooled.length) | 0]; return [Math.round(x[0] * sc), x[1]]; };
+      const n = o.own ? o.own.n : 1, k0 = o.mode === "own" ? 0 : PRIOR_GAMES, post = (n * (o.own ? o.own.mean : pm) + k0 * pm) / (n + k0), se = o.sd / Math.sqrt(n + k0);
+      const lvl = Math.max(0.15 * pm, post + se * gauss(R)), plm = pl ? (meanOf(pl.map(x => x[0])) || 1) : pm, sc = lvl / plm;   // your level, on a finisher's shape
+      draw = k => { const x = at(k); return [Math.round(x[0] * sc), x[1]]; };
     }
     for (let k = 1; k <= K; k++) {
-      if (t < o.budget) { const x = draw(); tot += x[0]; t += o.gmin ? o.gmin(x[1]) : 0; g++; }   // a game can start while any time is left
+      if (t < o.budget) { const x = draw(k); tot += x[0]; t += o.gmin ? o.gmin(x[1]) : 0; g++; }   // a game can start while any time is left
       totals[k][i] = tot;
     }
     done[i] = g;
@@ -371,7 +375,7 @@ function renderStop() {
   const budget = tp ? timeLeftMin() : Infinity;
   const fixed = SS.aim || (s.final ? s.likely : null);
   const T = aimPoints(), goalName = SS.aim ? `your aim of ${nf(SS.aim)}` : `a top ${nf(SS.rank)} finish`;
-  const sim = simStop({ pts: SS.pts, rem: left, mode: sel.mode, players: pooledFrom.players_pts || [], pooled: pooledFrom.sample, own, sd: base.sd || 20, cut: fixed != null ? { fixed } : { mu: s.mu, sd: s.sd }, budget, gmin: tp ? (p => gMin(p)) : null, seed: Math.round(SS.rank * 7 + SS.pts * 3 + SS.played * 13), sims: 6000 });
+  const sim = simStop({ pts: SS.pts, played: SS.played, rem: left, mode: sel.mode, players: pooledFrom.players_pts || [], pooled: pooledFrom.sample, own, sd: base.sd || 20, cut: fixed != null ? { fixed } : { mu: s.mu, sd: s.sd }, budget, gmin: tp ? (p => gMin(p)) : null, seed: Math.round(SS.rank * 7 + SS.pts * 3 + SS.played * 13), sims: 6000 });
   const rem = sim.most, P = sim.P.slice(0, rem + 1), Q = sim.Q.slice(0, rem + 1), p0 = P[0], pAll = P[rem], p1 = rem ? P[1] : p0, marg = P.map((v, k) => k ? v - P[k - 1] : 0);
   const sure = P.findIndex(v => v >= 95), dim = marg.findIndex((v, k) => k > 0 && v < 1.5), med = sim.games[1];
   const timeLimited = tp && left > 0 && med < left;
@@ -423,6 +427,49 @@ async function loadMe(quiet, force) {
   } else if (msg) msg.innerHTML = `<span class="mut">${esc(d.message || "Not found.")}</span>`;
   renderPersonal();
 }
+// ---------------------------------------------------------------- coach notes: your games against finishers near the target
+function shareBeyond(hist, buckets, cut, lobby) {   // share of games finishing worse than place `cut`, buckets treated as uniform inside
+  const edges = [[1, 1], [2, 3], [4, 5], [6, 10], [11, 15], [16, 25], [26, lobby]];
+  return hist.reduce((s, h, i) => { const [a, b] = edges[i], hi = Math.max(a, b); if (cut >= hi) return s; if (cut < a) return s + h; return s + h * (hi - cut) / Math.max(1, hi - a + 1); }, 0);
+}
+function coachNotes(m, f, sc, tp) {
+  const gs = m.games, n = gs.length, tips = [], pts = gs.map(g => g.points ?? 0);
+  if (n < 3 || !f) return tips;
+  const lobby = tp ? tp.lobby : null, per = sc.per_elim || 0, bg = f.by_game || [];
+  // 1. a slump: games where you scored far below finishers at the same game number
+  const slump = []; gs.forEach((g, i) => { const b = bg[i]; if (b && pts[i] < 0.65 * b.pts) slump.push(i); });
+  if (slump.length >= 2) { const lost = slump.reduce((t, i) => t + (bg[i].pts - pts[i]), 0); tips.push({ k: "warn", t: `<b>${slump.length} games fell well short of finishers</b> (${slump.map(i => i + 1).join(", ")}): you averaged ${nd(slump.reduce((t, i) => t + pts[i], 0) / slump.length)} where finishers made ${nd(slump.reduce((t, i) => t + bg[i].pts, 0) / slump.length)}. Closing that gap is worth about <b>${nf(lost)} points</b>.` }); }
+  // 2. early exits: finishing in the bottom half
+  if (lobby && f.place_hist) {
+    const mine = gs.filter(g => g.placement > lobby / 2).length / n, theirs = shareBeyond(f.place_hist, null, lobby / 2, lobby);
+    if (mine - theirs >= 0.15) { const bad = gs.filter(g => g.placement > lobby / 2), avg = bad.reduce((t, g, ) => t + (g.points ?? 0), 0) / bad.length; tips.push({ k: "bad", t: `<b>You finished in the bottom half in ${pc(mine)} of games</b>, finishers do in about ${pc(theirs)}. Those games averaged just ${nd(avg)} points. Each one avoided and replaced by an average game is worth about ${nd(f.pts_per_game - avg)} points.` }); }
+    else if (theirs - mine >= 0.15) tips.push({ k: "good", t: `<b>You survive better than most finishers</b>: only ${pc(mine)} of your games ended in the bottom half against about ${pc(theirs)}. Make that count by taking a fight or two when it is safe.` });
+  }
+  // 3. eliminations
+  if (per && f.elims_per_game) {
+    const d = m.elims_per_game - f.elims_per_game;
+    if (d <= -0.8) tips.push({ k: "warn", t: `<b>Elims are the gap:</b> ${nd(m.elims_per_game)} a game against ${nd(f.elims_per_game)} for finishers. Each missing elim is ${nd(per)} points, about <b>${nd(-d * per)} points a game</b> in total.` });
+    else if (d >= 0.8 && m.avg_place > f.avg_place + 2) tips.push({ k: "", t: `<b>You trade placement for elims:</b> ${nd(m.elims_per_game)} elims a game (finishers ${nd(f.elims_per_game)}) but an average finish of ${nd(m.avg_place)} against ${nd(f.avg_place)}. Surviving two places longer would add about ${nd(Math.max(0, ptsAtPlace(sc, Math.max(1, m.avg_place - 2)) - ptsAtPlace(sc, m.avg_place)))} points a game.` });
+  }
+  // 4. converting deep runs into wins
+  const top5 = gs.filter(g => g.placement <= 5).length;
+  if (top5 >= 3 && f.win_rate) { const exp = top5 ? f.win_rate / Math.max(0.01, f.top5_rate) : 0, got = m.wins / top5; if (got + 0.15 < exp) tips.push({ k: "warn", t: `<b>Top-5 finishes are not turning into wins:</b> ${m.wins} win${m.wins === 1 ? "" : "s"} from ${top5} top-5 finishes, while finishers convert about ${pc(exp)}. End-game decisions are the lever here.` }); }
+  // 5. consistency
+  const sd = sdOf(pts);
+  if (f.sd && sd > 1.35 * f.sd) tips.push({ k: "", t: `<b>Your results swing more than finishers'</b> (±${nd(sd)} a game against ±${nd(f.sd)}). If you are ahead of pace, lower the variance: protect the placement.` });
+  // 6. dead time between games
+  if (tp) {
+    const ex = []; gs.forEach((g, i) => { if (i && g.gap_min != null) ex.push(g.gap_min - gMin(g.placement)); });
+    const breaks = ex.filter(x => x > 20), idle = ex.filter(x => x > 2.5 && x <= 20).reduce((t, x) => t + x, 0);
+    if (breaks.length) tips.push({ k: "warn", t: `<b>${breaks.length} long gap${breaks.length > 1 ? "s" : ""} between games</b> (${breaks.map(x => Math.round(x) + " min").join(", ")} beyond a normal game). In a time-limited event that is ${nd(breaks.reduce((t, x) => t + x, 0) / (gMin(typicalPlace()) || 16))} games of time.` });
+    else if (idle >= 8) tips.push({ k: "", t: `<b>You spend about ${Math.round(idle)} extra minutes waiting between games</b> compared with a normal queue. Queue the next game the moment you are out.` });
+  }
+  // 7. fading late in the session
+  const h = Math.floor(n / 2), a1 = pts.slice(0, h).reduce((t, x) => t + x, 0) / Math.max(1, h), a2 = pts.slice(h).reduce((t, x) => t + x, 0) / Math.max(1, n - h);
+  const fh = bg.length >= 4 ? [bg.slice(0, h).reduce((t, x) => t + x.pts, 0) / Math.max(1, h), bg.slice(h, n).reduce((t, x) => t + x.pts, 0) / Math.max(1, Math.min(n, bg.length) - h)] : null;
+  if (a1 > 0 && a2 < 0.7 * a1 && (!fh || a2 / a1 < 0.9 * fh[1] / fh[0])) tips.push({ k: "warn", t: `<b>You fade as the session goes on:</b> ${nd(a1)} points a game in the first half, ${nd(a2)} in the second${fh ? ` (finishers go from ${nd(fh[0])} to ${nd(fh[1])})` : ""}. A short break before it drops could pay.` });
+  return tips;
+}
 function renderMe() {
   const el = $("#p-me"); if (!el) return; drop("me");
   const m = SS.me;
@@ -435,6 +482,7 @@ function renderMe() {
   el.innerHTML = `<div class="kpis">${kpi("Rank right now", "#" + nf(m.rank), m.team && m.team.length ? "with " + esc(m.team.join(", ")) : esc(m.name), "hero")}${kpi("Points", nf(m.points), nd(m.pts_per_game) + " per game" + (f ? " · finishers " + nd(f.pts_per_game) : ""))}${kpi("Games played", m.games_played, rem + " left in the format")}${kpi("Avg placement", nd(m.avg_place), f ? "finishers " + nd(f.avg_place) : "")}${kpi("Elims per game", nd(m.elims_per_game), f ? "finishers " + nd(f.elims_per_game) : "")}${kpi("Wins", m.wins, avgMin ? "about " + Math.round(avgMin) + " min between games" : "")}</div>
   <div class="grid g2">${chartCard("c-me", "Points in each of your games", ppg ? "dashed line: what you need from here, per game" : "", { cls: "short", table: false })}${chartCard("c-me2", "Where you finished", "1 is a win", { cls: "short", table: false })}</div>
   <div id="me-take"></div>
+  ${(() => { const tips = coachNotes(m, f, SS.d.scoring && !SS.d.scoring.error ? SS.d.scoring : { per_elim: 0, placement: [0] }, SS.d.tempo && !SS.d.tempo.error ? SS.d.tempo : null); return tips.length ? `<div class="card" style="margin-top:16px"><div class="hd"><h2>Coach notes</h2><span class="sub">your ${m.games_played} games against finishers around #${pr.rank}</span></div><ul class="coach">${tips.map(t => `<li class="${t.k}">${t.t}</li>`).join("")}</ul></div>` : (f ? `<div class="card" style="margin-top:16px"><div class="hd"><h2>Coach notes</h2></div><p class="mut" style="margin:0">Play at least 3 games and your own notes appear here. So far nothing stands out against finishers around #${pr.rank}.</p></div>` : ""); })()}
   <div class="card" style="margin-top:16px"><div class="hd"><h2>Game by game</h2><span class="sub">read ${hm(m.updated)} from the leaderboard${mismatch ? " · points do not add up exactly to this event's scoring, so per-game points are approximate" : ""}</span></div>${table(["Game", "Finished", "Elims", "Points", "Ended", "Minutes since previous"], gs.map(g => [g.n, g.win ? "🏆 win" : "#" + g.placement, g.elims, g.points == null ? "-" : g.points, g.end ? hm(g.end) : "-", g.gap_min == null ? "-" : nd(g.gap_min)]), ["n", "", "n", "n", "n", "n"])}</div>`;
   const lab = gs.map(g => g.n), ref = [];
   if (ppg) ref.push({ axis: "y", value: ppg, label: "need " + nd(ppg) + " / game", color: cssv("--tx"), right: true });
@@ -492,13 +540,29 @@ function renderRec() {
   }
   // ---- the plan for the chosen style
   const need = Math.max(0, T - SS.pts), G = cur.G, ppg = cur.ppg, name = { survive: "Survive", rec: "Recommended", aggro: "Aggressive" };
-  const card = k => { const r = styles[k]; if (!r) return `<button class="style" disabled style="opacity:.5"><b>${name[k]}</b><div class="big">Not possible</div><small>cannot reach it this way</small></button>`; return `<button class="style ${k === key ? "on" : ""}" data-style="${k}"><b>${name[k]}${k === "rec" ? '<span class="rtag">closest to finishers</span>' : ""}</b><div class="big">Top ${Math.max(1, Math.round(r.p))} · ${nd(r.e, 1)} elims</div><small>${nd(r.ppg, 0)} points a game · ${r.G} game${r.G === 1 ? "" : "s"}${r.min ? " · " + fm(r.min) + " each" : ""}</small></button>`; };
+  const card = k => { const r = styles[k]; if (!r) return `<button class="style" disabled style="opacity:.5"><b>${name[k]}</b><div class="big">Not possible</div><small>cannot reach it this way</small></button>`; return `<button class="style ${k === key ? "on" : ""}" data-style="${k}"><b>${name[k]}${k === "rec" ? '<span class="rtag">closest to finishers</span>' : ""}</b><div class="big">Top ${Math.max(1, Math.round(r.p))} · ${nd(r.e, 1)} elims</div><small>${nd(r.ppg, 0)} points a game · ${r.G} game${r.G === 1 ? "" : "s"}${r.min ? " · " + fm(r.min) + " each · " + nd(r.ppg / r.min, 1) + " pts/min" : ""}</small></button>`; };
   const w = SS.w, nowS = Date.now() / 1000, minPer = cur.min, spend = minPer ? Math.max(0, G - 1) * minPer : null, slack = spend != null ? left - spend : null;
   const gs = n => n + " game" + (n === 1 ? "" : "s");
   const timeTxt = left <= 0 ? "The window has closed." : w.status === "upcoming"
     ? `${SS.played > 0 ? "What-if: this assumes the whole window is still ahead of you. " : ""}Games can start from ${fmt(w.begin)} until ${hm(w.end)} (${fm(left)}); a game that starts before then still counts. ${gs(G)} at about ${fm(minPer) || "?"} each means the last one starts about ${fm(spend) || "?"} after the first${slack != null ? (slack >= 0 ? `, leaving ${fm(slack)} to spare. Start your first game by <b>${hm(w.end - spend * 60)}</b> at the latest to fit all ${G}.` : `, which is ${fm(-slack)} longer than the window, so only what fits is counted.`) : "."}`
     : `The window closes at <b>${hm(w.end)}</b> (${dur(left * 60)} left); a game that starts before then still counts. ${gs(G)} more at about ${fm(minPer) || "?"} each means the last one starts about ${fm(spend) || "?"} from now${slack != null ? (slack >= 0 ? `, so you have ${fm(slack)} of slack.` : `, which is more than the time left, so only what fits is counted.`) : "."}`;  const idx = [...new Set([Math.ceil(G / 4), Math.ceil(G / 2), Math.ceil(3 * G / 4), G])].filter(i => i >= 1);
-  const cps = idx.map(i => `<span>game ${SS.played + i}: <b>${nf(SS.pts + ppg * i)}</b></span>`).join("");
+  // checkpoints follow how finishers really collect points: front-loaded, not an even split
+  const pace = SS.d.pace && !SS.d.pace.error && SS.d.pace.mid.length >= 3 ? SS.d.pace : null;
+  const pm0 = pace ? [0, ...pace.mid] : null, kmax = pace ? pace.kmax : 0;
+  const curve = n => pm0 ? (n <= kmax ? lerp(pm0, n) : pm0[kmax] + (pm0[kmax] - pm0[Math.max(0, kmax - 2)]) / Math.min(2, kmax) * (n - kmax)) : null;
+  const endN = SS.played + G, c0 = curve(SS.played), c1 = curve(endN), shaped = c0 != null && c1 != null && c1 > c0;
+  const cp = n => shaped ? SS.pts + (T - SS.pts) * (curve(n) - c0) / (c1 - c0) : SS.pts + ppg * (n - SS.played);
+  const cps = idx.map(i => `<span>game ${SS.played + i}: <b>${nf(cp(SS.played + i))}</b></span>`).join("");
+  const halfShare = shaped && G >= 4 ? (curve(SS.played + G / 2) - c0) / (c1 - c0) : null;
+  const bound = G < remCap ? "time" : "format";
+  const limitTxt = bound === "time" ? `<b>Time is your limit:</b> only ${G} of ${remCap} games fit, so points per minute matter as much as points per game. ` : `<b>The format is your limit:</b> all ${remCap} games fit, so points per game decide it and you can afford to play deeper. `;
+  // where you stand against the path of finishers who reached this target
+  let now = "";
+  if (SS.played > 0 && pace && SS.played <= kmax + 1) {
+    const sc_ = T / pace.final_est, at = a => lerp(a, SS.played) * sc_, mid_ = at(pm0), lo_ = at([0, ...pace.lo]), hi_ = at([0, ...pace.hi]);
+    const state = SS.pts >= hi_ ? "ahead" : SS.pts >= lo_ ? "on" : "behind";
+    now = `After ${SS.played} game${SS.played === 1 ? "" : "s"}, finishers on the path to ${nf(T)} typically had <b>${nf(mid_)}</b> (middle half: ${nf(lo_)} to ${nf(hi_)}). You have <b>${nf(SS.pts)}</b>, so you are <b>${state === "ahead" ? "ahead of" : state === "on" ? "on" : "behind"}</b> that path. ${state === "ahead" ? "Protect your placement: a deep run now costs little." : state === "on" ? "Keep the recommended style." : (styles.aggro ? "Switch to the <b>Aggressive</b> style for the next games: you need the points, not the placement." : "You need more points per game than your current style gives.")}`;
+  }
   const sure = s.final || SS.aim ? T : (s.ladder || []).find(x => x.conf === 0.95)?.points ?? T;
   const m = SS.me && SS.me.found && SS.me.games_played >= 1 ? SS.me : null;
   let mine = "";
@@ -510,11 +574,12 @@ function renderRec() {
   }
   const steps = [
     ["Playstyle", `${["survive", "rec", "aggro"].map(card).join("").replace(/^/, '<div class="styles" style="margin-top:6px">') + "</div>"}<div class="small" style="margin-top:6px">${key === "survive" ? "Fewer elims, so you must place deeper. You play fewer games because you survive longer." : key === "aggro" ? "More elims and earlier deaths: shorter games, so more of them fit, but placement points are lower." : `Real finishers near #${pr.rank} average place ${nd(fp)} with ${nd(fe)} elims; this is the nearest style that reaches the target.`} Click a style to compare, or use <a href="#explore" onclick="document.getElementById('explore').scrollIntoView({behavior:'smooth'});return false">Try a playstyle</a>.</div>`],
-    ["Time", timeTxt],
-    ["Checkpoints", `Your total points should read about: <div class="cps">${cps}</div><div class="small" style="margin-top:6px">If you are more than one game's worth (${nd(ppg, 0)}) behind a checkpoint, move to the <b>Aggressive</b> style; if you are ahead, protect your placement.</div>`],
+    ["Time", limitTxt + timeTxt],
+    ["Checkpoints", `Your total points should read about: <div class="cps">${cps}</div><div class="small" style="margin-top:6px">${halfShare != null ? `Finishers collect points early: by the halfway game they already have about <b>${pc(halfShare)}</b> of the total, so do not plan an even split. ` : ""}If you are more than one game's worth (${nd(ppg, 0)}) behind a checkpoint, move to the <b>Aggressive</b> style; if you are ahead, protect your placement.</div>`],
     ["When to stop", `Once you pass <b>${nf(sure)}</b> points you are about 95% sure${SS.aim ? "" : " of the rank"}, and more games add little. ${tiers ? `The 95% level costs ${nf(tiers[2].pts - tiers[0].pts)} more points than a coin flip.` : ""}`],
   ];
   if (mine) steps.push(["You", mine]);
+  if (now) steps.unshift(["Right now", now]);
   shell(`<div class="headline">Aim for ${nf(T)} points: about ${G} game${G === 1 ? "" : "s"} at ${nd(ppg, 0)} points each</div>
     <p class="sub2">Play for <b>top ${Math.max(1, Math.round(cur.p))}</b> with about <b>${nd(cur.e, 1)} elims</b> a game${need !== T ? ` (you already have ${nf(SS.pts)})` : ""}. That is ${SS.aim ? "your own aim" : s.final ? "the final cutoff" : "the " + confTxt + " level for top " + nf(SS.rank)}, ${f.pts_per_game ? (ppg > f.pts_per_game * 1.1 ? `${Math.round((ppg / f.pts_per_game - 1) * 100)}% harder than what finishers near #${pr.rank} averaged (${nd(f.pts_per_game, 0)})` : ppg < f.pts_per_game * 0.9 ? `easier than what finishers near #${pr.rank} averaged (${nd(f.pts_per_game, 0)})` : `about what finishers near #${pr.rank} averaged (${nd(f.pts_per_game, 0)})`) : ""}.</p>
     ${tierHtml}

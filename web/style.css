@@ -231,6 +231,14 @@ details.tv[open] summary{margin-bottom:8px}
 .verdict .big{font-size:1.3rem;font-weight:800;line-height:1.2}
 .verdict.go{background:var(--good-bg)}.verdict.stop{background:var(--warn-bg)}.verdict.hard{background:var(--bad-bg)}
 
+.coach{list-style:none;padding:0;margin:0}
+.coach li{padding:10px 12px 10px 14px;border-left:3px solid var(--line2);background:var(--sf2);border-radius:0 10px 10px 0;margin:0 0 8px}
+.coach li.good{border-left-color:var(--good)}.coach li.warn{border-left-color:var(--warn)}.coach li.bad{border-left-color:var(--bad)}
+
+.banner{margin:14px 24px 0;padding:10px 14px;border-radius:12px;background:var(--warn-bg);color:var(--tx);border:1px solid var(--warn);font-size:.9rem}
+.banner a{font-weight:700}
+@media(max-width:900px){.banner{margin:10px 14px 0}}
+
 /* ---------- sessions of an event ---------- */
 .sess{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
 .sess-h{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}

@@ -664,5 +664,15 @@ async function route() {
     else app.innerHTML = '<div class="card">Page not found.</div>';
   } catch (e) { app.innerHTML = `<div class="card err">Something went wrong: ${esc(e.message)}</div>`; console.error(e); }
 }
+// live data health: tell visitors when the collector is paused (Epic login expired or no pass for a while)
+async function checkHealth() {
+  try {
+    const s = await j("/api/status"), el = $("#banner"); if (!el) return;
+    const idle = s.last_tick_age_s, down = s.logged_in === false || (idle != null && idle > 900);
+    el.hidden = !down;
+    if (down) el.innerHTML = `<b>Live data is paused.</b> ${s.logged_in === false ? "The Epic login behind the collector needs renewing" : "The collector has not run for " + Math.round(idle / 60) + " minutes"}${idle != null ? " (last update " + ago(idle) + ")" : ""}. Boards and live predictions may be out of date; stored history still works. <a href="#/status">Status</a>`;
+  } catch (e) { }
+}
+checkHealth(); setInterval(checkHealth, 60000);
 window.addEventListener("hashchange", route);
 route();

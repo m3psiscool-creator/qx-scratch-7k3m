@@ -1,0 +1,30 @@
+name: replay-test
+on:
+  workflow_dispatch:
+    inputs:
+      session:
+        description: "Match (session) id"
+        required: true
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: "8.0.x" }
+      - name: Download and assemble the replay
+        env:
+          ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+        run: node worker/replay.mjs "${{ inputs.session }}" match.replay
+      - name: Get the parser
+        run: |
+          git clone --depth 1 https://github.com/SL-x-TnT/FortniteReplayDecompressor fork
+          find fork -name "*.csproj" | head -20
+          git -C fork log -1 --format="%H %cd"
+      - name: Build the parser
+        run: |
+          cd fork
+          dotnet build -c Release 2>&1 | tail -15

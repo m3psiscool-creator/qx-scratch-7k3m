@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl *fn-game-analyzer.vercel.app/api/admin/probe*)",
+      "Bash(npx vercel deploy*)"
+    ]
+  }
+}

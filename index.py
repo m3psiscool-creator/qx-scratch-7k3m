@@ -258,6 +258,24 @@ async def admin_drops(req: Request, x_admin_key: str = Header(default="")):
         return _err(e)
 
 
+@app.get("/api/admin/probe")
+def admin_probe(window: str, rank: int = 1, x_admin_key: str = Header(default="")):
+    """Owner only: shows what a leaderboard entry holds and whether replay storage answers for its session id."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    from fngameanalyzer import probe
+    return _api(probe.run, window, rank)
+
+
+@app.get("/api/admin/replay")
+def admin_replay(session: str, x_admin_key: str = Header(default="")):
+    """Owner/worker only: file list and signed download links of one tournament match replay."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    from fngameanalyzer import replays
+    return _api(replays.links, session)
+
+
 @app.get("/api/sessions")
 def api_sessions(window: str):
     return _api(service.sessions, window)

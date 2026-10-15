@@ -560,6 +560,18 @@ def player_events(account_id):
     return out
 
 
+def player_style_sql(ids, category):
+    """How these players usually play in one gamemode: elims per game, average finish, wins, from their top-1000 finishes."""
+    if not ids:
+        return {}
+    with db() as c:
+        rows = c.execute(f"""WITH rows AS ({_PR_ROWS} AND w.category = %s)
+                             SELECT r->>0, count(*), sum((r->>3)::float), sum((r->>5)::float), avg(NULLIF(r->>6, 'null')::float), sum((r->>4)::float)
+                             FROM rows WHERE r->>0 = ANY(%s) GROUP BY 1""", (category, list(ids))).fetchall()
+    return {a: {"events": n, "elims_pg": round(e / g, 2) if g else None, "avg_place": round(p, 1) if p is not None else None, "wins": int(w or 0)}
+            for a, n, g, e, p, w in rows}
+
+
 def player_event_counts(ids):
     if not ids:
         return {}

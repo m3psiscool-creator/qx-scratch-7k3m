@@ -3,6 +3,7 @@ safety margins and the rank ladder. Everything is derived from data the collecto
 import bisect
 import math
 import statistics
+import time
 from statistics import NormalDist
 
 from . import classify, config, insights, model, rules, service, storage
@@ -146,7 +147,8 @@ def _band_stats(pg, a, b, with_extra=False):
            "place_hist": _hist([x[0] for x in games], PLACE_BUCKETS),
            "elim_hist": _hist([x[1] for x in games], ELIM_BUCKETS),
            "sample": _stride([[x[3], x[0]] for x in games], 300),
-           "players_pts": [[[x[3], x[0]] for x in g] for g in _stride(rows, 80)]}
+           "players_pts": [[[x[3], x[0]] for x in g] for g in _stride(rows, 80)],
+           "players_meta": [[round(sum(x[0] for x in g) / len(g), 2), round(sum(x[1] for x in g) / len(g), 2)] for g in _stride(rows, 80)]}
     out["split"]["place"] = round(max(0.0, 1 - out["split"]["elim"] - out["split"]["win"]), 4)
     if with_extra:
         longest = max(len(g) for g in rows)
@@ -276,6 +278,40 @@ def safety(window_id, rank):
             "likely": r["likely"], "safe": r["safe"], "sd_pct": round(100 * sd, 1), "mu": round(m, 5), "sd": round(sd, 5), "ladder": ladder, "curve": curve,
             "drift": drift, "method": r.get("method"), "progress": (r.get("live") or {}).get("progress"),
             "history_events": (r.get("prior") or {}).get("n") or r.get("history_events")}
+
+
+# ---------------------------------------------------------------- rivals: the players around a rank in a live event
+def rivals(window_id, rank, span=8):
+    t = _target(window_id)
+    if t["final"]:
+        raise ValueError("Rivals are shown while an event is live.")
+    snaps = storage.snapshots(window_id, last=1)
+    if not snaps:
+        raise ValueError("No live board yet.")
+    snap = snaps[0]
+    board = storage.kv_get("board:" + window_id)
+    players = board["players"] if board and abs(board["ts"] - snap["ts"]) < 180 else None
+    n = len(players) if players else min(60, len(snap["points"]))
+    rank = max(1, min(int(rank), n))
+    lo, hi = max(1, rank - span), min(n, rank + span)
+    cat = classify.of(t)
+    cap = (t.get("meta") or {}).get("match_cap") or 0
+    ids = [a for r in range(lo, hi + 1) for a in (players[r - 1] if players else [])]
+    names = insights._name_map(ids) if ids else {}
+    form = storage.player_form_sql(ids, cat) if ids else {}
+    style = storage.player_style_sql(ids, cat) if hasattr(storage, "player_style_sql") and ids else {}
+    mine = snap["points"][rank - 1]
+    rows = []
+    for r in range(lo, hi + 1):
+        accts = players[r - 1] if players else []
+        pts, g = snap["points"][r - 1], snap["games"][r - 1]
+        st = [style[a] for a in accts if a in style]
+        rows.append({"rank": r, "points": pts, "games": g, "ppg": round(pts / g, 1) if g else None, "gap": round(pts - mine),
+                     "games_left": max(0, cap - g) if cap else None, "me": r == rank,
+                     "players": [{"id": a, "name": names.get(a, a[:8]), **form.get(a, {})} for a in accts],
+                     "elims_pg": round(sum(x["elims_pg"] for x in st if x["elims_pg"] is not None) / max(1, len([x for x in st if x["elims_pg"] is not None])), 2) if st else None,
+                     "avg_place": round(sum(x["avg_place"] for x in st if x["avg_place"] is not None) / max(1, len([x for x in st if x["avg_place"] is not None])), 1) if st else None})
+    return {"window_id": window_id, "rank": rank, "age_s": round(time.time() - snap["ts"]), "rows": rows, "named": bool(players)}
 
 
 # ---------------------------------------------------------------- which past events count as history

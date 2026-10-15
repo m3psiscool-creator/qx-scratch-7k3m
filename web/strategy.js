@@ -37,14 +37,15 @@ async function tabStrategy(w, open) {
 
   </div>
     <div id="p-rec"></div>
-  <div class="anchbar"><a href="#s-plan" data-a="s-plan">1 Plan</a><a href="#s-scoring" data-a="s-scoring">2 Scoring</a><a href="#s-fin" data-a="s-fin">3 Finishers</a><a href="#s-pace" data-a="s-pace">4 Pace</a><a href="#s-me" data-a="s-me">5 Your games</a><a href="#s-safe" data-a="s-safe">6 Safety</a><a href="#s-stop" data-a="s-stop">7 Keep playing?</a></div>
+  <div class="anchbar"><a href="#s-plan" data-a="s-plan">1 Plan</a><a href="#s-scoring" data-a="s-scoring">2 Scoring</a><a href="#s-fin" data-a="s-fin">3 Finishers</a><a href="#s-pace" data-a="s-pace">4 Pace</a><a href="#s-me" data-a="s-me">5 Your games</a><a href="#s-riv" data-a="s-riv">6 Rivals</a><a href="#s-safe" data-a="s-safe">7 Safety</a><a href="#s-stop" data-a="s-stop">8 Keep playing?</a></div>
   ${sec(1, "s-plan", "Your plan", "How many points to aim for, and the ways to get there")}<div id="p-plan">${skel(2, 160)}</div>
   ${sec(2, "s-scoring", "What the scoring rewards", "Points per placement and per elimination in this event")}<div id="p-scoring">${skel(1, 160)}</div>
   ${sec(3, "s-fin", "What finishers actually did", "Per-game numbers of real players, from the closest finished event of this gamemode")}<div id="p-fin">${skel(2, 200)}</div>
   ${sec(4, "s-pace", "Pace tracker", "Where you should be after each game")}<div id="p-pace">${skel(1, 260)}</div>
   ${sec(5, "s-me", "Your games", "Read from the leaderboard by your Epic name")}<div id="p-me"><div class="card empty">Add your Epic account (top right, or the button above) once and your points and every game you have played here load automatically.</div></div>
-  ${sec(6, "s-safe", "Safety margin", "How much cushion each level of certainty costs")}<div id="p-safe">${skel(1, 260)}</div>
-  ${sec(7, "s-stop", "Keep playing or stop?", "Your chance of reaching the cutoff as you play more games")}<div id="p-stop">${skel(1, 260)}</div>`;
+  ${sec(6, "s-riv", "Rivals", "The players just above and below your rank, live")}<div id="p-riv"></div>
+  ${sec(7, "s-safe", "Safety margin", "How much cushion each level of certainty costs")}<div id="p-safe">${skel(1, 260)}</div>
+  ${sec(8, "s-stop", "Keep playing or stop?", "Your chance of reaching the cutoff as you play more games")}<div id="p-stop">${skel(1, 260)}</div>`;
   // controls
   const readPersonal = () => { if (+$("#sconf").value !== SS.conf) SS.confAuto = false; SS.conf = +$("#sconf").value; SS.played = clamp(+$("#spl").value || 0, 0, 99); SS.pts = Math.max(0, +$("#spt").value || 0); SS.aim = Math.max(0, +$("#saim").value || 0); saveSS(); };
   const apply = async () => { const r = clamp(Math.round(+$("#sx").value || SS.rank), 1, 10000); const changed = r !== SS.rank; SS.rank = r; readPersonal(); $$("[data-sr]").forEach(b => b.classList.toggle("on", +b.dataset.sr === r)); if (changed) await loadRank(); else renderPersonal(); };
@@ -58,8 +59,9 @@ async function tabStrategy(w, open) {
   j("/api/scoring?window=" + encodeURIComponent(w.window_id)).then(s => { SS.d.scoring = s; renderScoring(); renderPersonal(); });
   j("/api/tempo?window=" + encodeURIComponent(w.window_id)).then(t => { SS.d.tempo = t; renderPersonal(); });
   if (ACCT) loadMe();
+  loadRivals();
   await loadRank();
-  if (open) { every(120000, () => loadRank(true)); every(180000, () => { if (ACCT) loadMe(true, true); }); }
+  if (open) { every(120000, () => loadRank(true)); every(180000, () => { if (ACCT) loadMe(true, true); }); every(60000, () => loadRivals(true)); }
 }
 
 async function loadRank(quiet) {
@@ -78,7 +80,7 @@ async function loadRank(quiet) {
   if (SS.tok !== mine) return;
   SS.d.pace = pace; renderPersonal();
 }
-function renderPersonal() { renderRec(); renderPlan(); renderPace(); renderMe(); renderSafe(); renderStop(); }
+function renderPersonal() { renderRec(); renderPlan(); renderPace(); renderMe(); renderRiv(); renderSafe(); renderStop(); }
 
 // the cutoff to aim for at the chosen certainty
 function aimPoints(conf) {
@@ -410,6 +412,23 @@ function renderStop() {
   $("#c-stop-tbl").innerHTML = table(["Extra games", "Chance", "Adds", "10%", "Median", "90%"], xs.map(k => [k, nd(P[k], 0) + "%", k ? "+" + nd(marg[k]) : "", nf(Q[k][0]), nf(Q[k][1]), nf(Q[k][2])]), ["n", "n", "n", "n", "n", "n"]);
   $("#c-stop-take").innerHTML = take("", `Each run picks how well you play, plays games from real results (each one lasting as long as that finish really takes), stops when the window closes, and compares your total with a cutoff drawn from the prediction${fixed != null ? "" : ` (±${nd(s.sd_pct)}%)`}. ${sel.mode === "band" ? "Players are real finishers from the selected group, so it includes strong and weak runs." : sel.mode === "blend" ? `Your ${own.n} games count against ${PRIOR_GAMES} games of finisher form, so a short hot or cold start does not dominate.` : "Only your own games so far set your pace, so a short start can mislead."} It assumes you start the next game right away.`);
   $("#slike").onchange = e => { SS.like = e.target.value; saveSS(); renderStop(); };
+  styleCompare(el, pooledFrom, base, { left, budget, fixed, s, tp, goalName, own });
+}
+// Which style gives the best chance from where you are? Finishers are split by how many elims they get, and each group's
+// real game sequences are replayed from your next game onward (with the same time limit and cutoff).
+function styleCompare(el, from, base, c) {
+  const pl = from.players_pts || [], meta = from.players_meta || [];
+  if (pl.length < 12 || pl.length !== meta.length || c.left < 1) return;
+  const order = meta.map((m, i) => i).sort((a, b) => meta[a][1] - meta[b][1]), t = Math.floor(order.length / 3);
+  const groups = [["Placement first", order.slice(0, t)], ["Balanced", order.slice(t, order.length - t)], ["Elims first", order.slice(order.length - t)]].map(([name, ix]) => {
+    const avgE = meanOf(ix.map(i => meta[i][1])), avgP = meanOf(ix.map(i => meta[i][0]));
+    const sim = simStop({ pts: SS.pts, played: SS.played, rem: c.left, mode: "band", players: ix.map(i => pl[i]), pooled: from.sample, own: null, sd: base.sd || 20, cut: c.fixed != null ? { fixed: c.fixed } : { mu: c.s.mu, sd: c.s.sd }, budget: c.budget, gmin: c.tp ? (p => gMin(p)) : null, seed: 91 + ix.length, sims: 2500 });
+    return { name, avgE, avgP, p: sim.P[sim.most], games: sim.games[1], final: sim.Q[sim.most][1] };
+  });
+  const best = groups.reduce((a, b) => b.p > a.p ? b : a), id = "c-style";
+  el.insertAdjacentHTML("beforeend", `<div class="card" style="margin-top:16px"><div class="hd"><h2>Which style gives the best chance?</h2><span class="sub">real game sequences of finishers, grouped by elims, replayed from your next game</span></div>
+    <div class="styles">${groups.map(g => `<div class="style ${g === best ? "on" : ""}" style="cursor:default"><b>${g.name}${g === best ? '<span class="rtag">best chance</span>' : ""}</b><div class="big">${nd(g.p, 0)}%</div><small>${nd(g.avgE, 1)} elims · place ${nd(g.avgP, 1)} · about ${g.games} games · ${nf(g.final)} points</small></div>`).join("")}</div>
+    ${take("", `From where you are, the <b>${best.name.toLowerCase()}</b> group reaches ${c.goalName} most often (${nd(best.p, 0)}%), against ${groups.filter(g => g !== best).map(g => nd(g.p, 0) + "% for " + g.name.toLowerCase()).join(" and ")}. Groups are thirds of finishers near your target rank by elims per game. Style is a result, not a cause, so use it as a guide to which points mix has worked.`)}</div>`);
 }
 
 // ---------------------------------------------------------------- 5 your games (read by Epic name from the public leaderboard)
@@ -425,7 +444,7 @@ async function loadMe(quiet, force) {
     SS.played = d.games_played; SS.pts = Math.round(d.points); $("#spl").value = SS.played; $("#spt").value = SS.pts; saveSS();
     if (msg) msg.innerHTML = `<span class="ok">${esc(d.name)}: rank #${nf(d.rank)}, ${nf(d.points)} points, ${d.games_played} games. Checked ${hm(d.updated)}.</span>`;
   } else if (msg) msg.innerHTML = `<span class="mut">${esc(d.message || "Not found.")}</span>`;
-  renderPersonal();
+  renderPersonal(); loadRivals(true);
 }
 // ---------------------------------------------------------------- coach notes: your games against finishers near the target
 function shareBeyond(hist, buckets, cut, lobby) {   // share of games finishing worse than place `cut`, buckets treated as uniform inside
@@ -590,4 +609,33 @@ function renderRec() {
 function bindRec() {
   $$("#p-rec [data-tier]").forEach(b => b.onclick = () => { SS.conf = +b.dataset.tier; SS.confAuto = false; const sel = $("#sconf"); if (sel) sel.value = SS.conf; saveSS(); renderPersonal(); });
   $$("#p-rec [data-style]").forEach(b => b.onclick = () => { SS.style = b.dataset.style; renderRec(); });
+}
+
+
+// ---------------------------------------------------------------- 6 rivals: who is around you in a live event
+async function loadRivals(quiet) {
+  const el = $("#p-riv"); if (!el || !SS) return;
+  if (!ACTIVE.includes(SS.w.status)) { SS.d.riv = null; renderRiv(); return; }
+  const rank = SS.me && SS.me.found ? SS.me.rank : SS.rank;
+  if (rank > 700) { SS.d.riv = { error: "Live rival tables cover the top 700." }; renderRiv(); return; }
+  const d = await j(`/api/rivals?window=${encodeURIComponent(SS.w.window_id)}&rank=${rank}`);
+  if (!$("#p-riv")) return;
+  SS.d.riv = d; renderRiv();
+}
+function renderRiv() {
+  const el = $("#p-riv"); if (!el || !SS) return;
+  if (!ACTIVE.includes(SS.w.status)) { el.innerHTML = `<div class="card empty">Rivals appear while the event is live: the players just above and below your rank, with their pace and usual style.</div>`; return; }
+  const d = SS.d.riv; if (!d) return;
+  if (d.error) { el.innerHTML = `<div class="card empty">${esc(d.error)}</div>`; return; }
+  const f = SS.d.profile && !SS.d.profile.error ? SS.d.profile.focus : null, me = d.rows.find(r => r.me);
+  const tag = r => r.elims_pg == null || !f ? "" : r.elims_pg >= f.elims_per_game * 1.2 ? "elims first" : r.elims_pg <= f.elims_per_game * 0.8 ? "placement first" : "balanced";
+  const oneGame = f ? f.pts_per_game : 40, near = d.rows.filter(r => !r.me && Math.abs(r.gap) <= oneGame).length;
+  const threats = d.rows.filter(r => r.gap < 0 && me && me.games_left != null && r.games_left != null && r.games_left > me.games_left).length;
+  const ahead = d.rows.filter(r => r.gap > 0).length;
+  el.innerHTML = `<div class="kpis">${kpi("Your rank", "#" + nf(d.rank), "live, " + ago(d.age_s), "hero")}${kpi("Within one game", near, "players inside " + nf(oneGame) + " points")}${kpi("Above you", ahead, "in this table")}${kpi("Can catch you", threats, "below you with more games left")}</div>
+  <div class="card"><div class="hd"><h2>Around #${d.rank}</h2><span class="sub">gap is points against you · style from their results in this gamemode</span></div>${table(["#", "Player", "Points", "Gap", "Games", "Pts/game", "Style", "Usual finish"], d.rows.map(r => {
+    const pl = r.players.length ? r.players.map(p => `<a href="#/player/${p.id}">${esc(p.name)}</a>`).join(" + ") : '<span class="mut">-</span>';
+    const f0 = r.players[0] || {}, usual = f0.median ? `median #${nf(f0.median)} in ${f0.events} event${f0.events === 1 ? "" : "s"}` : '<span class="mut">no history</span>';
+    return [r.me ? `<b>${r.rank}</b>` : r.rank, r.me ? `<b>${pl} (you)</b>` : pl, nf(r.points), r.me ? "-" : (r.gap > 0 ? "+" : "") + nf(r.gap), r.games + (r.games_left != null ? ` <small>(${r.games_left} left)</small>` : ""), nd(r.ppg), tag(r) || "-", usual];
+  }), ["n", "", "n", "n", "n", "n", "", ""])}${d.named ? "" : '<p class="small">Names fill in once the collector has stored the full board.</p>'}</div>`;
 }

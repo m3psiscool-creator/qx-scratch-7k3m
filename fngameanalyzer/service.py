@@ -110,6 +110,8 @@ def _run_predict(window_id, top, entrants=None):
     if cur:   # a rank's score never falls
         for k in ("low", "likely", "safe"):
             r[k] = max(r[k], round(cur))
+    pool = model.comparable(target, finished)
+    r["history_mix"] = {"same": sum(1 for w in pool if w["region"] == target["region"]), "other": sum(1 for w in pool if w["region"] != target["region"]), "region": target["region"]}
     r["entrants_used"] = entrants or (r["prior"] or {}).get("entrants") or 0
     r["snapshot_age_s"] = round(time.time() - snap["ts"]) if snap else None
     if not target["final"]:

@@ -14,7 +14,7 @@ Hosted site that predicts the points needed for any rank (1-10,000) in Fortnite 
 - Storage per window: top-1000 points/games/per-game sessions (placement, elims, win, end time)/players, plus points at ranks 1000,1500..10000 (`deep`). Snapshots also write compact `series`. Full snapshots of finished windows are pruned after 3 days.
 
 ## Model
-- Events are classified (`classify.py`): reload|br, zb, solo|duo|trio|squads, mobile. History is only used within the same class (checkbox `approx` allows nearby classes explicitly).
+- Events are classified (`classify.py`): reload|br, zb, solo|duo|trio|squads, mobile. History is only used within the same class (checkbox `approx` allows nearby classes explicitly), and the same format (game count + scoring). Same-region events come first and carry the most weight; other regions of the same gamemode and format are added only when the region has fewer than `model.MIN_SAME_REGION` (4) previous events (`model.comparable`, `strategy.peers`, strategy `_refs`).
 - Live: player-by-player simulation (`sim.py`) using comparable players at the same moment in same-class past events (games played, points/game, pace scaling), with back-test bias correction. Ranks >700 scale from rank 500; ranks never predicted below current.
 - No history for a class = explicit "no history" message.
 

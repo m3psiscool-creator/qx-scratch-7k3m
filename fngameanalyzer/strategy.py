@@ -48,9 +48,9 @@ def _refs(target, n=1):
     meta = target.get("meta") or {}
     cands = [w for w in storage.windows(final=True, category=classify.of(target), light=True)
              if w["window_id"] != target["window_id"] and len(w["points"]) >= 900]
-    cands.sort(key=lambda w: ((w["meta"].get("match_cap") != meta.get("match_cap")),
+    cands.sort(key=lambda w: ((w["region"] != target["region"]),          # same region first, then same format, then same game count
                               (w["meta"].get("format") != meta.get("format")),
-                              (w["region"] != target["region"]), -w["end"]))
+                              (w["meta"].get("match_cap") != meta.get("match_cap")), -w["end"]))
     for c in cands:
         if len(out) >= n:
             break
@@ -278,12 +278,26 @@ def safety(window_id, rank):
             "history_events": (r.get("prior") or {}).get("n") or r.get("history_events")}
 
 
+# ---------------------------------------------------------------- which past events count as history
+def peers(target, rows, min_same=4, limit=14):
+    """Previous events of the same gamemode and format. The same region's events come first; other regions are added
+    only when the region has fewer than `min_same`."""
+    meta = target.get("meta") or {}
+    base = [w for w in rows if w["window_id"] != target["window_id"] and w["family"] == target["family"]
+            and classify.of(w) == classify.of(target) and w["end"] <= target["begin"]]
+    fmt = [w for w in base if meta.get("format") and (w.get("meta") or {}).get("format") == meta["format"]]
+    pool = fmt if len(fmt) >= 2 else base
+    reg = sorted([w for w in pool if w["region"] == target["region"]], key=lambda w: -w["end"])
+    if len(reg) >= min_same:
+        return reg[:limit]
+    return (reg + sorted([w for w in pool if w["region"] != target["region"]], key=lambda w: -w["end"]))[:limit]
+
+
 # ---------------------------------------------------------------- rank ladder
 def ladder(window_id):
     t = _target(window_id)
     cat = classify.of(t)
-    hist = [w for w in storage.windows(final=True, category=cat, light=True)
-            if w["window_id"] != window_id and w["family"] == t["family"]][:14]
+    hist = peers(t, storage.windows(final=True, category=cat, light=True))
     rows = {}
     for w in hist:
         for rk, v in insights.cutoffs(w, LADDER_RANKS).items():
@@ -297,7 +311,8 @@ def ladder(window_id):
         for p in storage.predictions_for(window_id)[::-1]:
             preds.setdefault(str(p["rank"]), {k: p[k] for k in ("low", "likely", "safe")})
     return {"window_id": window_id, "ranks": LADDER_RANKS, "now": cur, "source": th.get("source"),
-            "history": hist_out, "events": len(hist), "predicted": preds, "category": cat}
+            "history": hist_out, "events": len(hist), "predicted": preds, "category": cat,
+            "same_region": sum(1 for w in hist if w["region"] == t["region"]), "region": t["region"]}
 
 
 # ---------------------------------------------------------------- tempo: how long a game takes at each placement

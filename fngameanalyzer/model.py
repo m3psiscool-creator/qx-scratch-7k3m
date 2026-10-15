@@ -39,15 +39,20 @@ def _fmt(w):
     return (w.get("meta") or {}).get("format")
 
 
+MIN_SAME_REGION = 4    # fewer previous events than this in the region: other regions are added
+
+
 def comparable(target, finished):
-    """Finished windows with the SAME format (game count + scoring rules)."""
+    """Previous events of the same gamemode AND the same format (game count + scoring rules).
+    Same-region events come first (and carry the most weight); other regions are added only when the region has too few."""
     same = [w for w in finished
             if w["family"] == target["family"] and w["window_id"] != target["window_id"]
             and w["points"] and _fmt(w) == _fmt(target)
             and classify.of(w) == classify.of(target)]
-    reg = [w for w in same if w["region"] == target["region"]]
-    pool = reg if len(reg) >= 3 else same
-    return sorted(pool, key=lambda w: w["end"], reverse=True)
+    reg = sorted([w for w in same if w["region"] == target["region"]], key=lambda w: w["end"], reverse=True)
+    if len(reg) >= MIN_SAME_REGION:
+        return reg
+    return reg + sorted([w for w in same if w["region"] != target["region"]], key=lambda w: w["end"], reverse=True)
 
 
 def _wmean_var(vals, weights):
@@ -156,7 +161,8 @@ def shape_pool(target, finished, limit=12):
     same = [w for w in pool if classify.of(w) == cat]
     if approx() and len(same) < 3:   # explicitly allowed: nearest classes by game type, then any
         same = [w for w in pool if w["meta"].get("game_type") == meta.get("game_type")] or pool
-    return sorted(same, key=lambda w: w["end"], reverse=True)[:limit]
+    # same region first, then same format, then newest
+    return sorted(same, key=lambda w: (w["region"] != target["region"], _fmt(w) != _fmt(target), -w["end"]))[:limit]
 
 
 def _has_timed(w):
@@ -334,7 +340,7 @@ def rescored_prior(target, finished, rank, entrants=None, calibrate=True):
     same_type = [w for w in cands if w["meta"].get("game_type") == meta.get("game_type")]
     same_stage = [w for w in same_type if w["meta"].get("stage") == meta.get("stage")]
     pool = next((c for c in (same_stage, same_type, cands) if c), [])
-    pool = sorted(pool, key=lambda w: w["end"], reverse=True)[:RESCORE_WINDOWS]
+    pool = sorted(pool, key=lambda w: (w["region"] != target["region"], -w["end"]))[:RESCORE_WINDOWS]
     from . import storage
     pool = [w for w in storage.attach_sessions(pool) if len(w.get("sessions") or []) >= MIN_PLAYERS]
     if not pool:

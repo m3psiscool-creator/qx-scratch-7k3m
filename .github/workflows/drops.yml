@@ -12,6 +12,11 @@ on:
         description: "Matches to process per window"
         required: false
         default: "40"
+      reset:
+        description: "Start the window over (drops its loaded landings, finished matches and chest counts)"
+        required: false
+        type: boolean
+        default: false
 concurrency: drops
 jobs:
   run:
@@ -37,5 +42,5 @@ jobs:
           limit="${{ github.event.inputs.limit || '40' }}"
           if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 4)"; fi
           for w in $wins; do
-            node worker/run.mjs "$w" --limit "$limit" || echo "window $w failed"
+            node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }} || echo "window $w failed"
           done

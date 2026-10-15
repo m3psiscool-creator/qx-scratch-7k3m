@@ -444,7 +444,7 @@ def areas(window_id, top=100, game=0, radius=0.055, min_chests=4):
                 o["label"] = label + chr(97 + n)
     out.sort(key=lambda o: -o["score"])
     return {"areas": out, "matches": matches, "chest_matches": M, "team_size": team_size,
-            "teams_per_match": round(per_match, 1), "game": game}
+            "teams_per_match": round(per_match, 1), "game": game, "lobby": (w.get("meta") or {}).get("lobby")}
 
 
 def _area_loot(window_id, a, mask, base, poly):

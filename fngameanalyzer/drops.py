@@ -9,7 +9,7 @@ import time
 
 import numpy as np
 
-from . import classify, insights, rules, service, storage
+from . import classify, config, insights, rules, service, storage
 
 GRID = 96
 BASE = 128           # resolution of the background map drawn from player movement
@@ -444,7 +444,8 @@ def areas(window_id, top=100, game=0, radius=0.055, min_chests=4):
                 o["label"] = label + chr(97 + n)
     out.sort(key=lambda o: -o["score"])
     return {"areas": out, "matches": matches, "chest_matches": M, "team_size": team_size,
-            "teams_per_match": round(per_match, 1), "game": game, "lobby": (w.get("meta") or {}).get("lobby")}
+            "teams_per_match": round(per_match, 1), "game": game,
+            "lobby": (w.get("meta") or {}).get("lobby") or config.LOBBY.get(((w.get("meta") or {}).get("game_type"), (w.get("meta") or {}).get("mode")))}
 
 
 def _area_loot(window_id, a, mask, base, poly):

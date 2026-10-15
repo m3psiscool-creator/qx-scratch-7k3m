@@ -75,6 +75,23 @@ class AnyRankTest(unittest.TestCase):
                     service._run_predict("w", bad)
 
 
+class EventTypesTest(unittest.TestCase):
+    def test_evaluation_cups_are_tracked(self):
+        from fngameanalyzer import config
+        self.assertEqual(config.TOURNAMENT_TYPES.get("WorkshopCup"), "WORKSHOP")      # Epic's Performance Evaluation cups
+
+    def test_no_map_is_ever_drawn_from_player_movement(self):
+        rec = {"image": "", "base": {"1": 5}, "base_size": 128}
+        w = {"window_id": "w", "event_id": "e", "region": "NAC", "begin": 1, "end": 2, "final": 1, "meta": {"playlist": "Playlist_X_PiperBoot", "game_type": "reload", "mode": "solo"}}
+        with (mock.patch.object(storage, "get_window", return_value=w), mock.patch.object(storage, "drop_map_get", return_value=rec, create=True),
+              mock.patch.object(storage, "drops_available", return_value={}, create=True), mock.patch.object(drops.service, "pretty", return_value="x"),
+              mock.patch.object(drops.service, "goal_of", return_value=None), mock.patch.object(drops.classify, "of", return_value="reload solo")):
+            info = drops.map_info("w")
+        self.assertNotIn("base", info["map"])
+        self.assertEqual(info["map"]["image"], "")
+        self.assertIn("No picture of this map", info["note"])
+
+
 class CalendarTest(unittest.TestCase):
     def test_text_is_escaped(self):
         self.assertEqual(service._ics_text("a,b;c\nd"), "a\\,b\\;c\\nd")

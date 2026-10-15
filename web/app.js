@@ -344,10 +344,10 @@ async function tabPredictions(w, open) {
     <div style="flex:0"><button id="go">Predict</button></div></div>
     <div class="chips" style="margin-top:10px">${presets.map(p => `<button class="chip" data-r="${p}">Top ${p.toLocaleString()}</button>`).join("")}</div>
     <div id="pred"></div></div>
-  <div class="card" id="bubblecard" style="display:none"><div class="hd"><h2>Bubble: who is in the race</h2></div><div id="bubble"></div></div>
   ${chartCard("ch", "Points needed by rank", "now, previous events of this gamemode and format (same region first), and the predicted final", { cls: "tall", table: false, zoom: true, ctrl: `<div class="seg" id="ladseg"><button data-s="log" class="${LADLOG ? "on" : ""}">Log scale</button><button data-s="lin" class="${LADLOG ? "" : "on"}">Linear</button></div><small>Click a point to calculate that rank</small>` })}
   ${chartCard("ch2", "Points needed over time", "how the cutoffs have grown during this window", { cls: "tall", table: false, zoom: true, ctrl: `<div class="seg" id="rngseg">${[[0, "Whole window"], [3, "Last 3 hours"], [1, "Last hour"], [0.5, "Last 30 min"]].map(([h, l]) => `<button data-h="${h}" class="${h === TRANGE ? "on" : ""}">${l}</button>`).join("")}</div><small>Click a legend item to hide a rank</small>` })}
-  <div class="card"><div class="hd"><h2>Thresholds</h2></div><div id="th"></div></div>`;
+  <div class="card"><div class="hd"><h2>Thresholds</h2></div><div id="th"></div></div>
+  <div class="card" id="bubblecard" style="display:none"><div class="hd"><h2>Bubble: who is in the race</h2></div><div id="bubble"></div></div>`;
   $("#go").onclick = () => { predict(); bubble(); };
   $$("[data-r]").forEach(b => b.onclick = () => { $("#x").value = b.dataset.r; predict(); bubble(); });
   $$("#ladseg button").forEach(b => b.onclick = () => { LADLOG = b.dataset.s === "log"; store.set("ladlog", LADLOG); $$("#ladseg button").forEach(x => x.classList.toggle("on", x === b)); const cv = $("#ch"); if (cv) cv.dataset.sig = ""; ladderChart(); });

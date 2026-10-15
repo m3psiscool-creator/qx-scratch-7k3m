@@ -26,6 +26,9 @@ HEX32 = re.compile(r"^[0-9a-f]{32}$")
 MAPS = {
     "SourSpawn": {"name": "Nitemare Island", "image": "/maps/nitemare-island.jpg", "mask": "nitemare-island",
                   "credit": "Map: Nitemare Island, Epic Games (overview image from the Fortnite Wiki)"},
+    # Victory Cup island: the map texture read from the installed game files (Discovered_PiperBoot), fitted to the real landings (turned 180 degrees, same scale as Nitemare)
+    "PiperBoot": {"name": "Victory Cup island", "image": "/maps/victory-island.jpg", "mask": "victory-island",
+                  "credit": "Map: Victory Cup island (codename PiperBoot), Epic Games (map texture from the game files)"},
     # the big Battle Royale island (events with no Reload codename); its light-blue shallows count as water in the outline, hence the lower bar
     "BR": {"name": "Battle Royale island", "image": "/maps/br-island.jpg", "mask": "br-island", "min_on_land": 0.85,
            "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)"},

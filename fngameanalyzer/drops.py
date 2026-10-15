@@ -26,6 +26,9 @@ HEX32 = re.compile(r"^[0-9a-f]{32}$")
 MAPS = {
     "SourSpawn": {"name": "Nitemare Island", "image": "/maps/nitemare-island.jpg", "mask": "nitemare-island",
                   "credit": "Map: Nitemare Island, Epic Games (overview image from the Fortnite Wiki)"},
+    # the big Battle Royale island (events with no Reload codename); its light-blue shallows count as water in the outline, hence the lower bar
+    "BR": {"name": "Battle Royale island", "image": "/maps/br-island.jpg", "mask": "br-island", "min_on_land": 0.85,
+           "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)"},
 }
 MIN_ON_LAND = 0.93     # a registered picture is only shown while at least this share of the real landings is on its land
 _masks = {}
@@ -66,13 +69,14 @@ def map_info(window_id):
     codename = next((t for t in ("SourSpawn", "BlastBerry", "DashBerry", "PiperBoot", "JumpBear") if t.lower() in playlist.lower()), None)
     label = "Reload map" if reload_ else "Battle Royale island"
     rec = storage.drop_map_get(window_id) if hasattr(storage, "drop_map_get") else None
-    known = MAPS.get(codename)
+    known = MAPS.get(codename) or (MAPS["BR"] if not reload_ and meta.get("game_type") == "br" else None)
     check = None
     if known:   # a known map picture wins over the background drawn from player movement, but only while the landings agree with it
         rec = {**(rec or {}), **known}
         share = picture_check(window_id, known) if known.get("mask") else None
-        check = {"on_land": None if share is None else round(share, 3), "min": MIN_ON_LAND,
-                 "status": "untested" if share is None else "ok" if share >= MIN_ON_LAND else "mismatch"}
+        need = known.get("min_on_land", MIN_ON_LAND)
+        check = {"on_land": None if share is None else round(share, 3), "min": need,
+                 "status": "untested" if share is None else "ok" if share >= need else "mismatch"}
         if check["status"] == "mismatch":   # wrong map picture: never show it
             rec = {k: v for k, v in rec.items() if k not in ("image", "name", "credit")}
             rec["image"] = ""

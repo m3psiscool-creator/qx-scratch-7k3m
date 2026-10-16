@@ -206,9 +206,8 @@ class ChestTest(unittest.TestCase):
             cells[str(int((0.2 + 0.004 * k) * n) * n + int(0.2 * n))] = 50
         for k in range(4):   # quiet spot around (0.7, 0.7): 4 chests
             cells[str(int((0.7 + 0.004 * k) * n) * n + int(0.7 * n))] = 50
-        # the stored cells are turned 90 degrees clockwise on the way out: the crowded spot (0.2, 0.2) is at x 0.8, y 0.2, the quiet one at x 0.3, y 0.7
-        xs = np.array([0.8] * 30 + [0.3] * 3, dtype=np.float32)   # 30 landings at the first spot, 3 at the second
-        a = {"game": np.ones(len(xs), dtype=np.int16), "x": xs, "y": np.array([0.2] * 30 + [0.7] * 3, dtype=np.float32), "placement": np.full(len(xs), 5, dtype=np.int16),
+        xs = np.array([0.2] * 30 + [0.7] * 3, dtype=np.float32)   # 30 landings at the first spot, 3 at the second
+        a = {"game": np.ones(len(xs), dtype=np.int16), "x": xs, "y": xs.copy(), "placement": np.full(len(xs), 5, dtype=np.int16),
              "points": np.full(len(xs), 20, dtype=np.int32), "rank": np.zeros(len(xs), dtype=np.int32), "lobby": np.full(len(xs), 20, dtype=np.int16),
              "win": np.zeros(len(xs), dtype=np.int8)}
         def kv(k):
@@ -217,7 +216,7 @@ class ChestTest(unittest.TestCase):
               mock.patch.object(drops, "_arrays", return_value=a)):
             out = drops.areas("w", min_chests=1)
         first, second = out["areas"][0], out["areas"][1]
-        self.assertLess(first["x"], 0.5)                          # the quiet spot comes first
+        self.assertGreater(first["x"], 0.5)                       # the quiet spot comes first
         self.assertLess(first["players_per_game"], second["players_per_game"])
         self.assertGreater(first["chests_per_player"], second["chests_per_player"])
         self.assertAlmostEqual(out["teams_per_match"], 3.3, places=1)
@@ -282,8 +281,19 @@ class MapFitTest(unittest.TestCase):
                 ys.append((v - 0.5) * fit["L"] + fit["cy"])
         got = drops._auto_fit("TigerRanch", known, {"x": np.array(xs, dtype=np.float32), "y": np.array(ys, dtype=np.float32)})
         self.assertIsNotNone(got)
-        self.assertEqual(got["k"], 3)
-        self.assertLess(abs(got["cx"] - 0.48) + abs(got["cy"] - 0.52), 0.04)
+        self.assertEqual(got["rot"], 3)                      # found upright after three quarter turns clockwise of the stored frame
+        self.assertEqual(got["k"], 0)
+        cx, cy = drops._turn(0.48, 0.52, 3)                  # and its centre moves with the turn
+        self.assertLess(abs(got["cx"] - cx) + abs(got["cy"] - cy), 0.04)
+
+    def test_turns_are_quarter_turns_clockwise(self):
+        self.assertEqual(drops._turn(0.2, 0.1, 1), (0.9, 0.2))     # top-left area goes to top-right
+        self.assertEqual(drops._turn(0.2, 0.1, 2), (0.8, 0.9))
+        x, y = 0.3, 0.7
+        for n in range(4):
+            a, b = drops._turn(x, y, 1)
+            self.assertAlmostEqual(drops._turn(x, y, n + 1)[0], drops._turn(*drops._turn(x, y, n), 1)[0])
+        self.assertEqual(drops._turn(x, y, 4), (x, y))
 
     def test_too_few_landings_give_no_fit(self):
         self.assertIsNone(drops._auto_fit("TigerRanch", {"mask": "raw-tigerranch"}, {"x": np.zeros(50, dtype=np.float32), "y": np.zeros(50, dtype=np.float32)}))

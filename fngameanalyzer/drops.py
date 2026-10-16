@@ -24,20 +24,20 @@ HEX32 = re.compile(r"^[0-9a-f]{32}$")
 # landings (north-up is NOT assumed: it is the picture rotated/scaled to match the game's own coordinates, see
 # docs/dropspots-data.md "Map pictures"). Picture: Epic Games' overview image of the map, via the Fortnite Wiki.
 MAPS = {
-    "SourSpawn": {"name": "Nitemare Island", "image": "/maps/nitemare-island.jpg", "mask": "nitemare-island",
-                  "credit": "Map: Nitemare Island, Epic Games (overview image from the Fortnite Wiki)"},
-    # Victory Cup island: the map texture read from the installed game files (Discovered_PiperBoot), fitted to the real landings (turned 180 degrees, same scale as Nitemare)
-    "PiperBoot": {"name": "Surf City V1", "image": "/maps/victory-island.jpg", "mask": "victory-island",
-                  "credit": "Map: Surf City V1 (codename PiperBoot), Epic Games (map texture from the game files)"},
     # the big Battle Royale island (events with no Reload codename); its light-blue shallows count as water in the outline, hence the lower bar
-    "BR": {"name": "Battle Royale island", "image": "/maps/br-island.jpg", "mask": "br-island", "min_on_land": 0.85,
+    "BR": {"name": "Battle Royale island", "image": "/maps/br-island.jpg", "mask": "br-island", "min_on_land": 0.85, "rot": 1,
            "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)"},
 }
 # Maps read straight from the game files (the minimap texture Epic ships, see tools/mapfit/mapdump): the raw picture is sent as it is
 # and the page turns it into the 0-1 frame with "fit" = {k: quarter turns counter-clockwise, L: width of the picture in frames,
 # cx, cy: centre of the picture in the frame}. A map with a fit that was measured is listed here; a map without one is fitted
 # from its real landings once enough exist (_auto_fit) and shown only when that fit is clear.
-_RAW = {"BlastBerry": ("raw-blastberry", "Venture", {"k": 3, "L": 1.55, "cx": 0.565, "cy": 0.515}, 0.86),
+# Fits are measured twice: on the landings (land / sea) and then refined on the chest sites, which sit on buildings (tools/mapfit/align_chests.py):
+# the width comes out about 1.58-1.60 frames for every Reload map. rot = quarter turns clockwise of the stored frame (see _turn).
+_ROT = {"SourSpawn": 1, "PiperBoot": 2}
+_RAW = {"BlastBerry": ("raw-blastberry", "Venture", {"k": 0, "L": 1.59, "cx": 0.507, "cy": 0.423}, 0.86),
+        "SourSpawn": ("raw-nitemare", "Nitemare Island", {"k": 0, "L": 1.58, "cx": 0.462, "cy": 0.506}, 0.9),
+        "PiperBoot": ("raw-surfcity", "Surf City V1", {"k": 0, "L": 1.61, "cx": 0.500, "cy": 0.510}, 0.9),
         "DashBerry": ("raw-dashberry", "DashBerry", None, None),
         "ForbiddenBlastBerry": ("raw-forbiddenblastberry", "Forbidden BlastBerry", None, None),
         "MatchMist": ("raw-matchmist", "MatchMist", None, None),
@@ -49,15 +49,42 @@ for _c, (_f, _n, _fit, _min) in _RAW.items():
     MAPS[_c] = {"name": _n, "raw": "/maps/%s.jpg" % _f, "mask": _f, "credit": "Map: %s, Epic Games (map texture from the game files)" % _n}
     if _fit:
         MAPS[_c]["fit"] = _fit
+        MAPS[_c]["rot"] = _ROT.get(_c, 0)
     if _min:
         MAPS[_c]["min_on_land"] = _min
 CODENAMES = ("ForbiddenBlastBerry", "SourSpawn", "BlastBerry", "DashBerry", "PiperBoot", "JumpBear", "MatchMist", "PunchBerry", "RopeSmile",
              "TigerRanch", "TimberStake")
-# The loaders store landings in the game's own frame (u = east, v = south). Everything the site shows is that frame turned 90 degrees
-# clockwise, so the maps read like the in-game map and fortnite.gg (north up): x' = 1 - v, y' = u. Done once in _arrays and _sites; the map
-# pictures (nitemare, victory, br) and their masks were turned the same way, raw textures get it through their fit.
-FRAME_NOTE = "stored frame turned 90 degrees clockwise"
-MIN_ON_LAND = 0.93     # a registered picture is only shown while at least this share of the real landings is on its land
+# The loaders store landings in the game's own frame (u = east, v = south). Each map is shown the way the game draws it (north up, like the
+# in-game map and fortnite.gg), which is that frame turned a whole number of quarter turns clockwise: MAPS[code]["rot"] for the maps we turned by
+# hand, and for a raw texture the turn the landings fit found (kv maprot:<code>). _turn applies it to points; _arrays and _sites use it.
+MIN_ON_LAND = 0.93
+
+
+def _turn(x, y, n):
+    """Points of the stored frame turned n quarter turns clockwise."""
+    n %= 4
+    if n == 0:
+        return x, y
+    if n == 1:
+        return 1 - y, x
+    if n == 2:
+        return 1 - x, 1 - y
+    return y, 1 - x
+
+
+def _known_of(w):
+    code = _code(w)
+    return code, (MAPS.get(code) or (MAPS["BR"] if (w.get("meta") or {}).get("game_type") == "br" else None))
+
+
+def _rot_of(w):
+    """Quarter turns clockwise that put this tournament's map the way the game draws it."""
+    code, known = _known_of(w)
+    if not known:
+        return 0
+    if "rot" in known:
+        return known["rot"]
+    return int(storage.kv_get("maprot:" + code) or 0)     # a registered picture is only shown while at least this share of the real landings is on its land
 _masks = {}
 
 
@@ -102,7 +129,7 @@ def _loglik(m, fit, x, y):
 def _auto_fit(code, known, a):
     """Find how a raw map picture sits in the frame from real landings: 4 quarter turns x centre, the width fixed at the
     1.55 every Reload map has. Accepted only when one turn is clearly better than the others and the landings lie on land."""
-    x, y = a["x"].astype(float), a["y"].astype(float)
+    x, y = a.get("x0", a["x"]).astype(float), a.get("y0", a["y"]).astype(float)   # the stored frame: the turn that puts the picture upright is what we find
     if len(x) < 300:
         return None
     if len(x) > 6000:
@@ -134,7 +161,9 @@ def _auto_fit(code, known, a):
     share = _on_land(m, top[1], x, y)
     if gap < 0.05 or share < known.get("min_on_land", MIN_ON_LAND) - 0.03:
         return None
-    return {**top[1], "on_land": round(share, 3), "gap": round(gap, 3), "n": int(len(x))}
+    g = top[1]
+    cx, cy = _turn(g["cx"], g["cy"], g["k"])     # shown turned k quarter turns clockwise: the picture is then upright (k = 0) and its centre moves with it
+    return {"k": 0, "L": g["L"], "cx": round(float(cx), 3), "cy": round(float(cy), 3), "rot": int(g["k"]), "on_land": round(share, 3), "gap": round(gap, 3), "n": int(len(x))}
 
 
 def _fit_of(code, known, window_id):
@@ -151,6 +180,8 @@ def _fit_of(code, known, window_id):
     f = _auto_fit(code, known, a)
     if f:
         storage.kv_set("mapfit:" + code, f)
+        storage.kv_set("maprot:" + code, f["rot"])
+        _cache.clear()                           # the landings are turned differently from now on
     return f
 
 
@@ -164,6 +195,7 @@ def picture_check(window_id, known, code=None):
         fit = _fit_of(code, known, window_id)
         if not fit:
             return None
+        a = _arrays(window_id)
         return _on_land(_oriented_mask(known["mask"], fit["k"]), fit, a["x"].astype(float), a["y"].astype(float))
     m = _land_mask(known["mask"])
     n = m.shape[0]
@@ -209,8 +241,9 @@ def map_info(window_id):
             rec["name"] = ""
         rec.pop("mask", None)
     rec = dict(rec or {})
-    if rec.get("pois"):   # stored in the loader's frame: same clockwise turn as everything else
-        rec["pois"] = [{**p, "x": round(1 - float(p["y"]), 4), "y": round(float(p["x"]), 4)} for p in rec["pois"]]
+    if rec.get("pois"):   # stored in the loader's frame: same turn as everything else
+        nrot = _rot_of(w)
+        rec["pois"] = [{**p, "x": round(float(_turn(float(p["x"]), float(p["y"]), nrot)[0]), 4), "y": round(float(_turn(float(p["x"]), float(p["y"]), nrot)[1]), 4)} for p in rec["pois"]]
     rec.pop("base", None)      # never a map drawn from player movement: only a real picture of the map, or none
     rec.pop("base_size", None)
     if not rec.get("image"):
@@ -238,8 +271,13 @@ def _arrays(window_id):
     rows = storage.drops_rows(window_id)
     if not rows:
         raise ValueError("No landing data has been loaded for this tournament yet.")
+    row = next((r for r in storage.window_list() if r["window_id"] == window_id), None)
+    x0 = np.array([r[2] for r in rows], dtype=np.float32)
+    y0 = np.array([r[3] for r in rows], dtype=np.float32)
+    nrot = _rot_of(row) if row else 0
+    xt, yt = _turn(x0, y0, nrot)
     a = {"game": np.array([r[0] for r in rows], dtype=np.int16), "team": [r[1] for r in rows],
-         "x": 1 - np.array([r[3] for r in rows], dtype=np.float32), "y": np.array([r[2] for r in rows], dtype=np.float32),   # frame turned 90 degrees clockwise (see FRAME_NOTE)
+         "x": xt.astype(np.float32), "y": yt.astype(np.float32), "x0": x0, "y0": y0, "rot": nrot,
          "poi": [r[4] or "" for r in rows], "placement": np.array([r[5] or 0 for r in rows], dtype=np.int16),
          "points": np.array([r[6] or 0 for r in rows], dtype=np.int32), "rank": np.array([r[7] or 0 for r in rows], dtype=np.int32),
          "win": np.array([r[8] or 0 for r in rows], dtype=np.int8)}
@@ -491,7 +529,7 @@ def _sites(w, frac=None, nms=1, smooth=0):
     C = np.zeros((n, n), dtype=np.float32)
     for k, v in atlas["cells"].items():
         C[int(k) // n, int(k) % n] = v
-    C = np.rot90(C, -1).copy()                    # same clockwise turn as the landings
+    C = np.rot90(C, -_rot_of(w)).copy()           # same turn as the landings
     k = 2 * smooth + 1
     P = np.pad(C, smooth)
     S = sum(P[dy:dy + n, dx:dx + n] for dy in range(k) for dx in range(k))     # a chest's openings spread over neighbouring cells

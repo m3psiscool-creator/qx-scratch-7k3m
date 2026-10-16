@@ -199,7 +199,7 @@ def accuracy():
         if not w or prog is None:
             continue
         act = cutoffs(w, [rank]).get(rank)
-        if act is None:
+        if not act:   # None or 0 points: no relative error to measure
             continue
         b = min(buckets, key=lambda x: abs(x - prog))
         if abs(b - prog) > 0.07:

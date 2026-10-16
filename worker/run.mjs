@@ -30,7 +30,9 @@ const api = async (path, init = {}) => {
 
 // world coordinates -> 0..1 across the map picture (north up: +X is north, +Y is east)
 const toUnit = (x, y) => [(y - minY) / (maxY - minY), (maxX - x) / (maxX - minX)];
-const inside = ([u, v]) => u >= 0 && u <= 1 && v >= 0 && v <= 1;
+const WIDE = [-0.7, 1.7];   // the islands are bigger than the 0-1 square: keep everything, the site crops to the map
+const in01 = ([u, v]) => u >= 0 && u <= 1 && v >= 0 && v <= 1;
+const inside = ([u, v]) => u >= WIDE[0] && u <= WIDE[1] && v >= WIDE[0] && v <= WIDE[1];
 
 const listing = await api(`/api/admin/matches?window=${encodeURIComponent(windowId)}`);
 if (process.env.MAP_BOUNDS) [minX, maxX, minY, maxY] = process.env.MAP_BOUNDS.split(',').map(Number);
@@ -79,7 +81,7 @@ for (let i = 0; i < files.length; i += 20) {
     const { s } = part.find((p) => res.file === `${p.s.session}.replay`) || {};
     if (!s || res.error) { console.warn(`parse error ${res.file}: ${res.error}`); continue; }
     // containers: every chest the players searched, at the searching player's position (stored frame u, v)
-    if (!cdone.has(s.session)) ctnBatch.push({ session: s.session, items: (res.containers || []).map(([n, x, y]) => [n, ...toUnit(x, y)]).filter(([, u, v]) => u >= 0 && u <= 1 && v >= 0 && v <= 1) });
+    if (!cdone.has(s.session)) ctnBatch.push({ session: s.session, items: (res.containers || []).map(([n, x, y]) => [n, ...toUnit(x, y)]).filter(([, u, v]) => inside([u, v])) });
     if (done.has(s.session)) continue;   // landings of this match are already loaded
     finished.push(s.session);
     // every team in the match, not only the ones on the leaderboard (the leaderboard stops at 10,000 teams)
@@ -103,7 +105,7 @@ for (let i = 0; i < files.length; i += 20) {
     }
     for (const [x, y] of res.trail || []) {
       const u = toUnit(x, y);
-      if (!inside(u)) continue;
+      if (!in01(u)) continue;
       const k = Math.min(BASE - 1, Math.floor(u[1] * BASE)) * BASE + Math.min(BASE - 1, Math.floor(u[0] * BASE));
       cells.set(k, (cells.get(k) || 0) + 1);
     }
@@ -111,7 +113,7 @@ for (let i = 0; i < files.length; i += 20) {
     const seen = new Set();
     for (const [x, y] of res.chests || []) {
       const u = toUnit(x, y);
-      if (!inside(u)) continue;
+      if (!in01(u)) continue;
       chestBursts++;
       seen.add(Math.min(CHEST - 1, Math.floor(u[1] * CHEST)) * CHEST + Math.min(CHEST - 1, Math.floor(u[0] * CHEST)));
     }

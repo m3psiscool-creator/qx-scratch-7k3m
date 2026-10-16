@@ -224,7 +224,7 @@ class ChestTest(unittest.TestCase):
 
 class PictureCheckTest(unittest.TestCase):
     def _arrays(self, xs, ys):
-        return {"x": np.array(xs, dtype=np.float32), "y": np.array(ys, dtype=np.float32)}
+        return {"x": np.array(xs, dtype=np.float32), "y": np.array(ys, dtype=np.float32), "view": (0.0, 0.0, 1.0)}
 
     def test_landings_on_land_pass_and_landings_in_the_sea_fail(self):
         known = drops.MAPS["SourSpawn"]
@@ -323,12 +323,12 @@ class ContainerTest(unittest.TestCase):
                 drops.add_containers("w", [{"session": "s%d" % i, "items": [["Tiered_Chest_Athena_C_UAID_a", u, v]]}])
             again = drops.add_containers("w", [{"session": "s0", "items": [["Tiered_Chest_Athena_C_UAID_a", 0.3, 0.4]]}])
         self.assertEqual(again["added"], 0)                      # same match twice: ignored
-        atlas = self.kv["ctn:SourSpawn"]
+        atlas = self.kv["ctn2:SourSpawn"]
         self.assertEqual(atlas["M"], 3)
         self.assertEqual(atlas["items"]["Tiered_Chest_Athena_C_UAID_a"]["n"], 3)
 
     def test_sites_are_turned_like_the_map_and_rates_are_shares_of_matches(self):
-        self.kv["ctn:SourSpawn"] = {"M": 40, "done": [], "items": {"Tiered_Chest_Athena_C_UAID_a": {"n": 10, "p": [[0.2, 0.3]] * 5}, "Tiered_Ammo_Athena_C_UAID_b": {"n": 40, "p": [[0.5, 0.5]]}}}
+        self.kv["ctn2:SourSpawn"] = {"M": 40, "done": [], "items": {"Tiered_Chest_Athena_C_UAID_a": {"n": 10, "p": [[0.2, 0.3]] * 5}, "Tiered_Ammo_Athena_C_UAID_b": {"n": 40, "p": [[0.5, 0.5]]}}}
         a, b, c = self._patches()
         with a, b, c:
             chests, M = drops._container_sites(self.W, drops.CHEST_KINDS)
@@ -337,12 +337,12 @@ class ContainerTest(unittest.TestCase):
         self.assertEqual(len(chests), 1)                          # ammo boxes are not chests
         self.assertEqual(len(allk), 2)
         x, y = drops._turn(0.2, 0.3, drops.MAPS["SourSpawn"]["rot"])
-        self.assertAlmostEqual(chests[0]["x"], x, places=3)
+        self.assertAlmostEqual(chests[0]["x"], x, places=3)      # (the view square is applied one level up, in _sites)
         self.assertAlmostEqual(chests[0]["y"], y, places=3)
         self.assertAlmostEqual(chests[0]["rate"], 0.25)           # searched in 10 of 40 matches
 
     def test_too_few_matches_fall_back_to_the_old_method(self):
-        self.kv["ctn:SourSpawn"] = {"M": 5, "done": [], "items": {"Tiered_Chest_Athena_C_UAID_a": {"n": 5, "p": [[0.2, 0.3]]}}}
+        self.kv["ctn2:SourSpawn"] = {"M": 5, "done": [], "items": {"Tiered_Chest_Athena_C_UAID_a": {"n": 5, "p": [[0.2, 0.3]]}}}
         a, b, c = self._patches()
         with a, b, c:
             self.assertIsNone(drops._container_sites(self.W, drops.CHEST_KINDS)[0])
@@ -365,5 +365,7 @@ class TracksTest(unittest.TestCase):
         self.assertEqual(g["teams"][0]["rank"], 7)
         rot = drops.MAPS["SourSpawn"]["rot"]
         x, y = drops._turn(0.2, 0.3, rot)
+        vw = drops._view("SourSpawn")
+        x, y = (x - vw[0]) / vw[2], (y - vw[1]) / vw[2]
         self.assertEqual(g["tracks"][0]["p"][0][1:3], [int(round(x * 10000)), int(round(y * 10000))])
         self.assertEqual(len(g["storm"]), 1)

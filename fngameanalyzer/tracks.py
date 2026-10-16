@@ -79,7 +79,11 @@ def game(session):
     doc = json.loads(zlib.decompress(blob).decode("utf8"))
     row = next((r for r in storage.window_list() if r["window_id"] == wid), None)
     nrot = drops._rot_of(row) if row else 0
-    turn = lambda u, v: drops._turn(u / SCALE, v / SCALE, nrot)
+    vw = drops._vwin(row)
+
+    def turn(u, v):
+        x, y = drops._turn(u / SCALE, v / SCALE, nrot)
+        return (x - vw[0]) / vw[2], (y - vw[1]) / vw[2]
     def ints(u, v):
         x, y = turn(u, v)
         return int(round(x * SCALE)), int(round(y * SCALE))

@@ -86,6 +86,42 @@ def _rot_of(w):
         return known["rot"]
     return int(storage.kv_get("maprot:" + code) or 0)     # a registered picture is only shown while at least this share of the real landings is on its land
 _masks = {}
+WIDE = (-0.7, 1.7)     # stored coordinates may lie outside the old 0-1 frame: the islands are bigger than the frame the loaders used
+
+
+def _view(code):
+    """(x0, y0, s): the square of the turned frame that holds ALL the land of a map with a measured picture fit (plus a small margin).
+    The site works in this square: 0-1 is the whole island, so nothing of the map is cut off and the grid A1-J10 covers all of it."""
+    known = MAPS.get(code)
+    if not known or not known.get("fit") or not known.get("mask"):
+        return (0.0, 0.0, 1.0)
+    if code not in _views:
+        m = _land_mask(known["mask"])
+        n = m.shape[0]
+        cols, rows = np.cumsum(m.sum(axis=0)), np.cumsum(m.sum(axis=1))
+        tot = cols[-1]
+        lo = lambda c: int(np.searchsorted(c, tot * 0.0005))
+        hi = lambda c: int(np.searchsorted(c, tot * 0.9995))
+        f = known["fit"]
+        fx = lambda u: f["cx"] + (u / n - 0.5) * f["L"]
+        fy = lambda v: f["cy"] + (v / n - 0.5) * f["L"]
+        x0, x1, y0, y1 = fx(lo(cols)), fx(hi(cols) + 1), fy(lo(rows)), fy(hi(rows) + 1)
+        side = min(f["L"], max(x1 - x0, y1 - y0) * 1.06 + 0.01)
+        _views[code] = (round((x0 + x1) / 2 - side / 2, 4), round((y0 + y1) / 2 - side / 2, 4), round(side, 4))
+    return _views[code]
+
+
+_views = {}
+
+
+def _vwin(w):
+    code, known = _known_of(w) if w else (None, None)
+    return _view(code) if known else (0.0, 0.0, 1.0)
+
+
+def _fit_view(fit, v):
+    """A picture fit (turned frame) expressed in the view square."""
+    return {**fit, "L": round(fit["L"] / v[2], 4), "cx": round((fit["cx"] - v[0]) / v[2], 4), "cy": round((fit["cy"] - v[1]) / v[2], 4)}
 
 
 def _land_mask(name):
@@ -196,7 +232,7 @@ def picture_check(window_id, known, code=None):
         if not fit:
             return None
         a = _arrays(window_id)
-        return _on_land(_oriented_mask(known["mask"], fit["k"]), fit, a["x"].astype(float), a["y"].astype(float))
+        return _on_land(_oriented_mask(known["mask"], fit["k"]), _fit_view(fit, a["view"]), a["x"].astype(float), a["y"].astype(float))
     m = _land_mask(known["mask"])
     n = m.shape[0]
     ix = np.clip((a["x"] * n).astype(int), 0, n - 1)
@@ -229,7 +265,7 @@ def map_info(window_id):
             fit = _fit_of(codename, known, window_id) if check["status"] == "ok" else None
             if fit:
                 rec["image"] = known["raw"]
-                rec["fit"] = {k: fit[k] for k in ("k", "L", "cx", "cy")}
+                rec["fit"] = _fit_view({k: fit[k] for k in ("k", "L", "cx", "cy")}, _view(codename))
             else:
                 rec["image"] = ""
                 rec["name"] = ""
@@ -242,8 +278,8 @@ def map_info(window_id):
         rec.pop("mask", None)
     rec = dict(rec or {})
     if rec.get("pois"):   # stored in the loader's frame: same turn as everything else
-        nrot = _rot_of(w)
-        rec["pois"] = [{**p, "x": round(float(_turn(float(p["x"]), float(p["y"]), nrot)[0]), 4), "y": round(float(_turn(float(p["x"]), float(p["y"]), nrot)[1]), 4)} for p in rec["pois"]]
+        nrot, vw = _rot_of(w), _view(codename)
+        rec["pois"] = [{**p, "x": round((float(_turn(float(p["x"]), float(p["y"]), nrot)[0]) - vw[0]) / vw[2], 4), "y": round((float(_turn(float(p["x"]), float(p["y"]), nrot)[1]) - vw[1]) / vw[2], 4)} for p in rec["pois"]]
     rec.pop("base", None)      # never a map drawn from player movement: only a real picture of the map, or none
     rec.pop("base_size", None)
     if not rec.get("image"):
@@ -276,7 +312,15 @@ def _arrays(window_id):
     y0 = np.array([r[3] for r in rows], dtype=np.float32)
     nrot = _rot_of(row) if row else 0
     xt, yt = _turn(x0, y0, nrot)
-    a = {"game": np.array([r[0] for r in rows], dtype=np.int16), "team": [r[1] for r in rows],
+    v = _vwin(row)
+    xt, yt = (xt - v[0]) / v[2], (yt - v[1]) / v[2]
+    keep = (xt >= 0) & (xt <= 1) & (yt >= 0) & (yt <= 1)         # the sea beyond the picture is not part of the map
+    if not keep.all():
+        rows = [r for r, k in zip(rows, keep) if k]
+        x0, y0, xt, yt = x0[keep], y0[keep], xt[keep], yt[keep]
+        if not rows:
+            raise ValueError("No landing data has been loaded for this tournament yet.")
+    a = {"view": v, "game": np.array([r[0] for r in rows], dtype=np.int16), "team": [r[1] for r in rows],
          "x": xt.astype(np.float32), "y": yt.astype(np.float32), "x0": x0, "y0": y0, "rot": nrot,
          "poi": [r[4] or "" for r in rows], "placement": np.array([r[5] or 0 for r in rows], dtype=np.int16),
          "points": np.array([r[6] or 0 for r in rows], dtype=np.int32), "rank": np.array([r[7] or 0 for r in rows], dtype=np.int32),
@@ -439,7 +483,7 @@ def ingest(body):
         except (KeyError, TypeError, ValueError):
             skipped += 1
             continue
-        if not (math.isfinite(x) and math.isfinite(y)) or not (0 <= x <= 1 and 0 <= y <= 1):
+        if not (math.isfinite(x) and math.isfinite(y)) or not (WIDE[0] <= x <= WIDE[1] and WIDE[0] <= y <= WIDE[1]):
             skipped += 1
             continue
         team = str(d.get("team") or "")[:140]
@@ -539,7 +583,7 @@ def _map_key(w):
 
 
 def _ctn_key(w):
-    return "ctn:" + _map_key(w)
+    return "ctn2:" + _map_key(w)      # v2: positions outside the old 0-1 frame are kept (v1 "ctn:" lost them)
 
 
 def _kind(name):
@@ -581,7 +625,7 @@ def add_containers(window_id, batch):
         atlas["M"] = int(atlas.get("M") or 0) + 1
         added += 1
         for name, u, v in b.get("items") or []:
-            if _kind(str(name)) is None or not (0 <= float(u) <= 1 and 0 <= float(v) <= 1):
+            if _kind(str(name)) is None or not (WIDE[0] <= float(u) <= WIDE[1] and WIDE[0] <= float(v) <= WIDE[1]):
                 continue
             it = atlas["items"].setdefault(str(name), {"n": 0, "p": []})
             it["n"] += 1
@@ -595,14 +639,18 @@ def add_containers(window_id, batch):
 
 
 def _container_sites(w, kinds):
-    key = _ctn_key(w)
-    hit = _atlas_cache.get(key)
-    if hit and time.time() - hit[0] < CACHE_TTL:
-        atlas = hit[1]
-    else:
+    def load(key):
+        hit = _atlas_cache.get(key)
+        if hit and time.time() - hit[0] < CACHE_TTL:
+            return hit[1]
         atlas = storage.kv_get(key) or {}
         _atlas_cache[key] = (time.time(), atlas)
+        return atlas
+    atlas = load(_ctn_key(w))
     M = int(atlas.get("M") or 0)
+    if M < MIN_MATCHES:      # the full-frame counts are still being rebuilt: use the older ones meanwhile
+        atlas = load("ctn:" + _map_key(w))
+        M = int(atlas.get("M") or 0)
     if M < MIN_MATCHES:
         return None, M
     nrot = _rot_of(w)
@@ -619,6 +667,15 @@ def _container_sites(w, kinds):
 
 
 def _sites(w, frac=None, nms=1, smooth=0, kinds=CHEST_KINDS):
+    got, M = _sites_turned(w, frac, nms, smooth, kinds)
+    v = _vwin(w)
+    if v != (0.0, 0.0, 1.0):
+        got = [{**c, "x": round((c["x"] - v[0]) / v[2], 4), "y": round((c["y"] - v[1]) / v[2], 4)} for c in got]
+        got = [c for c in got if -0.01 <= c["x"] <= 1.01 and -0.01 <= c["y"] <= 1.01]
+    return got, M
+
+
+def _sites_turned(w, frac=None, nms=1, smooth=0, kinds=CHEST_KINDS):
     """Chest sites of the map this tournament was played on: [{x, y, rate, chests}] with x, y in 0-1 map units. Real container positions
     (every placed chest, read from replays) when enough matches were processed, else peaks of the loot-burst map."""
     got, M = _container_sites(w, kinds)

@@ -27,8 +27,8 @@ MAPS = {
     "SourSpawn": {"name": "Nitemare Island", "image": "/maps/nitemare-island.jpg", "mask": "nitemare-island",
                   "credit": "Map: Nitemare Island, Epic Games (overview image from the Fortnite Wiki)"},
     # Victory Cup island: the map texture read from the installed game files (Discovered_PiperBoot), fitted to the real landings (turned 180 degrees, same scale as Nitemare)
-    "PiperBoot": {"name": "Victory Cup island", "image": "/maps/victory-island.jpg", "mask": "victory-island",
-                  "credit": "Map: Victory Cup island (codename PiperBoot), Epic Games (map texture from the game files)"},
+    "PiperBoot": {"name": "Surf City V1", "image": "/maps/victory-island.jpg", "mask": "victory-island",
+                  "credit": "Map: Surf City V1 (codename PiperBoot), Epic Games (map texture from the game files)"},
     # the big Battle Royale island (events with no Reload codename); its light-blue shallows count as water in the outline, hence the lower bar
     "BR": {"name": "Battle Royale island", "image": "/maps/br-island.jpg", "mask": "br-island", "min_on_land": 0.85,
            "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)"},
@@ -37,7 +37,7 @@ MAPS = {
 # and the page turns it into the 0-1 frame with "fit" = {k: quarter turns counter-clockwise, L: width of the picture in frames,
 # cx, cy: centre of the picture in the frame}. A map with a fit that was measured is listed here; a map without one is fitted
 # from its real landings once enough exist (_auto_fit) and shown only when that fit is clear.
-_RAW = {"BlastBerry": ("raw-blastberry", "BlastBerry", {"k": 0, "L": 1.55, "cx": 0.515, "cy": 0.435}, 0.86),
+_RAW = {"BlastBerry": ("raw-blastberry", "Venture", {"k": 3, "L": 1.55, "cx": 0.565, "cy": 0.515}, 0.86),
         "DashBerry": ("raw-dashberry", "DashBerry", None, None),
         "ForbiddenBlastBerry": ("raw-forbiddenblastberry", "Forbidden BlastBerry", None, None),
         "MatchMist": ("raw-matchmist", "MatchMist", None, None),
@@ -53,6 +53,10 @@ for _c, (_f, _n, _fit, _min) in _RAW.items():
         MAPS[_c]["min_on_land"] = _min
 CODENAMES = ("ForbiddenBlastBerry", "SourSpawn", "BlastBerry", "DashBerry", "PiperBoot", "JumpBear", "MatchMist", "PunchBerry", "RopeSmile",
              "TigerRanch", "TimberStake")
+# The loaders store landings in the game's own frame (u = east, v = south). Everything the site shows is that frame turned 90 degrees
+# clockwise, so the maps read like the in-game map and fortnite.gg (north up): x' = 1 - v, y' = u. Done once in _arrays and _sites; the map
+# pictures (nitemare, victory, br) and their masks were turned the same way, raw textures get it through their fit.
+FRAME_NOTE = "stored frame turned 90 degrees clockwise"
 MIN_ON_LAND = 0.93     # a registered picture is only shown while at least this share of the real landings is on its land
 _masks = {}
 
@@ -205,6 +209,8 @@ def map_info(window_id):
             rec["name"] = ""
         rec.pop("mask", None)
     rec = dict(rec or {})
+    if rec.get("pois"):   # stored in the loader's frame: same clockwise turn as everything else
+        rec["pois"] = [{**p, "x": round(1 - float(p["y"]), 4), "y": round(float(p["x"]), 4)} for p in rec["pois"]]
     rec.pop("base", None)      # never a map drawn from player movement: only a real picture of the map, or none
     rec.pop("base_size", None)
     if not rec.get("image"):
@@ -233,7 +239,7 @@ def _arrays(window_id):
     if not rows:
         raise ValueError("No landing data has been loaded for this tournament yet.")
     a = {"game": np.array([r[0] for r in rows], dtype=np.int16), "team": [r[1] for r in rows],
-         "x": np.array([r[2] for r in rows], dtype=np.float32), "y": np.array([r[3] for r in rows], dtype=np.float32),
+         "x": 1 - np.array([r[3] for r in rows], dtype=np.float32), "y": np.array([r[2] for r in rows], dtype=np.float32),   # frame turned 90 degrees clockwise (see FRAME_NOTE)
          "poi": [r[4] or "" for r in rows], "placement": np.array([r[5] or 0 for r in rows], dtype=np.int16),
          "points": np.array([r[6] or 0 for r in rows], dtype=np.int32), "rank": np.array([r[7] or 0 for r in rows], dtype=np.int32),
          "win": np.array([r[8] or 0 for r in rows], dtype=np.int8)}
@@ -485,6 +491,7 @@ def _sites(w, frac=None, nms=1, smooth=0):
     C = np.zeros((n, n), dtype=np.float32)
     for k, v in atlas["cells"].items():
         C[int(k) // n, int(k) % n] = v
+    C = np.rot90(C, -1).copy()                    # same clockwise turn as the landings
     k = 2 * smooth + 1
     P = np.pad(C, smooth)
     S = sum(P[dy:dy + n, dx:dx + n] for dy in range(k) for dx in range(k))     # a chest's openings spread over neighbouring cells
@@ -509,7 +516,36 @@ def _sites(w, frac=None, nms=1, smooth=0):
         r = float(S[y, x]) / M
         k = max(1, int(round(r))) if r > 1.4 else 1   # more than one opening per match at one spot: two chests close together
         out.append({"x": round((x + 0.5) / n, 4), "y": round((y + 0.5) / n, 4), "rate": round(min(1.0, max(r, float(R3[y, x]) / M) / k), 3), "chests": k})
-    return out, M
+    return _on_land_only(w, out), M
+
+
+def _on_land_only(w, sites):
+    """A chest is never in the sea: drop the sites that fall in open water of the map's own land outline (a few metres of shore are allowed)."""
+    try:
+        code = _code(w)
+        known = MAPS.get(code) or (MAPS["BR"] if (w.get("meta") or {}).get("game_type") == "br" else None)
+        if not known or not known.get("mask") or not sites:
+            return sites
+        m = _land_mask(known["mask"])
+        fit = {"cx": 0.5, "cy": 0.5, "L": 1.0}
+        if known.get("raw"):
+            fit = known.get("fit") or storage.kv_get("mapfit:" + code)
+            if not fit:
+                return sites
+            m = _oriented_mask(known["mask"], fit["k"])
+        grow = 3 if known is MAPS["BR"] else 2        # the BR outline treats shallows as water: allow more shore there
+        n = m.shape[0]
+        P = np.pad(m, grow)
+        near = np.zeros_like(m)
+        for dy in range(2 * grow + 1):
+            for dx in range(2 * grow + 1):
+                near |= P[dy:dy + n, dx:dx + n]
+        x = np.array([c["x"] for c in sites], dtype=np.float32)
+        y = np.array([c["y"] for c in sites], dtype=np.float32)
+        keep = _hits(near, fit, x, y)
+        return [c for c, k in zip(sites, keep) if k]
+    except Exception:
+        return sites
 
 
 def loot(window_id, frac=None, nms=1, smooth=0):

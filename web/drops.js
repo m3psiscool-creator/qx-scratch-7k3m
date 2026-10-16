@@ -144,7 +144,7 @@ function draw() {
   if (DR.layers.chests && DR.loot && DR.loot.sites) DR.loot.sites.forEach(c => {
     const [sx, sy] = toPx(c.x, c.y); if (sx < -10 || sy < -10 || sx > S + 10 || sy > S + 10) return;
     const t = clamp(c.rate, 0, 1), col = `rgb(${Math.round(70 + 185 * t)},${Math.round(220 - 150 * t)},${Math.round(110 - 40 * t)})`;   // green = rarely looted, red = looted almost every game
-    x.beginPath(); x.arc(sx, sy, Math.min(7, 2.4 + 1.2 * Math.sqrt(DR.z) + (c.chests > 1 ? 1.5 : 0)), 0, 7); x.fillStyle = col; x.fill(); x.lineWidth = 1.2; x.strokeStyle = "rgba(0,0,0,.85)"; x.stroke();
+    drawChest(x, sx, sy, Math.min(9, 3 + 1.5 * Math.sqrt(DR.z)), col);
   });
   if (DR.mark) { const [mx, my] = toPx(DR.mark.x, DR.mark.y); x.beginPath(); x.arc(mx, my, DR.mark.r * S * DR.z, 0, 7); x.setLineDash([6, 4]); x.lineWidth = 2.5; x.strokeStyle = "#fff"; x.stroke(); x.setLineDash([]);
     x.font = "700 12px system-ui"; x.lineWidth = 4; x.strokeStyle = "#000c"; x.strokeText(DR.mark.label, mx - 8, my - DR.mark.r * S * DR.z - 6); x.fillStyle = "#fff"; x.fillText(DR.mark.label, mx - 8, my - DR.mark.r * S * DR.z - 6); }

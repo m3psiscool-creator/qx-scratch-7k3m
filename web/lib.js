@@ -168,3 +168,18 @@ document.addEventListener("click", e => {
 // normal distribution, for turning a points total into a chance
 const erf = x => { const s = Math.sign(x), t = 1 / (1 + 0.3275911 * Math.abs(x)); return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x)); };
 const phi = x => 0.5 * (1 + erf(x / Math.SQRT2));
+
+// A chest, drawn on a canvas: wooden body and arched lid with gold bands and a lock. `s` = half the chest's width in pixels;
+// `ring` (a colour) puts a glow behind it, used to show how often the chest is opened (green = rarely, red = in most games).
+function drawChest(x, cx, cy, s, ring) {
+  x.save(); x.translate(cx, cy);
+  if (ring) { x.beginPath(); x.arc(0, 0, s * 1.45, 0, 7); x.fillStyle = ring; x.globalAlpha = 0.9; x.fill(); x.globalAlpha = 1; x.lineWidth = Math.max(1, s * 0.16); x.strokeStyle = "rgba(10,12,20,.9)"; x.stroke(); }
+  const w = s * 1.7, h = s * 1.15, top = -h * 0.55, lid = h * 0.52;
+  x.lineJoin = "round"; x.lineWidth = Math.max(1, s * 0.15); x.strokeStyle = "#241407";
+  x.fillStyle = "#9a6430"; x.beginPath(); x.rect(-w / 2, top + lid * 0.85, w, h - lid * 0.85); x.fill(); x.stroke();                       // body
+  x.fillStyle = "#b9803f"; x.beginPath(); x.moveTo(-w / 2, top + lid); x.quadraticCurveTo(0, top - lid * 0.5, w / 2, top + lid); x.closePath(); x.fill(); x.stroke();   // lid
+  x.fillStyle = "#f4c93a"; x.fillRect(-w / 2, top + lid * 0.78, w, Math.max(1, s * 0.2));                                                       // gold rim
+  x.fillRect(-w * 0.34, top + lid * 0.05, Math.max(1, s * 0.2), h * 0.95); x.fillRect(w * 0.34 - Math.max(1, s * 0.2), top + lid * 0.05, Math.max(1, s * 0.2), h * 0.95);   // gold bands
+  x.fillStyle = "#ffe27a"; x.fillRect(-s * 0.2, top + lid * 0.72, s * 0.4, s * 0.45);                                                            // lock
+  x.restore();
+}

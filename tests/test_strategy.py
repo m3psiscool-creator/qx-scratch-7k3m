@@ -176,7 +176,7 @@ class DropsTest(unittest.TestCase):
 
 
 class ChestTest(unittest.TestCase):
-    W = {"window_id": "w", "meta": {"playlist": "Playlist_ShowdownTournament_SourSpawnDuos_PBM", "mode": "duos"}}
+    W = {"window_id": "w", "meta": {"playlist": "Playlist_ShowdownTournament_JumpBearDuos_PBM", "mode": "duos"}}   # a map with no picture: no land filter
 
     def setUp(self):
         drops._atlas_cache.clear()
@@ -206,8 +206,9 @@ class ChestTest(unittest.TestCase):
             cells[str(int((0.2 + 0.004 * k) * n) * n + int(0.2 * n))] = 50
         for k in range(4):   # quiet spot around (0.7, 0.7): 4 chests
             cells[str(int((0.7 + 0.004 * k) * n) * n + int(0.7 * n))] = 50
-        xs = np.array([0.2] * 30 + [0.7] * 3, dtype=np.float32)   # 30 landings at the first spot, 3 at the second
-        a = {"game": np.ones(len(xs), dtype=np.int16), "x": xs, "y": xs.copy(), "placement": np.full(len(xs), 5, dtype=np.int16),
+        # the stored cells are turned 90 degrees clockwise on the way out: the crowded spot (0.2, 0.2) is at x 0.8, y 0.2, the quiet one at x 0.3, y 0.7
+        xs = np.array([0.8] * 30 + [0.3] * 3, dtype=np.float32)   # 30 landings at the first spot, 3 at the second
+        a = {"game": np.ones(len(xs), dtype=np.int16), "x": xs, "y": np.array([0.2] * 30 + [0.7] * 3, dtype=np.float32), "placement": np.full(len(xs), 5, dtype=np.int16),
              "points": np.full(len(xs), 20, dtype=np.int32), "rank": np.zeros(len(xs), dtype=np.int32), "lobby": np.full(len(xs), 20, dtype=np.int16),
              "win": np.zeros(len(xs), dtype=np.int8)}
         def kv(k):
@@ -216,7 +217,7 @@ class ChestTest(unittest.TestCase):
               mock.patch.object(drops, "_arrays", return_value=a)):
             out = drops.areas("w", min_chests=1)
         first, second = out["areas"][0], out["areas"][1]
-        self.assertGreater(first["x"], 0.5)                       # the quiet spot comes first
+        self.assertLess(first["x"], 0.5)                          # the quiet spot comes first
         self.assertLess(first["players_per_game"], second["players_per_game"])
         self.assertGreater(first["chests_per_player"], second["chests_per_player"])
         self.assertAlmostEqual(out["teams_per_match"], 3.3, places=1)
@@ -228,7 +229,7 @@ class PictureCheckTest(unittest.TestCase):
 
     def test_landings_on_land_pass_and_landings_in_the_sea_fail(self):
         known = drops.MAPS["SourSpawn"]
-        with mock.patch.object(drops, "_arrays", return_value=self._arrays([0.5, 0.45, 0.55, 0.4], [0.5, 0.4, 0.45, 0.55])):
+        with mock.patch.object(drops, "_arrays", return_value=self._arrays([0.5, 0.48, 0.52, 0.5], [0.5, 0.5, 0.48, 0.52])):
             self.assertGreaterEqual(drops.picture_check("w", known), drops.MIN_ON_LAND)     # the middle of the island is land
         with mock.patch.object(drops, "_arrays", return_value=self._arrays([0.02, 0.03, 0.97, 0.98], [0.02, 0.97, 0.03, 0.98])):
             self.assertLess(drops.picture_check("w", known), 0.2)                           # the four corners are open sea

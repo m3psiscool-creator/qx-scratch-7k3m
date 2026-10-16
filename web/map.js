@@ -5,7 +5,7 @@ const MP = { list: [], wid: null, info: null, loot: null, grid: null, img: null,
 
 async function mapPage(wid) {
   MP.info = MP.loot = MP.grid = MP.img = null; MP.z = 1; MP.ox = MP.oy = 0; MP.sel = MP.hover = null;
-  app.innerHTML = `<div class="ph"><div><h1>Map</h1><p>Every chest on the map, plotted from real match loot. Drag to move, scroll to zoom, hover a dot for details. Colour shows how often that chest is opened in the first minutes of a game.</p></div></div>
+  app.innerHTML = `<div class="ph"><div><h1>Map</h1><p>Every chest on the map, plotted from real match loot. Drag to move, scroll to zoom, hover a chest for details. Colour shows how often that chest is opened in the first minutes of a game.</p></div></div>
     <div class="dr-layout"><div class="card dr-pick"><div class="hd"><h2>Maps</h2></div><div class="dr-list" id="mplist">${skel(2, 70)}</div></div><div id="mpmain" class="dr-main"></div></div>`;
   const list = await j("/api/maps");
   MP.list = Array.isArray(list) ? list : [];
@@ -33,7 +33,7 @@ async function mapLoad(m) {
     <div class="dr-canvas" style="position:relative"><canvas id="mpc"></canvas><div id="mptip" class="mp-tip" style="display:none"></div></div>
     <div class="mp-legend"><span>rarely opened</span><i></i><span>opened in most games</span></div>
     ${mp.image ? "" : `<p class="small">${esc(info.note || "No picture of this map is available yet.")} The chests are still placed where they were found.</p>`}
-    <p class="small">${mp.credit ? esc(mp.credit) + ". " : ""}A dot is one chest position found from real match loot; ${nf(loot.matches)} matches were read. Colour = share of games in which that chest was opened in the first minutes.</p></div>
+    <p class="small">${mp.credit ? esc(mp.credit) + ". " : ""}Each chest icon is one chest position found from real match loot; ${nf(loot.matches)} matches were read. Colour = share of games in which that chest was opened in the first minutes.</p></div>
     <div class="card"><div class="hd"><h2>Most and least contested chests</h2><span class="sub">click a row to find it on the map</span></div><div id="mplist2"></div></div>`;
   const imgUrl = mp.image || "";
   if (imgUrl) { const im = new Image(); im.onload = () => { MP.img = mp.fit ? warp(im, mp.fit) : im; mapDraw(); }; im.src = imgUrl; }
@@ -77,14 +77,13 @@ function mapDraw() {
     for (let i = 0; i < 10; i++) { const [a, b] = mapPx((i + 0.5) / 10, (i + 0.5) / 10); x.fillText("ABCDEFGHIJ"[i], a - 4, MP.oy + 14 * (W / 900) + 2); x.fillText(String(i + 1), MP.ox + 4, b + 4); }
   }
   if (MP.layers.chests) {
-    const d = Math.min(2, window.devicePixelRatio || 1), r = Math.max(3.2, Math.min(11, (2.6 + 2.2 * Math.sqrt(MP.z)) * d));
+    const d = Math.min(2, window.devicePixelRatio || 1), r = Math.max(4, Math.min(14, (2.2 + 2.7 * Math.sqrt(MP.z)) * d));
     mapVisible().forEach(s => {
       const [a, b] = mapPx(s.x, s.y); if (a < -20 || b < -20 || a > W + 20 || b > W + 20) return;
-      x.beginPath(); x.arc(a, b, r + (s.chests > 1 ? 1.5 : 0), 0, 7);
-      x.fillStyle = mapRate(s.rate); x.fill(); x.lineWidth = 1.4 * d; x.strokeStyle = "rgba(10,12,20,0.9)"; x.stroke();
-      if (s.chests > 1 && MP.z > 1.6) { x.fillStyle = "#101522"; x.font = `bold ${r * 1.2}px sans-serif`; x.textAlign = "center"; x.fillText(s.chests, a, b + r * 0.42); x.textAlign = "start"; }
+      drawChest(x, a, b, r * (s.chests > 1 ? 1.2 : 1), mapRate(s.rate));
+      if (s.chests > 1 && MP.z > 1.6) { x.fillStyle = "#fff"; x.font = `bold ${r * 1.1}px sans-serif`; x.textAlign = "center"; x.lineWidth = 3 * d; x.strokeStyle = "#000"; x.strokeText(s.chests, a + r * 1.3, b - r * 1.1); x.fillText(s.chests, a + r * 1.3, b - r * 1.1); x.textAlign = "start"; }
     });
-    [MP.sel, MP.hover].forEach(s => { if (!s) return; const [a, b] = mapPx(s.x, s.y); x.beginPath(); x.arc(a, b, r + 5 * d, 0, 7); x.lineWidth = 2.4 * d; x.strokeStyle = "#fff"; x.stroke(); });
+    [MP.sel, MP.hover].forEach(s => { if (!s) return; const [a, b] = mapPx(s.x, s.y); x.beginPath(); x.arc(a, b, r * 1.45 + 4 * d, 0, 7); x.lineWidth = 2.4 * d; x.strokeStyle = "#fff"; x.stroke(); });
   }
 }
 function mapZoom(f, cx, cy) {

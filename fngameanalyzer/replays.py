@@ -83,7 +83,11 @@ def matches(window_id, pages=100):
     row = next((r for r in storage.window_list() if r["window_id"] == window_id), None)
     cdone_ids = set((storage.kv_get(drops._ctn_key(row)) or {}).get("done") or []) if row else set()
     cdone = sorted(sid for sid in sessions if sid[:12] in cdone_ids)
+    try:
+        tdone = sorted(storage.tracks_done(window_id) & set(sessions))
+    except Exception:
+        tdone = []
     out = sorted(sessions.values(), key=lambda r: r["end"] or "")
     return {"window_id": window_id, "begin": w["begin"], "end": w["end"], "final": bool(w["final"]), "playlist": (w.get("meta") or {}).get("playlist"),
             "game_type": (w.get("meta") or {}).get("game_type"),
-            "sessions": out, "done": sorted(done & set(sessions)), "cdone": cdone, "pages": total}
+            "sessions": out, "done": sorted(done & set(sessions)), "cdone": cdone, "tdone": tdone, "pages": total}

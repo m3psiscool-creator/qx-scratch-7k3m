@@ -12,6 +12,10 @@ on:
         description: "Matches to process per window"
         required: false
         default: "40"
+      tracks:
+        description: "Full replays to read per window for the Rotations tab"
+        required: false
+        default: "4"
       reset:
         description: "Start the window over (drops its loaded landings, finished matches and chest counts)"
         required: false
@@ -43,4 +47,8 @@ jobs:
           if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 4)"; fi
           for w in $wins; do
             node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }} || echo "window $w failed"
+          done
+          # full replays of a few matches per window (the ones with the most qualifying teams): movement tracks for the Rotations tab
+          for w in $wins; do
+            node worker/tracks.mjs "$w" --limit "${{ github.event.inputs.tracks || '4' }}" || echo "tracks of $w failed"
           done

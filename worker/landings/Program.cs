@@ -92,7 +92,9 @@ foreach (var file in args)
             if (ci++ > 0) sb.Append(',');
             sb.Append('[').Append(Q(kv.Key)).Append(',').Append(kv.Value.x.ToString("F0", inv)).Append(',').Append(kv.Value.y.ToString("F0", inv)).Append(',').Append(kv.Value.t.ToString("F0", inv)).Append(']');
         }
-        sb.Append("]}");
+        sb.Append("]");
+        if (Environment.GetEnvironmentVariable("TRACKS") == "1") AppendTracks(sb, replay, reader);
+        sb.Append("}");
     }
     catch (Exception e)
     {
@@ -100,6 +102,58 @@ foreach (var file in args)
         sb.Append("{\"file\":").Append(Q(Path.GetFileName(file))).Append(",\"error\":").Append(Q(e.Message)).Append('}');
     }
     Console.WriteLine(sb.ToString());
+}
+
+// Where every player was during the whole match (one sample about every 4 seconds), and the storm circles, for the rotation viewer.
+// Times are seconds since the first sample of the match (world clock); positions are world units.
+static void AppendTracks(StringBuilder sb, FortniteReplayReader.Models.FortniteReplay replay, Spy reader)
+{
+    var inv = CultureInfo.InvariantCulture;
+    var plist = replay.PlayerData.Where(p => !p.IsBot && p.Locations.Count > 5).ToList();
+    double Tm(FortniteReplayReader.Models.PlayerMovement m) => m.ReplicatedWorldTimeSecondsDouble ?? m.LastUpdateTime ?? 0;
+    double t0 = double.MaxValue;
+    foreach (var p in plist) foreach (var m in p.Locations) { if (m.ReplicatedMovement.HasValue && Tm(m) > 100) { t0 = Math.Min(t0, Tm(m)); break; } }
+    if (t0 == double.MaxValue) t0 = 0;
+    sb.Append(",\"t0\":").Append(t0.ToString("F1", inv)).Append(",\"tracks\":[");
+    bool firstP = true; double endAll = 0;
+    foreach (var p in plist)
+    {
+        var pts = new List<(int t, int x, int y, int z)>();
+        double last = -999;
+        foreach (var m in p.Locations)
+        {
+            if (!m.ReplicatedMovement.HasValue || Tm(m) <= 100) continue;
+            double t = Tm(m) - t0; if (t < 0) continue;
+            if (t - last < 4) continue;
+            last = t; var l = m.ReplicatedMovement.Value.Location;
+            pts.Add(((int)Math.Round(t), (int)Math.Round(l.X), (int)Math.Round(l.Y), (int)Math.Round(l.Z / 100)));
+        }
+        if (pts.Count < 2) continue;
+        endAll = Math.Max(endAll, pts[^1].t);
+        if (!firstP) sb.Append(','); firstP = false;
+        sb.Append("{\"epic\":").Append(Q(p.EpicId)).Append(",\"team\":").Append(p.TeamIndex?.ToString(inv) ?? "null")
+          .Append(",\"placement\":").Append(p.Placement?.ToString(inv) ?? "null").Append(",\"kills\":").Append(p.Kills?.ToString(inv) ?? "null");
+        if (p.DeathLocation != null)
+            sb.Append(",\"death\":[").Append(((int)p.DeathLocation.X).ToString(inv)).Append(',').Append(((int)p.DeathLocation.Y).ToString(inv)).Append(',')
+              .Append(((int)Math.Round((p.DeathTimeDouble ?? 0) - t0)).ToString(inv)).Append(']');
+        sb.Append(",\"p\":[");
+        for (int i = 0; i < pts.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            sb.Append('[').Append(pts[i].t).Append(',').Append(pts[i].x).Append(',').Append(pts[i].y).Append(',').Append(pts[i].z).Append(']');
+        }
+        sb.Append("]}");
+    }
+    sb.Append("],\"duration\":").Append(((int)endAll).ToString(inv)).Append(",\"storm\":[");
+    for (int i = 0; i < reader.Storm.Count; i++)
+    {
+        if (i > 0) sb.Append(',');
+        var z = reader.Storm[i];
+        sb.Append('[').Append(((int)Math.Round(z.t - t0)).ToString(inv));
+        foreach (var v in new[] { z.lastR, z.lastX, z.lastY, z.nextR, z.nextX, z.nextY, z.start - t0, z.finish - t0 }) sb.Append(',').Append(((int)Math.Round(v)).ToString(inv));
+        sb.Append(']');
+    }
+    sb.Append(']');
 }
 
 static string Q(string s) => s == null ? "null" : "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
@@ -115,11 +169,20 @@ class Spy : ReplayReader
     /// <summary>game clock minus replay time (seconds): turns a game-clock time into the time bursts are stamped with</summary>
     public double ClockOffset => offsets.Count == 0 ? 0 : offsets.OrderBy(x => x).ElementAt(offsets.Count / 2);
     readonly Dictionary<uint, (double x, double y)> pawnPos = new();
+    double world;
+    /// <summary>storm circle snapshots: world time, last circle (radius, x, y), next circle (radius, x, y), shrink start and finish (world seconds)</summary>
+    public readonly List<(double t, double lastR, double lastX, double lastY, double nextR, double nextX, double nextY, double start, double finish)> Storm = new();
     /// <summary>container name -> where it was first searched (the searching player's position), game seconds</summary>
     public readonly Dictionary<string, (double x, double y, double t)> Opened = new();
     protected override void OnExportRead(uint channelIndex, Unreal.Core.Contracts.INetFieldExportGroup? exportGroup)
     {
         var actor = Channels[channelIndex]?.Actor;
+        if (exportGroup is FortniteReplayReader.Models.NetFieldExports.GameState gs && gs.ReplicatedWorldTimeSecondsDouble is double wt) world = wt;
+        else if (exportGroup is FortniteReplayReader.Models.NetFieldExports.SafeZoneIndicator sz)
+        {
+            var z = (world, (double)sz.LastRadius, (double)(sz.LastCenter?.X ?? 0), (double)(sz.LastCenter?.Y ?? 0), (double)sz.NextRadius, (double)(sz.NextCenter?.X ?? 0), (double)(sz.NextCenter?.Y ?? 0), (double)sz.SafeZoneStartShrinkTime, (double)sz.SafeZoneFinishShrinkTime);
+            if (Storm.Count == 0 || Storm[^1].nextR != z.Item5 || Storm[^1].start != z.Item8 || Storm[^1].nextX != z.Item6) Storm.Add(z);
+        }
         if (exportGroup is FortniteReplayReader.Models.NetFieldExports.PlayerPawn pp)
         {
             if (pp.ReplayLastTransformUpdateTimeStamp is float w && w > 100 && offsets.Count < 2000) offsets.Add(w - now);

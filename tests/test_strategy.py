@@ -297,3 +297,73 @@ class MapFitTest(unittest.TestCase):
 
     def test_too_few_landings_give_no_fit(self):
         self.assertIsNone(drops._auto_fit("TigerRanch", {"mask": "raw-tigerranch"}, {"x": np.zeros(50, dtype=np.float32), "y": np.zeros(50, dtype=np.float32)}))
+
+
+class ContainerTest(unittest.TestCase):
+    W = {"window_id": "w", "meta": {"playlist": "Playlist_ShowdownTournament_SourSpawnDuos_PBM", "game_type": "reload"}, "region": "NAC"}
+
+    def setUp(self):
+        drops._atlas_cache.clear()
+        self.kv = {}
+
+    def _patches(self):
+        return (mock.patch.object(storage, "window_list", return_value=[self.W]), mock.patch.object(storage, "kv_get", side_effect=lambda k: self.kv.get(k)),
+                mock.patch.object(storage, "kv_set", side_effect=lambda k, v: self.kv.__setitem__(k, v)))
+
+    def test_kinds_come_from_the_unique_name(self):
+        self.assertEqual(drops._kind("Tiered_Chest_Sunflower_C_UAID_1"), "chest")
+        self.assertEqual(drops._kind("AlwaysSpawn_RareChest_C_UAID_1"), "rare")
+        self.assertEqual(drops._kind("Tiered_Ammo_Athena_C_UAID_1"), "ammo")
+        self.assertIsNone(drops._kind("Fog_Machine_UAID_1"))
+
+    def test_a_match_is_counted_once_and_positions_use_the_median(self):
+        a, b, c = self._patches()
+        with a, b, c:
+            for i, (u, v) in enumerate([(0.30, 0.40), (0.30, 0.40), (0.90, 0.10)]):   # the third is a wrong pawn (outlier)
+                drops.add_containers("w", [{"session": "s%d" % i, "items": [["Tiered_Chest_Athena_C_UAID_a", u, v]]}])
+            again = drops.add_containers("w", [{"session": "s0", "items": [["Tiered_Chest_Athena_C_UAID_a", 0.3, 0.4]]}])
+        self.assertEqual(again["added"], 0)                      # same match twice: ignored
+        atlas = self.kv["ctn:SourSpawn"]
+        self.assertEqual(atlas["M"], 3)
+        self.assertEqual(atlas["items"]["Tiered_Chest_Athena_C_UAID_a"]["n"], 3)
+
+    def test_sites_are_turned_like_the_map_and_rates_are_shares_of_matches(self):
+        self.kv["ctn:SourSpawn"] = {"M": 40, "done": [], "items": {"Tiered_Chest_Athena_C_UAID_a": {"n": 10, "p": [[0.2, 0.3]] * 5}, "Tiered_Ammo_Athena_C_UAID_b": {"n": 40, "p": [[0.5, 0.5]]}}}
+        a, b, c = self._patches()
+        with a, b, c:
+            chests, M = drops._container_sites(self.W, drops.CHEST_KINDS)
+            allk, _ = drops._container_sites(self.W, drops.CTN_KINDS)
+        self.assertEqual(M, 40)
+        self.assertEqual(len(chests), 1)                          # ammo boxes are not chests
+        self.assertEqual(len(allk), 2)
+        x, y = drops._turn(0.2, 0.3, drops.MAPS["SourSpawn"]["rot"])
+        self.assertAlmostEqual(chests[0]["x"], x, places=3)
+        self.assertAlmostEqual(chests[0]["y"], y, places=3)
+        self.assertAlmostEqual(chests[0]["rate"], 0.25)           # searched in 10 of 40 matches
+
+    def test_too_few_matches_fall_back_to_the_old_method(self):
+        self.kv["ctn:SourSpawn"] = {"M": 5, "done": [], "items": {"Tiered_Chest_Athena_C_UAID_a": {"n": 5, "p": [[0.2, 0.3]]}}}
+        a, b, c = self._patches()
+        with a, b, c:
+            self.assertIsNone(drops._container_sites(self.W, drops.CHEST_KINDS)[0])
+
+
+class TracksTest(unittest.TestCase):
+    def test_game_turns_paths_like_the_map_and_names_the_teams(self):
+        import json
+        import zlib
+        from fngameanalyzer import tracks
+        doc = {"d": 600, "storm": [[100, 0, 0, 0, 3000, 5000, 5000, 120, 180]], "teams": [{"acc": ["a" * 32], "rank": 7, "game": 2, "pl": 3, "pts": 20, "el": 1}],
+               "tracks": [{"a": "a" * 32, "t": 0, "pl": 3, "k": 1, "x": [4000, 2000, 500], "p": [[0, 2000, 3000, 5], [30, 2500, 3500, 5]]}]}
+        blob = zlib.compress(json.dumps(doc).encode())
+        win = {"window_id": "w", "event_id": "e", "region": "NAC", "meta": {"playlist": "Playlist_X_SourSpawn", "game_type": "reload"}}
+        with (mock.patch.object(storage, "tracks_get", return_value=("w", 600, blob), create=True), mock.patch.object(storage, "window_list", return_value=[win]),
+              mock.patch.object(tracks.insights, "_name_map", return_value={"a" * 32: "Ana"}), mock.patch.object(tracks.service, "pretty", return_value="Cup"),
+              mock.patch.object(tracks.service, "goal_of", return_value={"rank": 20})):
+            g = tracks.game("s")
+        self.assertEqual(g["teams"][0]["players"][0]["name"], "Ana")
+        self.assertEqual(g["teams"][0]["rank"], 7)
+        rot = drops.MAPS["SourSpawn"]["rot"]
+        x, y = drops._turn(0.2, 0.3, rot)
+        self.assertEqual(g["tracks"][0]["p"][0][1:3], [int(round(x * 10000)), int(round(y * 10000))])
+        self.assertEqual(len(g["storm"]), 1)

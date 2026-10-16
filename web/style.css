@@ -331,3 +331,8 @@ pre{background:var(--sf2);padding:10px;border-radius:10px;overflow:auto}
 .mp-legend i{flex:0 0 160px;height:8px;border-radius:5px;background:linear-gradient(90deg,hsl(130,85%,52%),hsl(65,85%,52%),hsl(0,85%,52%))}
 .mp-row{cursor:pointer}.mp-row:hover td{background:var(--ac-soft)}
 .chip.on small{color:inherit;opacity:.85}
+
+.rt-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:14px;margin-top:10px;align-items:start}
+.rt-scroll{max-height:420px;overflow:auto}
+.rt-row{cursor:pointer}.rt-row:hover td,.rt-row.on td{background:var(--ac-soft)}
+@media(max-width:900px){.rt-grid{grid-template-columns:1fr}}

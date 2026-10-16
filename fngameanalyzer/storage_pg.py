@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS drops(
  window_id TEXT, game INTEGER, team TEXT, x REAL, y REAL, poi TEXT,
  placement INTEGER, points INTEGER, rank INTEGER, win INTEGER DEFAULT 0);
 CREATE INDEX IF NOT EXISTS drops_win ON drops(window_id, game);
+CREATE TABLE IF NOT EXISTS tracks(session TEXT PRIMARY KEY, window_id TEXT, duration INTEGER, players INTEGER, d BYTEA);
+CREATE TABLE IF NOT EXISTS track_players(account TEXT, session TEXT, window_id TEXT, game INTEGER, placement INTEGER, kills INTEGER, rank INTEGER, team TEXT);
+CREATE INDEX IF NOT EXISTS track_players_acct ON track_players(account);
+CREATE INDEX IF NOT EXISTS track_players_sess ON track_players(session);
 """
 ALTERS = ["ALTER TABLE windows ADD COLUMN IF NOT EXISTS deep TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS category TEXT",
@@ -628,3 +632,49 @@ def drop_map_get(window_id):
 def drop_map_set(window_id, d):
     with db() as c:
         c.execute("INSERT INTO drop_maps(window_id,d) VALUES(%s,%s) ON CONFLICT(window_id) DO UPDATE SET d=excluded.d", (window_id, json.dumps(d)))
+
+
+# ---------------------------------------------------------------- movement tracks (the rotation viewer)
+def tracks_put(session, window_id, duration, blob, players):
+    """players: (account, game, placement, kills, rank, team) per tracked player. Replaces the match if it was stored before."""
+    with db() as c:
+        c.execute("DELETE FROM track_players WHERE session=%s", (session,))
+        c.execute("INSERT INTO tracks(session,window_id,duration,players,d) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(session) DO UPDATE SET window_id=excluded.window_id, "
+                  "duration=excluded.duration, players=excluded.players, d=excluded.d", (session, window_id, duration, len(players), blob))
+        with c.cursor() as cur:
+            cur.executemany("INSERT INTO track_players(account,session,window_id,game,placement,kills,rank,team) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
+                            [(a, session, window_id, g, pl, k, r, t) for a, g, pl, k, r, t in players])
+
+
+def tracks_get(session):
+    with db() as c:
+        r = c.execute("SELECT window_id,duration,d FROM tracks WHERE session=%s", (session,)).fetchone()
+    return (r[0], r[1], bytes(r[2])) if r else None
+
+
+def tracks_for_account(account):
+    with db() as c:
+        return [{"session": r[0], "window_id": r[1], "game": r[2], "placement": r[3], "kills": r[4], "rank": r[5], "team": r[6], "duration": r[7]}
+                for r in c.execute("SELECT p.session,p.window_id,p.game,p.placement,p.kills,p.rank,p.team,t.duration FROM track_players p JOIN tracks t ON t.session=p.session "
+                                   "WHERE p.account=%s ORDER BY p.window_id DESC, p.game", (account,)).fetchall()]
+
+
+def tracks_done(window_id):
+    with db() as c:
+        return {r[0] for r in c.execute("SELECT session FROM tracks WHERE window_id=%s", (window_id,)).fetchall()}
+
+
+def tracks_available():
+    """window_id -> number of matches with movement tracks."""
+    with db() as c:
+        return {r[0]: r[1] for r in c.execute("SELECT window_id, count(*) FROM tracks GROUP BY 1").fetchall()}
+
+
+def tracks_recent(limit=30):
+    with db() as c:
+        return [{"session": r[0], "window_id": r[1], "duration": r[2], "players": r[3]} for r in c.execute("SELECT session,window_id,duration,players FROM tracks ORDER BY window_id DESC, session LIMIT %s", (limit,)).fetchall()]
+
+
+def tracks_matches(window_id):
+    with db() as c:
+        return [{"session": r[0], "duration": r[1], "players": r[2]} for r in c.execute("SELECT session,duration,players FROM tracks WHERE window_id=%s ORDER BY session", (window_id,)).fetchall()]

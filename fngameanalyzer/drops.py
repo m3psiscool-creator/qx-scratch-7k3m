@@ -37,7 +37,7 @@ MAPS = {
 _ROT = {"SourSpawn": 1, "PiperBoot": 2}
 _RAW = {"BlastBerry": ("raw-blastberry", "Venture", {"k": 0, "L": 1.59, "cx": 0.507, "cy": 0.423}, 0.86),
         "SourSpawn": ("raw-nitemare", "Nitemare Island", {"k": 0, "L": 1.591, "cx": 0.4641, "cy": 0.5028}, 0.9),   # re-fitted on fortnite.gg chest icons (tools/mapfit/validate_fortnitegg.py)
-        "PiperBoot": ("raw-surfcity", "Surf City V1", {"k": 0, "L": 1.5846, "cx": 0.4985, "cy": 0.5034}, 0.9),   # re-fitted on fortnite.gg chest icons
+        "PiperBoot": ("raw-surfcity2", "Surf City (new)", {"k": 0, "L": 1.5846, "cx": 0.4990, "cy": 0.5011}, 0.9),   # re-fitted on fortnite.gg chest icons
         "DashBerry": ("raw-dashberry", "Springfield", None, None),
         "ForbiddenBlastBerry": ("raw-forbiddenblastberry", "Venture (Blitz)", None, None),
         "MatchMist": ("raw-matchmist", "Elite Stronghold", None, None),
@@ -52,6 +52,9 @@ for _c, (_f, _n, _fit, _min) in _RAW.items():
         MAPS[_c]["rot"] = _ROT.get(_c, 0)
     if _min:
         MAPS[_c]["min_on_land"] = _min
+# the tournament island of the codename PiperBoot is the new Surf City (no mountain, rebuilt harbour), not the Dec 2025 map of the game files
+# (web/maps/raw-surfcity.jpg, kept in the catalog as "Surf City V1"): 99.6% of the real landings are on the new picture's land, none on the mountain
+MAPS["PiperBoot"]["credit"] = "Map: Surf City (new), Epic Games (map render from the Fortnite Wiki, version 42.20)"
 CODENAMES = ("ForbiddenBlastBerry", "SourSpawn", "BlastBerry", "DashBerry", "PiperBoot", "JumpBear", "MatchMist", "PunchBerry", "RopeSmile",
              "TigerRanch", "TimberStake")
 # The loaders store landings in the game's own frame (u = east, v = south). Each map is shown the way the game draws it (north up, like the
@@ -866,7 +869,8 @@ CATALOG = [
     ("PunchBerry", "Oasis", "Reload", "/maps/raw-punchberry.jpg"),
     ("TigerRanch", "Slurp Rush", "Reload", "/maps/raw-tigerranch.jpg"),
     ("TimberStake", "Squid Grounds", "Reload", "/maps/raw-timberstake.jpg"),
-    ("PiperBoot", "Surf City V1", "Reload", "/maps/raw-surfcity.jpg"),
+    ("PiperBoot", "Surf City (new)", "Reload", "/maps/raw-surfcity2.jpg"),
+    ("SurfCityV1", "Surf City V1", "Reload", "/maps/raw-surfcity.jpg"),
     ("SourSpawn", "Nitemare Island", "Reload", "/maps/raw-nitemare.jpg"),
     ("MatchMist", "Elite Stronghold", "Reload", "/maps/raw-matchmist.jpg"),
     ("DashBerry", "Springfield", "Reload", "/maps/raw-dashberry.jpg"),

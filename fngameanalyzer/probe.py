@@ -95,6 +95,8 @@ def scan(q="", regions=None):
             for w in ev.get("eventWindows", []):
                 if w["eventWindowId"] not in row["windows"] and len(row["windows"]) < 12:
                     row["windows"].append(w["eventWindowId"])
+                    tmpl = next((t for t in raw.get("templates", []) if t.get("eventTemplateId") == w.get("eventTemplateId")), {})
+                    row.setdefault("playlists", {})[w["eventWindowId"]] = [tmpl.get("playlistId"), w.get("beginTime"), w.get("endTime")]
             row["begin"] = ev.get("beginTime")
             row["end"] = ev.get("endTime")
     return sorted(seen.values(), key=lambda r: r.get("begin") or "", reverse=True) if all(isinstance(v, dict) for v in seen.values()) else seen

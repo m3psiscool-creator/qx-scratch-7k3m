@@ -20,7 +20,7 @@ setInterval(() => { countdowns(); const c = $("#clock"); if (c) c.textContent = 
 // ---------------------------------------------------------------- shell: navigation, theme, region
 const NAV = [
   { g: "", items: [["home", "Home", "home", "#/"]] },
-  { g: "Plan", items: [["strategy", "Strategy", "target", "#/strategy"], ["me", "My results", "user", "#/me"], ["drops", "Dropspots", "map", "#/drops"], ["schedule", "Schedule", "cal", "#/schedule"], ["fncs", "FNCS", "trophy", "#/fncs"]] },
+  { g: "Plan", items: [["strategy", "Strategy", "target", "#/strategy"], ["me", "My results", "user", "#/me"], ["drops", "Dropspots", "map", "#/drops"], ["map", "Map", "pin", "#/map"], ["schedule", "Schedule", "cal", "#/schedule"], ["fncs", "FNCS", "trophy", "#/fncs"]] },
   { g: "Research", items: [["archive", "Archive", "archive", "#/archive"], ["classes", "Gamemodes", "layers", "#/classes"], ["players", "Players", "user", "#/players"]] },
   { g: "Site", items: [["accuracy", "Accuracy", "gauge", "#/accuracy"], ["status", "Status", "gear", "#/status"]] },
 ];
@@ -701,6 +701,7 @@ async function route() {
     else if (page === "player") await playerPage(arg);
     else if (page === "me") await myPage();
     else if (page === "drops") await dropsPage(arg);
+    else if (page === "map") await mapPage(arg);
     else if (page === "fncs") await fncs();
     else if (page === "accuracy") await accuracy();
     else if (page === "status") await status();

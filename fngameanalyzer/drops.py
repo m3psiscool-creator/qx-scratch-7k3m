@@ -602,3 +602,27 @@ def _area_loot(window_id, a, mask, base, poly):
     return {"chests": chests, "lootage": None if rate is None else round(rate, 3), "teams_per_game": round(teams, 2),
             "players_per_game": round(players, 2), "chests_per_player": round(chests / max(players, 0.25), 2) if chests else 0,
             "free_chests": round(chests * (1 - rate), 1) if chests else 0, "chest_matches": M}
+
+
+# ---------------------------------------------------------------- the interactive map tab: every map with chest data
+def maps():
+    """One entry per map (chest atlas) with enough processed matches: the tournament to read its picture and chest sites from."""
+    avail = storage.drops_available()
+    best = {}
+    for w in storage.window_list():
+        if w["window_id"] not in avail:
+            continue
+        key = _atlas_key(w)
+        n = avail[w["window_id"]][0]
+        if key not in best or n > best[key][0]:
+            best[key] = (n, w)
+    out = []
+    for key, (n, w) in best.items():
+        sites, M = _sites(w)
+        if not sites:
+            continue
+        code = _code(w)
+        known = MAPS.get(code) or (MAPS["BR"] if (w.get("meta") or {}).get("game_type") == "br" else None)
+        out.append({"window_id": w["window_id"], "code": code, "name": (known or {}).get("name") or code, "matches": M, "chests": sum(s["chests"] for s in sites),
+                    "landings": n, "region": w["region"]})
+    return sorted(out, key=lambda m: -m["matches"])

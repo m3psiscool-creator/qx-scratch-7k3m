@@ -341,6 +341,16 @@ class ContainerTest(unittest.TestCase):
         self.assertAlmostEqual(chests[0]["y"], y, places=3)
         self.assertAlmostEqual(chests[0]["rate"], 0.25)           # searched in 10 of 40 matches
 
+    def test_old_counts_stay_and_new_counts_add_the_containers_outside_the_old_frame(self):
+        self.kv["ctn:SourSpawn"] = {"M": 200, "done": [], "items": {"Tiered_Chest_Athena_C_UAID_a": {"n": 100, "p": [[0.2, 0.3]]}}}
+        self.kv["ctn2:SourSpawn"] = {"M": 4, "done": [], "items": {"Tiered_Chest_Athena_C_UAID_a": {"n": 4, "p": [[0.2, 0.3]]}, "Tiered_Chest_Athena_C_UAID_far": {"n": 2, "p": [[0.5, 1.2]]}}}
+        a, b, c = self._patches()
+        with a, b, c:
+            sites, M = drops._container_sites(self.W, drops.CHEST_KINDS)
+        self.assertEqual(M, 200)
+        self.assertEqual(len(sites), 2)                                   # the chest south of the old frame is there now
+        self.assertEqual(sorted(s["rate"] for s in sites), [0.5, 0.5])    # old chest 100/200, new one 2/4
+
     def test_too_few_matches_fall_back_to_the_old_method(self):
         self.kv["ctn2:SourSpawn"] = {"M": 5, "done": [], "items": {"Tiered_Chest_Athena_C_UAID_a": {"n": 5, "p": [[0.2, 0.3]]}}}
         a, b, c = self._patches()

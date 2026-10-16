@@ -36,8 +36,8 @@ MAPS = {
 # the width comes out about 1.58-1.60 frames for every Reload map. rot = quarter turns clockwise of the stored frame (see _turn).
 _ROT = {"SourSpawn": 1, "PiperBoot": 2}
 _RAW = {"BlastBerry": ("raw-blastberry", "Venture", {"k": 0, "L": 1.59, "cx": 0.507, "cy": 0.423}, 0.86),
-        "SourSpawn": ("raw-nitemare", "Nitemare Island", {"k": 0, "L": 1.58, "cx": 0.462, "cy": 0.506}, 0.9),
-        "PiperBoot": ("raw-surfcity", "Surf City V1", {"k": 0, "L": 1.61, "cx": 0.500, "cy": 0.510}, 0.9),
+        "SourSpawn": ("raw-nitemare", "Nitemare Island", {"k": 0, "L": 1.591, "cx": 0.4641, "cy": 0.5028}, 0.9),   # re-fitted on fortnite.gg chest icons (tools/mapfit/validate_fortnitegg.py)
+        "PiperBoot": ("raw-surfcity", "Surf City V1", {"k": 0, "L": 1.5846, "cx": 0.4985, "cy": 0.5034}, 0.9),   # re-fitted on fortnite.gg chest icons
         "DashBerry": ("raw-dashberry", "Springfield", None, None),
         "ForbiddenBlastBerry": ("raw-forbiddenblastberry", "Venture (Blitz)", None, None),
         "MatchMist": ("raw-matchmist", "Elite Stronghold", None, None),
@@ -646,16 +646,18 @@ def _container_sites(w, kinds):
         atlas = storage.kv_get(key) or {}
         _atlas_cache[key] = (time.time(), atlas)
         return atlas
-    atlas = load(_ctn_key(w))
-    M = int(atlas.get("M") or 0)
-    if M < MIN_MATCHES:      # the full-frame counts are still being rebuilt: use the older ones meanwhile
-        atlas = load("ctn:" + _map_key(w))
-        M = int(atlas.get("M") or 0)
-    if M < MIN_MATCHES:
-        return None, M
+    new, old = load(_ctn_key(w)), load("ctn:" + _map_key(w))      # v2 keeps positions outside the old 0-1 frame; v1 lost them but has more matches
+    M2, M1 = int(new.get("M") or 0), int(old.get("M") or 0)
+    if M1 < MIN_MATCHES and M2 < MIN_MATCHES:
+        return None, max(M1, M2)
+    # a container seen in the older counts keeps its place and rate; the ones only the newer counts have (the ones outside the old frame) are added
+    items = {n: (it, M1) for n, it in (old.get("items") or {}).items()} if M1 >= MIN_MATCHES else {}
+    for n, it in (new.get("items") or {}).items():
+        if n not in items and M2 >= 3:
+            items[n] = (it, M2)
     nrot = _rot_of(w)
     out = []
-    for name, it in (atlas.get("items") or {}).items():
+    for name, (it, M) in items.items():
         kind = _kind(name)
         if kind not in kinds or not it.get("p"):
             continue
@@ -663,7 +665,7 @@ def _container_sites(w, kinds):
         v = float(np.median([p[1] for p in it["p"]]))
         x, y = _turn(u, v, nrot)
         out.append({"x": round(float(x), 4), "y": round(float(y), 4), "rate": round(min(1.0, it["n"] / M), 3), "chests": 1, "cls": kind})
-    return out, M
+    return out, max(M1, M2)
 
 
 def _sites(w, frac=None, nms=1, smooth=0, kinds=CHEST_KINDS):
@@ -761,7 +763,7 @@ def loot(window_id, frac=None, nms=1, smooth=0, kinds=None):
     counts = {}
     for s_ in sites:
         counts[s_.get("cls", "chest")] = counts.get(s_.get("cls", "chest"), 0) + 1
-    return {"matches": M, "sites": sites, "min_matches": MIN_MATCHES, "kinds": counts, "exact": bool(sites and sites[0].get("cls")),
+    return {"matches": M, "view": list(_vwin(w)), "sites": sites, "min_matches": MIN_MATCHES, "kinds": counts, "exact": bool(sites and sites[0].get("cls")),
             "chests": sum(s["chests"] for s in sites if s.get("cls", "chest") in CHEST_KINDS),
             "note": None if sites else f"Chest positions need at least {MIN_MATCHES} processed matches of this map (have {M})."}
 

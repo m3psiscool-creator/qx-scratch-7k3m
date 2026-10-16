@@ -31,6 +31,7 @@ async function mapLoad(m) {
     if (info.error || loot.error || !loot.sites) { info = loot = null; }
   }
   MP.info = info; MP.loot = loot;
+  MP.minRate = m.key === "BR" ? 0.1 : 0;   // BR chests spawn at random places: one seen in under 10% of matches is usually not there in a given game
   const mp = (info && info.map) || {};
   const kinds = (loot && loot.kinds) || {};
   const sites = loot ? loot.sites : [];
@@ -43,7 +44,7 @@ async function mapLoad(m) {
     <div class="chips" id="mpkinds" style="margin:0 0 8px">${MP_KINDS.filter(([k]) => kinds[k]).map(([k, l]) => `<button class="chip ${MP.kinds[k] ? "on" : ""}" data-k="${k}">${l} <small>${nf(kinds[k])}</small></button>`).join("")}</div>` : `<p class="mut">There is no replay data for this map yet, so no chest positions: the picture is the map as the game draws it. Chests appear here as soon as a tournament is played on it and its replays are read.</p>`}
     <div class="chips" id="mplay" style="margin:0 0 8px">${loot ? `<button class="chip" data-l="grid">Grid</button><button class="chip" data-l="heat">Where teams land</button>` : ""}
       <span style="flex:1"></span><button class="chip" id="mpz1">Zoom +</button><button class="chip" id="mpz2">Zoom −</button><button class="chip" id="mpreset">Reset view</button></div>
-    ${loot ? `<div style="margin:0 0 10px"><label>Show chests opened in at least <b id="mpminv">0%</b> of games</label><input id="mpmin" type="range" min="0" max="100" value="0"></div>` : ""}
+    ${loot ? `<div style="margin:0 0 10px"><label>Show chests opened in at least <b id="mpminv">${Math.round(MP.minRate * 100)}%</b> of games</label><input id="mpmin" type="range" min="0" max="100" value="${Math.round(MP.minRate * 100)}"></div>` : ""}
     <div class="dr-canvas" style="position:relative"><canvas id="mpc"></canvas><div id="mptip" class="mp-tip" style="display:none"></div></div>
     ${loot ? `<div class="mp-legend"><span>rarely opened</span><i></i><span>opened in most games</span></div>` : ""}
     <p class="small">${mp.credit ? esc(mp.credit) + ". " : (m.image ? "Map picture: Epic Games. " : "No picture of this map is available. ")}${loot ? `Each icon is one container at the position players stood when they searched it, read from ${nf(loot.matches)} real matches (the same chest gives the same spot in every match, within about a metre). Colour = share of games in which it was opened in the first minutes.` : ""}</p></div>

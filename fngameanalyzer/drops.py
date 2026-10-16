@@ -25,7 +25,10 @@ HEX32 = re.compile(r"^[0-9a-f]{32}$")
 # docs/dropspots-data.md "Map pictures"). Picture: Epic Games' overview image of the map, via the Fortnite Wiki.
 MAPS = {
     # the big Battle Royale island (events with no Reload codename); its light-blue shallows count as water in the outline, hence the lower bar
-    "BR": {"name": "Battle Royale island", "image": "/maps/br-island.jpg", "mask": "br-island", "min_on_land": 0.85, "rot": 1,
+    # The picture (fortnite-api.com) spans 284,900 world units, not the 262,144 of the replay frame, and its centre is at world (X 7381, Y 3993): fitted
+    # on the 40 POI positions fortnite-api.com gives in world coordinates (Pac-Man Island, Chopped Shop, Blinky/Pinky Island... all land on their art).
+    "BR": {"name": "Battle Royale island", "raw": "/maps/br-island.jpg", "fit": {"k": 0, "L": 1.0868, "cx": 0.5282, "cy": 0.5152},
+           "mask": "br-island", "min_on_land": 0.85, "rot": 1,
            "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)"},
 }
 # Maps read straight from the game files (the minimap texture Epic ships, see tools/mapfit/mapdump): the raw picture is sent as it is
@@ -92,7 +95,7 @@ _masks = {}
 WIDE = (-0.7, 1.7)     # stored coordinates may lie outside the old 0-1 frame: the islands are bigger than the frame the loaders used
 
 
-def _view(code):
+def _view(code):      # code = codename, or "BR"
     """(x0, y0, s): the square of the turned frame that holds ALL the land of a map with a measured picture fit (plus a small margin).
     The site works in this square: 0-1 is the whole island, so nothing of the map is cut off and the grid A1-J10 covers all of it."""
     known = MAPS.get(code)
@@ -119,7 +122,7 @@ _views = {}
 
 def _vwin(w):
     code, known = _known_of(w) if w else (None, None)
-    return _view(code) if known else (0.0, 0.0, 1.0)
+    return _view("BR" if known is MAPS["BR"] else code) if known else (0.0, 0.0, 1.0)
 
 
 def _fit_view(fit, v):
@@ -268,7 +271,7 @@ def map_info(window_id):
             fit = _fit_of(codename, known, window_id) if check["status"] == "ok" else None
             if fit:
                 rec["image"] = known["raw"]
-                rec["fit"] = _fit_view({k: fit[k] for k in ("k", "L", "cx", "cy")}, _view(codename))
+                rec["fit"] = _fit_view({k: fit[k] for k in ("k", "L", "cx", "cy")}, _view("BR" if known is MAPS["BR"] else codename))
             else:
                 rec["image"] = ""
                 rec["name"] = ""
@@ -281,7 +284,7 @@ def map_info(window_id):
         rec.pop("mask", None)
     rec = dict(rec or {})
     if rec.get("pois"):   # stored in the loader's frame: same turn as everything else
-        nrot, vw = _rot_of(w), _view(codename)
+        nrot, vw = _rot_of(w), _view("BR" if known is MAPS["BR"] else codename)
         rec["pois"] = [{**p, "x": round((float(_turn(float(p["x"]), float(p["y"]), nrot)[0]) - vw[0]) / vw[2], 4), "y": round((float(_turn(float(p["x"]), float(p["y"]), nrot)[1]) - vw[1]) / vw[2], 4)} for p in rec["pois"]]
     rec.pop("base", None)      # never a map drawn from player movement: only a real picture of the map, or none
     rec.pop("base_size", None)

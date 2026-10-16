@@ -646,14 +646,29 @@ async function fncs() {
 async function accuracy() {
   const d = await j("/api/accuracy");
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
-  const b = d.buckets;
-  app.innerHTML = head("Prediction accuracy", `Every prediction stored during a live event is compared with the real final cutoff once the event is collected. ${d.events} events scored so far.`) +
-    (b.length ? `<div class="grid g2">${chartCard("ac1", "How far off are the predictions?", "by how far through the window", { table: false })}${chartCard("ac2", "How often the real result is inside the range", "range = low to safe, aimed at 90%", { table: false })}</div>
-    <div class="card"><div class="hd"><h2>Details</h2></div>${table(["Point in event", "Predictions", "Average error", "Bias", "Real result inside range"], b.map(x => [Math.round(x.progress * 100) + "% through", x.n, x.mean_abs_error_pct + "%", (x.bias_pct > 0 ? "+" : "") + x.bias_pct + "%", x.inside_range_pct + "%"]), ["", "n", "n", "n", "n"])}<p class="small">Bias above 0 means the site guessed too high.</p></div>` : '<div class="card empty">No scored predictions yet. They accumulate as live events finish.</div>');
+  const b = d.buckets, list = d.list || [];
+  const lab = x => x.progress === 0 ? "Start" : Math.round(x.progress * 100) + "%";
+  const evOpt = list.map((e, i) => `<option value="${i}">${esc(e.name)} · ${esc(e.region)} · ${new Date((e.end || 0) * 1000).toLocaleDateString([], { month: "short", day: "numeric" })}</option>`).join("");
+  app.innerHTML = head("Prediction accuracy", `Every finished tournament is predicted automatically as of its start, from earlier events only, and every live one is predicted while it runs. Each prediction is compared with the real final cutoff. <b>${d.events}</b> of ${d.finished} finished tournaments scored so far (${d.live_events} also predicted live).`) +
+    (b.length ? `<div class="grid g2">${chartCard("ac1", "How far off were the predictions?", "average error and bias, by how far through the event", { table: false })}${chartCard("ac2", "Predicted at different times vs the real end", "the line is what the site predicted as the event went on", { table: false, ctrl: `<label style="margin:0">Tournament</label><select id="acev" style="width:auto;max-width:100%;margin:0">${evOpt}</select><label style="margin:0">Rank</label><select id="acrk" style="width:auto;margin:0"></select>` })}</div>
+    <div class="card"><div class="hd"><h2>Details</h2></div>${table(["Point in event", "Tournaments", "Predictions", "Average error", "Typical error (median)", "Bias", "Real result inside range"], b.map(x => [lab(x), x.events, x.n, x.mean_abs_error_pct + "%", x.median_abs_error_pct + "%", (x.bias_pct > 0 ? "+" : "") + x.bias_pct + "%", x.inside_range_pct + "%"]), ["", "n", "n", "n", "n", "n", "n"])}<p class="small">Error = how far the guess was from the real cutoff, as a share of it. Bias above 0 means the site guessed too high on average, below 0 too low. "Start" is the prediction made before the event opened. Range = low to safe, aimed at 90%.</p></div>` : '<div class="card empty">No finished predictions to score yet. They are made automatically while events run and as the history is scored.</div>');
   if (!b.length) return;
-  const lab = b.map(x => Math.round(x.progress * 100) + "%");
-  mk($("#ac1"), { type: "bar", data: { labels: lab, datasets: [{ label: "Average error", data: b.map(x => x.mean_abs_error_pct), backgroundColor: SER(0) }, { label: "Bias (+ = too high)", data: b.map(x => x.bias_pct), backgroundColor: SER(1) }] }, options: { scales: { x: { title: { text: "Share of the window elapsed" } }, y: { title: { text: "% of the real cutoff" } } }, plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y}%` } } } } });
-  mk($("#ac2"), { type: "bar", data: { labels: lab, datasets: [{ label: "Inside range", data: b.map(x => x.inside_range_pct), backgroundColor: SER(2) }] }, options: { scales: { x: { title: { text: "Share of the window elapsed" } }, y: { min: 0, max: 100, ticks: { callback: v => v + "%" } } }, plugins: { legend: { display: false }, refLines: { lines: [{ axis: "y", value: 90, label: "Aim: 90%", right: true }] }, tooltip: { callbacks: { label: c => c.parsed.y + "% of predictions" } } } } });
+  mk($("#ac1"), { type: "bar", data: { labels: b.map(lab), datasets: [{ label: "Average error", data: b.map(x => x.mean_abs_error_pct), backgroundColor: SER(0) }, { label: "Bias (+ = too high)", data: b.map(x => x.bias_pct), backgroundColor: SER(1) }] }, options: { scales: { x: { title: { text: "Share of the event elapsed" } }, y: { title: { text: "% of the real cutoff" } } }, plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y}%` } } } } });
+  const draw = () => {
+    const e = list[+$("#acev").value]; if (!e) return;
+    const rs = Object.keys(e.ranks).map(Number).sort((a, c) => a - c), sel = $("#acrk");
+    const keep = sel.value && e.ranks[sel.value] ? sel.value : String(rs.includes(100) ? 100 : rs[0]);
+    sel.innerHTML = rs.map(r => `<option value="${r}" ${String(r) === keep ? "selected" : ""}>Top ${nf(r)}</option>`).join("");
+    const r = e.ranks[keep]; if (!r) return;
+    const pts = r.points, pct = p => Math.round(p * 100);
+    mk($("#ac2"), { type: "line", data: { labels: pts.map(p => p[0] === 0 ? "Start" : pct(p[0]) + "%"), datasets: [
+      { label: "Predicted (safe)", data: pts.map(p => p[3]), borderColor: SER(2), borderDash: [4, 4], pointRadius: 0, fill: false },
+      { label: "Predicted (likely)", data: pts.map(p => p[2]), borderColor: SER(0), backgroundColor: SER(0), pointRadius: 3 },
+      { label: "Predicted (low)", data: pts.map(p => p[1]), borderColor: SER(2), borderDash: [4, 4], pointRadius: 0, fill: "-2", backgroundColor: withAlpha(SER(2), 0.15) },
+      { label: "Real final cutoff", data: pts.map(() => r.actual), borderColor: SER(3), borderWidth: 2.5, pointRadius: 0 }] },
+      options: { scales: { x: { title: { text: "Share of the event elapsed when the prediction was made" } }, y: { title: { text: "Points" } } }, plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y)} pts` } } } } });
+  };
+  $("#acev").onchange = () => { $("#acrk").innerHTML = ""; draw(); }; $("#acrk").onchange = draw; draw();
 }
 
 // ---------------------------------------------------------------- Status

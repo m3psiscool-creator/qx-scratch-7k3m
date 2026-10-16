@@ -189,6 +189,33 @@ def _run_predict(window_id, top, entrants=None):
     return r
 
 
+def prestart(window_id, ranks):
+    """What the model would have said before the event began: only events that ended before it started count as history.
+    Used to score every finished tournament automatically. Returns {rank: (low, likely, safe)} for the ranks it can answer."""
+    target = storage.get_window(window_id)
+    if not target:
+        raise ValueError("Unknown window")
+    out = {}
+    for wide in (False, True):
+        model._ctx.approx = wide
+        try:
+            hist = [w for w in storage.windows_all(None if wide else classify.of(target)) if w["end"] < target["begin"] and w["window_id"] != window_id]
+            for r in ranks:
+                if r in out or r > 700:
+                    continue
+                try:
+                    p = model.predict(target, hist, r, None, None, {})
+                except Exception:
+                    p = None
+                if p and (wide or p.get("prior")):
+                    out[r] = (p["low"], p["likely"], p["safe"])
+        finally:
+            model._ctx.approx = False
+        if len(out) >= len([r for r in ranks if r <= 700]):
+            break
+    return out
+
+
 def _history_index(finished, family):
     idx = {}
     for w in finished:

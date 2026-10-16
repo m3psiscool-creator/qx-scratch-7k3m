@@ -91,23 +91,32 @@ def poll_once(e, budget=12.0):
 PRED_EVERY = 1200  # seconds between stored predictions for the same window (each needs the class history)
 
 
-def store_predictions(budget):
-    """Save predictions for one live window per pass (feeds the home and accuracy pages)."""
+def _ranks_of(w):
     from . import insights, service
+    goal = service.goal_of(w["meta"])
+    return sorted(set(insights.PRED_RANKS) | {r for r, _ in (w["meta"].get("advance") or [])} | ({goal["rank"]} if goal and goal["rank"] <= 1000 else set()))
+
+
+def store_predictions(budget):
+    """Save predictions for the live windows (feeds the home and accuracy pages). Every live window of every region and type gets its
+    turn: the one waiting longest goes first and the pass continues with the next until the time budget is used."""
+    from . import service
     t0 = time.time()
     now = t0
+    due = []
     for w in storage.live_windows(now, config.POST_END_GRACE):
         if not (w["begin"] + 600 <= now <= w["end"] + config.POST_END_GRACE):
             continue
-        key = "predw:" + w["window_id"]
-        if now - (storage.kv_get(key) or 0) < PRED_EVERY:
-            continue
-        storage.kv_set(key, now)          # claim it first so overlapping passes don't repeat the work
-        goal = service.goal_of(w["meta"])
-        ranks = sorted(set(insights.PRED_RANKS) | {r for r, _ in (w["meta"].get("advance") or [])}
-                       | ({goal["rank"]} if goal and goal["rank"] <= 1000 else set()))
+        last = storage.kv_get("predw:" + w["window_id"]) or 0
+        if now - last >= PRED_EVERY:
+            due.append((last, w))
+    saved = 0
+    for _, w in sorted(due, key=lambda x: x[0]):
+        if time.time() - t0 > budget:
+            break
+        storage.kv_set("predw:" + w["window_id"], now)          # claim it first so overlapping passes don't repeat the work
         rows = []
-        for r in ranks:
+        for r in _ranks_of(w):
             if time.time() - t0 > budget:
                 break
             try:
@@ -118,8 +127,32 @@ def store_predictions(budget):
                 pass
         if rows:
             storage.add_predictions(rows)
-        return len(rows)
-    return 0
+            saved += len(rows)
+    return saved
+
+
+def backfill_prestart(budget):
+    """Score every finished tournament: predict it as of its start (history from before it only) and store that, so the accuracy page
+    covers all of them, not only the ones that were live while the collector watched."""
+    from . import service
+    t0 = time.time()
+    done = 0
+    for w in storage.windows(final=True, light=True):
+        if time.time() - t0 > budget:
+            break
+        key = "prest2:" + w["window_id"]
+        if storage.kv_get(key):
+            continue
+        try:
+            full = storage.get_window(w["window_id"])
+            got = service.prestart(w["window_id"], _ranks_of(full))
+            if got:
+                storage.add_predictions([(w["window_id"], w["begin"], r, lo, li, sa, 0.0, None) for r, (lo, li, sa) in got.items()])
+            storage.kv_set(key, {"at": time.time(), "ranks": len(got)})
+            done += 1
+        except Exception as ex:
+            storage.kv_set(key, {"at": time.time(), "error": str(ex)[:200]})      # not retried forever: the error is kept for /api/admin/prestart
+    return done
 
 
 def backfill_names(budget):
@@ -173,6 +206,11 @@ def run_tick(duration=50, interval=30, force_sync=False):
         n = store_predictions(max(left - 4, 0)) if left > 6 else 0
         if n:
             log.append(("predictions", "", n))
+        rem = duration + 8 - (time.time() - t0)
+        if rem > 5:
+            nb = backfill_prestart(rem - 4)
+            if nb:
+                log.append(("prestart", "", nb))
         if time.time() - t0 < duration + 4:
             nn = backfill_names(5)
             if nn:

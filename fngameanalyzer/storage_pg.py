@@ -362,6 +362,11 @@ def windows(final=None, category=None, light=False):
         return [_row(r) for r in c.execute(q, (category,) if category else ()).fetchall()]
 
 
+def windows_all(category=None):
+    """Every finished window of a class (or of all), slim rows without sessions: history for scoring old events as of their start."""
+    return [{**w, "sessions": [], "players": [], "timed": None} for w in _light_rows(category)]
+
+
 def player_rows():
     """Compact per-event player results (for the player pages), cached for an hour."""
     if _PR["rows"] is not None and time.time() - _PR["t"] < LIGHT_TTL:

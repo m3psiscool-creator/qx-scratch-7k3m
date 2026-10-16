@@ -372,6 +372,50 @@ def admin_event_scan(q: str = "", x_admin_key: str = Header(default="")):
     return _api(probe.scan, q)
 
 
+@app.get("/api/admin/prestart")
+def admin_prestart(window: str, x_admin_key: str = Header(default="")):
+    """Owner only: the as-of-the-start prediction of one finished window (what the accuracy page scores), or the error."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    from fngameanalyzer import collector
+    w = storage.get_window(window)
+    if not w:
+        return _err("Unknown window")
+    try:
+        return {"window": window, "ranks": collector._ranks_of(w), "got": service.prestart(window, collector._ranks_of(w)), "kv": storage.kv_get("prest2:" + window)}
+    except Exception as ex:
+        import traceback
+        return {"error": str(ex), "trace": traceback.format_exc()[-1500:]}
+
+
+@app.get("/api/admin/score")
+def admin_score(seconds: int = 200, x_admin_key: str = Header(default="")):
+    """Owner only: score finished tournaments as of their start for up to `seconds` (the collector also does a few per pass)."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return _api(lambda: {"scored": collector.backfill_prestart(min(max(seconds, 5), 250)),
+                         "left": sum(1 for w in storage.windows(final=True, light=True) if not storage.kv_get("prest2:" + w["window_id"]))})
+
+
+@app.get("/api/admin/ctn")
+def admin_ctn(map: str = "BR", ver: str = "ctn:", x_admin_key: str = Header(default="")):
+    """Owner only: what the container counts of a map hold, by container class and how often each was searched."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    import re as _re
+    a = storage.kv_get(ver + map) or {}
+    by = {}
+    for name, it in (a.get("items") or {}).items():
+        fam = _re.sub(r"_C_UAID.*|_UAID.*", "", name)
+        d = by.setdefault(fam, {"names": 0, "n1": 0, "n_med": []})
+        d["names"] += 1
+        d["n1"] += it["n"] <= 1
+        d["n_med"].append(it["n"])
+    for d in by.values():
+        d["n_med"] = sorted(d["n_med"])[len(d["n_med"]) // 2]
+    return {"M": a.get("M"), "items": len(a.get("items") or {}), "classes": dict(sorted(by.items(), key=lambda kv: -kv[1]["names"]))}
+
+
 @app.get("/api/admin/sync_test")
 def admin_sync_test(region: str = "NAC", x_admin_key: str = Header(default="")):
     if not _is_admin(x_admin_key):

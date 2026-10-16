@@ -190,30 +190,49 @@ def fncs():
 
 
 # ---------------------------------------------------------------- accuracy
+POINTS = (0.0, 0.25, 0.5, 0.75, 0.9)       # the moments scored: before the start and a quarter, half, three quarters and 90% of the way
+
+
 def accuracy():
+    """Every stored prediction (live ones, and the as-of-the-start ones made for every finished tournament) against the real final cutoff:
+    error and bias by moment in the event (chart A) and, per event and rank, what was predicted over time against what happened (chart B)."""
     fin = {w["window_id"]: w for w in storage.windows(final=True, light=True)}
-    buckets = {0.25: [], 0.5: [], 0.75: [], 0.9: []}
-    recent = {}
+    buckets = {p: [] for p in POINTS}
+    by_event = {}
     for wid, ts, rank, low, likely, safe, prog in storage.predictions_all():
         w = fin.get(wid)
         if not w or prog is None:
             continue
         act = cutoffs(w, [rank]).get(rank)
-        if not act:   # None or 0 points: no relative error to measure
-            continue
-        b = min(buckets, key=lambda x: abs(x - prog))
-        if abs(b - prog) > 0.07:
+        if not act:      # no result for that rank (or 0 points): no relative error to measure
             continue
         err = (likely - act) / act
-        buckets[b].append((err, low <= act <= safe))
-        recent.setdefault(wid, []).append((rank, prog, likely, act))
+        b = min(POINTS, key=lambda x: abs(x - prog))
+        if abs(b - prog) <= (0.03 if b == 0 else 0.07):
+            buckets[b].append((err, low <= act <= safe, wid))
+        by_event.setdefault((wid, rank), {"act": act, "pts": []})["pts"].append((round(float(prog), 3), low, likely, safe))
     out = []
     for b, v in buckets.items():
         if v:
-            out.append({"progress": b, "n": len(v), "mean_abs_error_pct": round(100 * statistics.mean(abs(e) for e, _ in v), 1),
-                        "bias_pct": round(100 * statistics.mean(e for e, _ in v), 1),
-                        "inside_range_pct": round(100 * sum(1 for _, ok in v if ok) / len(v))})
-    return {"buckets": out, "events": len(recent), "note": "range = low..safe; progress = share of the window elapsed"}
+            out.append({"progress": b, "n": len(v), "events": len({x[2] for x in v}),
+                        "mean_abs_error_pct": round(100 * statistics.mean(abs(e) for e, _, _ in v), 1),
+                        "median_abs_error_pct": round(100 * statistics.median(abs(e) for e, _, _ in v), 1),
+                        "bias_pct": round(100 * statistics.mean(e for e, _, _ in v), 1),
+                        "inside_range_pct": round(100 * sum(1 for _, ok, _ in v if ok) / len(v))})
+    events = {}
+    for (wid, rank), d in by_event.items():
+        w = fin[wid]
+        pts = sorted(d["pts"])
+        if len(pts) < 2 and pts[0][0] > 0.03:
+            continue
+        ev = events.setdefault(wid, {"window_id": wid, "name": service.pretty(w.get("event_id") or "", wid), "region": w.get("region"),
+                                     "end": w.get("end"), "ranks": {}})
+        thin = pts if len(pts) <= 40 else pts[::max(1, len(pts) // 40)]
+        ev["ranks"][str(rank)] = {"actual": d["act"], "points": [list(p) for p in thin]}
+    evs = sorted(events.values(), key=lambda e: -(e.get("end") or 0))[:300]
+    return {"buckets": out, "events": len({k[0] for k in by_event}), "finished": len(fin), "list": evs,
+            "live_events": len({wid for (wid, _), d in by_event.items() if any(p[0] > 0.03 for p in d["pts"])}),
+            "note": "range = low..safe; progress = share of the window elapsed; 'start' = predicted from earlier events only, before the window opened"}
 
 
 # ---------------------------------------------------------------- status

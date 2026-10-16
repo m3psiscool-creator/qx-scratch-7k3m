@@ -148,6 +148,7 @@ function draw() {
   if (DR.layers.spots) spotsList().forEach(p => { const [sx, sy] = toPx(p.x, p.y); if (sx < -20 || sy < -20 || sx > S + 20 || sy > S + 20) return; x.beginPath(); x.arc(sx, sy, 3.5, 0, 7); x.fillStyle = "#fff"; x.fill(); x.strokeStyle = "#000"; x.lineWidth = 1; x.stroke(); if (DR.z >= 1.3 || spotsList().length <= 14) { x.font = "600 11px system-ui"; x.lineWidth = 3; x.strokeStyle = "#0009"; x.strokeText(p.name, sx + 6, sy + 4); x.fillStyle = "#fff"; x.fillText(p.name, sx + 6, sy + 4); } });
   if (DR.layers.chests && DR.loot && DR.loot.sites) DR.loot.sites.forEach(c => {
     const [sx, sy] = toPx(c.x, c.y); if (sx < -10 || sy < -10 || sx > S + 10 || sy > S + 10) return;
+    if (c.rate < (DR.info && DR.info.game_type === "br" ? 0.1 : 0)) return;   // BR chests spawn at random: seen in under 10% of matches = usually not there
     const t = clamp(c.rate, 0, 1), col = `rgb(${Math.round(70 + 185 * t)},${Math.round(220 - 150 * t)},${Math.round(110 - 40 * t)})`;   // green = rarely looted, red = looted almost every game
     drawChest(x, sx, sy, Math.min(9, 3 + 1.5 * Math.sqrt(DR.z)), col);
   });

@@ -111,6 +111,10 @@ def windows(final=None, category=None, light=False):
     return out
 
 
+def windows_all(category=None):
+    return windows(final=True, category=category)
+
+
 def get_window(window_id):
     with db() as c:
         r = c.execute("SELECT * FROM windows WHERE window_id=?", (window_id,)).fetchone()

@@ -661,12 +661,13 @@ async function accuracy() {
     sel.innerHTML = rs.map(r => `<option value="${r}" ${String(r) === keep ? "selected" : ""}>Top ${nf(r)}</option>`).join("");
     const r = e.ranks[keep]; if (!r) return;
     const pts = r.points, pct = p => Math.round(p * 100);
-    mk($("#ac2"), { type: "line", data: { labels: pts.map(p => p[0] === 0 ? "Start" : pct(p[0]) + "%"), datasets: [
-      { label: "Predicted (safe)", data: pts.map(p => p[3]), borderColor: SER(2), borderDash: [4, 4], pointRadius: 0, fill: false },
-      { label: "Predicted (likely)", data: pts.map(p => p[2]), borderColor: SER(0), backgroundColor: SER(0), pointRadius: 3 },
-      { label: "Predicted (low)", data: pts.map(p => p[1]), borderColor: SER(2), borderDash: [4, 4], pointRadius: 0, fill: "-2", backgroundColor: withAlpha(SER(2), 0.15) },
-      { label: "Real final cutoff", data: pts.map(() => r.actual), borderColor: SER(3), borderWidth: 2.5, pointRadius: 0 }] },
-      options: { scales: { x: { title: { text: "Share of the event elapsed when the prediction was made" } }, y: { title: { text: "Points" } } }, plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${nf(c.parsed.y)} pts` } } } } });
+    const xy = k => pts.map(p => ({ x: pct(p[0]), y: p[k] }));
+    mk($("#ac2"), { type: "line", data: { datasets: [
+      { label: "Predicted (safe)", data: xy(3), borderColor: SER(2), borderDash: [4, 4], pointRadius: 0, fill: false },
+      { label: "Predicted (likely)", data: xy(2), borderColor: SER(0), backgroundColor: SER(0), pointRadius: 3 },
+      { label: "Predicted (low)", data: xy(1), borderColor: SER(2), borderDash: [4, 4], pointRadius: 0, fill: "-2", backgroundColor: withAlpha(SER(2), 0.15) },
+      { label: "Real final cutoff", data: [{ x: 0, y: r.actual }, { x: 100, y: r.actual }], borderColor: SER(3), borderWidth: 2.5, pointRadius: 0 }] },
+      options: { interaction: { mode: "nearest", intersect: false }, scales: { x: { type: "linear", min: 0, max: 100, title: { text: "Share of the event elapsed when the prediction was made" }, ticks: { callback: v => v + "%" } }, y: { beginAtZero: true, title: { text: "Points" } } }, plugins: { tooltip: { callbacks: { title: c => c.length ? c[0].parsed.x + "% through" : "", label: c => `${c.dataset.label}: ${nf(c.parsed.y)} pts` } } } } });
   };
   $("#acev").onchange = () => { $("#acrk").innerHTML = ""; draw(); }; $("#acrk").onchange = draw; draw();
 }

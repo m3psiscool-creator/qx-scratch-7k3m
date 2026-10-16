@@ -25,9 +25,9 @@ HEX32 = re.compile(r"^[0-9a-f]{32}$")
 # docs/dropspots-data.md "Map pictures"). Picture: Epic Games' overview image of the map, via the Fortnite Wiki.
 MAPS = {
     # the big Battle Royale island (events with no Reload codename); its light-blue shallows count as water in the outline, hence the lower bar
-    # The picture (fortnite-api.com) spans 284,900 world units, not the 262,144 of the replay frame, and its centre is at world (X 7381, Y 3993): fitted
-    # on the 40 POI positions fortnite-api.com gives in world coordinates (Pac-Man Island, Chopped Shop, Blinky/Pinky Island... all land on their art).
-    "BR": {"name": "Battle Royale island", "raw": "/maps/br-island.jpg", "fit": {"k": 0, "L": 1.0868, "cx": 0.5282, "cy": 0.5152},
+    # The picture (fortnite-api.com) spans about 280,500 world units (L 1.07), not the 262,144 of the replay frame, centred near world (X 5900, Y -2600): fitted on the chest sites (on land and on grey buildings, both agree) and checked against
+    # the POI positions fortnite-api.com gives in world coordinates (Pac-Man, Blinky and Pinky Island land within about 80 m of their art).
+    "BR": {"name": "Battle Royale island", "raw": "/maps/br-island.jpg", "fit": {"k": 0, "L": 1.07, "cx": 0.5225, "cy": 0.490},
            "mask": "br-island", "min_on_land": 0.85, "rot": 1,
            "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)"},
 }

@@ -10,7 +10,7 @@ import { buildReplay } from './replay.mjs';
 
 const SITE = process.env.SITE || 'https://fn-game-analyzer.vercel.app';
 const KEY = process.env.ADMIN_KEY;
-const DLL = process.env.LANDINGS_DLL || join(import.meta.dirname, 'landings', 'out', 'landings.dll');
+const DLL = process.env.LANDINGS_DLL || join(import.meta.dirname, 'landings', 'out', 'LandingsReplayReader.dll');
 const DOTNET = process.env.DOTNET || 'dotnet';
 let [minX, maxX, minY, maxY] = [-55000, 55000, -55000, 55000];   // Reload maps; the big Battle Royale island is set once the window is known
 const BASE = 128;
@@ -35,11 +35,12 @@ const inside = ([u, v]) => u >= 0 && u <= 1 && v >= 0 && v <= 1;
 const listing = await api(`/api/admin/matches?window=${encodeURIComponent(windowId)}`);
 if (process.env.MAP_BOUNDS) [minX, maxX, minY, maxY] = process.env.MAP_BOUNDS.split(',').map(Number);
 else if (listing.game_type === 'br') [minX, maxX, minY, maxY] = [-131072, 131072, -131072, 131072];   // landings reach about +-112,000
-const done = new Set(RESET ? [] : listing.done);   // --reset starts this window over: rows, finished matches and chest counts
+const done = new Set(RESET ? [] : listing.done);
+const cdone = new Set(listing.cdone || []);   // matches whose containers (chests, ammo boxes...) were already read   // --reset starts this window over: rows, finished matches and chest counts
 // A tournament has thousands of matches. Alternate between the matches with the most qualifying teams (the ones that
 // answer "where did the qualifiers land") and a random draw (so "everyone else" is not skewed towards qualifiers).
 const TOP = opt('top', 1000);
-const pending = listing.sessions.filter((s) => !done.has(s.session));
+const pending = listing.sessions.filter((s) => !done.has(s.session) || !cdone.has(s.session));
 const byQual = [...pending].sort((a, b) => b.teams.filter((t) => t.rank <= TOP).length - a.teams.filter((t) => t.rank <= TOP).length);
 const shuffled = [...pending].sort(() => Math.random() - 0.5);
 const todo = [], seen = new Set();
@@ -47,7 +48,7 @@ for (let i = 0; todo.length < Math.min(LIMIT, pending.length); i++) {
   for (const s of [byQual[i], shuffled[i]]) if (s && !seen.has(s.session) && todo.length < LIMIT) { seen.add(s.session); todo.push(s); }
 }
 const started = Date.now();
-console.log(`${windowId}: ${listing.sessions.length} matches, ${done.size} done, processing ${todo.length}`);
+console.log(`${windowId}: ${listing.sessions.length} matches, ${done.size} done, ${cdone.size} with containers, processing ${todo.length}`);
 if (!todo.length) process.exit(0);
 
 const dir = mkdtempSync(join(tmpdir(), 'replays-'));
@@ -66,7 +67,7 @@ async function worker() {
 }
 await Promise.all([worker(), worker()]);
 
-const rows = [], cells = new Map(), chestCells = new Map(), finished = [];
+const rows = [], cells = new Map(), chestCells = new Map(), finished = [], ctnBatch = [];
 let noMatch = 0, synthetic = 0, chestBursts = 0;
 const CHEST = 360;   // chest map: CHEST x CHEST cells over the map square (about 3 m each)
 for (let i = 0; i < files.length; i += 20) {
@@ -77,6 +78,9 @@ for (let i = 0; i < files.length; i += 20) {
   for (const res of out) {
     const { s } = part.find((p) => res.file === `${p.s.session}.replay`) || {};
     if (!s || res.error) { console.warn(`parse error ${res.file}: ${res.error}`); continue; }
+    // containers: every chest the players searched, at the searching player's position (stored frame u, v)
+    if (!cdone.has(s.session)) ctnBatch.push({ session: s.session, items: (res.containers || []).map(([n, x, y]) => [n, ...toUnit(x, y)]).filter(([, u, v]) => u >= 0 && u <= 1 && v >= 0 && v <= 1) });
+    if (done.has(s.session)) continue;   // landings of this match are already loaded
     finished.push(s.session);
     // every team in the match, not only the ones on the leaderboard (the leaderboard stops at 10,000 teams)
     const byTeam = new Map();
@@ -115,6 +119,10 @@ for (let i = 0; i < files.length; i += 20) {
   }
 }
 rmSync(dir, { recursive: true, force: true });
+if (!DRY) for (let i = 0; i < ctnBatch.length; i += 8) {
+  const res = await api('/api/admin/containers', { method: 'POST', body: JSON.stringify({ window_id: windowId, matches: ctnBatch.slice(i, i + 8) }) });
+  if (i + 8 >= ctnBatch.length) console.log(`containers: ${ctnBatch.length} matches added, ${res.containers} distinct containers on this map so far (${res.matches} matches)`);
+}
 console.log(`landings for ${rows.length} teams from ${finished.length} matches (${failed} downloads failed, ${synthetic} teams were not on the leaderboard); ${chestBursts} chest openings in ${chestCells.size} map cells, in ${((Date.now() - started) / 1000).toFixed(0)}s`);
 
 if (DRY) {
@@ -124,6 +132,7 @@ if (DRY) {
   console.log(JSON.stringify(rows.slice(0, 2)));
   process.exit(0);
 }
+if (!rows.length && !finished.length) process.exit(0);   // nothing new for the landing tables (only containers were read)
 const code = (listing.playlist || '').match(/SourSpawn|BlastBerry|DashBerry|PiperBoot|JumpBear/i)?.[0] || '';
 const kind = listing.game_type === 'reload' || /reload/i.test(listing.playlist || '') ? 'Reload map' : 'Battle Royale island';
 for (let i = 0; i < Math.max(rows.length, 1); i += 4000) {

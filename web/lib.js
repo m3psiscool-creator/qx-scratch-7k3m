@@ -169,17 +169,33 @@ document.addEventListener("click", e => {
 const erf = x => { const s = Math.sign(x), t = 1 / (1 + 0.3275911 * Math.abs(x)); return s * (1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x)); };
 const phi = x => 0.5 * (1 + erf(x / Math.SQRT2));
 
-// A chest, drawn on a canvas: wooden body and arched lid with gold bands and a lock. `s` = half the chest's width in pixels;
-// `ring` (a colour) puts a glow behind it, used to show how often the chest is opened (green = rarely, red = in most games).
-function drawChest(x, cx, cy, s, ring) {
+// A container, drawn on a canvas. `s` = half its width in pixels; `ring` (a colour) puts a glow behind it, used to show how often it is
+// opened (green = rarely, red = in most games). kind: chest (wood and gold), rare (blue and gold), ammo (green box), produce (crate),
+// cash (register), fishing (barrel).
+function drawChest(x, cx, cy, s, ring, kind) {
+  kind = kind || "chest";
   x.save(); x.translate(cx, cy);
   if (ring) { x.beginPath(); x.arc(0, 0, s * 1.45, 0, 7); x.fillStyle = ring; x.globalAlpha = 0.9; x.fill(); x.globalAlpha = 1; x.lineWidth = Math.max(1, s * 0.16); x.strokeStyle = "rgba(10,12,20,.9)"; x.stroke(); }
+  const lw = Math.max(1, s * 0.15); x.lineJoin = "round"; x.lineWidth = lw; x.strokeStyle = "#241407";
   const w = s * 1.7, h = s * 1.15, top = -h * 0.55, lid = h * 0.52;
-  x.lineJoin = "round"; x.lineWidth = Math.max(1, s * 0.15); x.strokeStyle = "#241407";
-  x.fillStyle = "#9a6430"; x.beginPath(); x.rect(-w / 2, top + lid * 0.85, w, h - lid * 0.85); x.fill(); x.stroke();                       // body
-  x.fillStyle = "#b9803f"; x.beginPath(); x.moveTo(-w / 2, top + lid); x.quadraticCurveTo(0, top - lid * 0.5, w / 2, top + lid); x.closePath(); x.fill(); x.stroke();   // lid
-  x.fillStyle = "#f4c93a"; x.fillRect(-w / 2, top + lid * 0.78, w, Math.max(1, s * 0.2));                                                       // gold rim
-  x.fillRect(-w * 0.34, top + lid * 0.05, Math.max(1, s * 0.2), h * 0.95); x.fillRect(w * 0.34 - Math.max(1, s * 0.2), top + lid * 0.05, Math.max(1, s * 0.2), h * 0.95);   // gold bands
-  x.fillStyle = "#ffe27a"; x.fillRect(-s * 0.2, top + lid * 0.72, s * 0.4, s * 0.45);                                                            // lock
+  if (kind === "ammo" || kind === "produce") {
+    const body = kind === "ammo" ? "#5a7a35" : "#b98a4a", band = kind === "ammo" ? "#d8e6a8" : "#7aa83c";
+    x.fillStyle = body; x.beginPath(); x.rect(-w / 2, -h * 0.4, w, h * 0.95); x.fill(); x.stroke();
+    x.fillStyle = band; x.fillRect(-w / 2, -h * 0.4, w, h * 0.28); x.fillRect(-w * 0.08, -h * 0.4, w * 0.16, h * 0.95);
+  } else if (kind === "cash") {
+    x.fillStyle = "#8d98a8"; x.beginPath(); x.rect(-w / 2, -h * 0.1, w, h * 0.6); x.fill(); x.stroke();
+    x.fillStyle = "#cfd6e2"; x.fillRect(-w * 0.35, -h * 0.55, w * 0.7, h * 0.4); x.strokeRect(-w * 0.35, -h * 0.55, w * 0.7, h * 0.4);
+    x.fillStyle = "#4a5568"; x.fillRect(-w * 0.28, -h * 0.47, w * 0.56, h * 0.22);
+  } else if (kind === "fishing") {
+    x.fillStyle = "#6b4a2b"; x.beginPath(); x.ellipse(0, 0, w * 0.38, h * 0.62, 0, 0, 7); x.fill(); x.stroke();
+    x.fillStyle = "#c9a15a"; x.fillRect(-w * 0.38, -h * 0.2, w * 0.76, Math.max(1, s * 0.18)); x.fillRect(-w * 0.38, h * 0.2, w * 0.76, Math.max(1, s * 0.18));
+  } else {
+    const rare = kind === "rare";
+    x.fillStyle = rare ? "#4a6fb5" : "#9a6430"; x.beginPath(); x.rect(-w / 2, top + lid * 0.85, w, h - lid * 0.85); x.fill(); x.stroke();                                    // body
+    x.fillStyle = rare ? "#6a8fdc" : "#b9803f"; x.beginPath(); x.moveTo(-w / 2, top + lid); x.quadraticCurveTo(0, top - lid * 0.5, w / 2, top + lid); x.closePath(); x.fill(); x.stroke();   // lid
+    x.fillStyle = "#f4c93a"; x.fillRect(-w / 2, top + lid * 0.78, w, Math.max(1, s * 0.2));                                                                                       // gold rim
+    x.fillRect(-w * 0.34, top + lid * 0.05, Math.max(1, s * 0.2), h * 0.95); x.fillRect(w * 0.34 - Math.max(1, s * 0.2), top + lid * 0.05, Math.max(1, s * 0.2), h * 0.95);       // gold bands
+    x.fillStyle = "#ffe27a"; x.fillRect(-s * 0.2, top + lid * 0.72, s * 0.4, s * 0.45);                                                                                           // lock
+  }
   x.restore();
 }

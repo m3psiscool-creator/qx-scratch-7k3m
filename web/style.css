@@ -330,3 +330,4 @@ pre{background:var(--sf2);padding:10px;border-radius:10px;overflow:auto}
 .mp-legend{display:flex;align-items:center;gap:8px;margin:8px 0 2px;font-size:.74rem;color:var(--mut)}
 .mp-legend i{flex:0 0 160px;height:8px;border-radius:5px;background:linear-gradient(90deg,hsl(130,85%,52%),hsl(65,85%,52%),hsl(0,85%,52%))}
 .mp-row{cursor:pointer}.mp-row:hover td{background:var(--ac-soft)}
+.chip.on small{color:inherit;opacity:.85}

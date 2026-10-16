@@ -85,6 +85,13 @@ foreach (var file in args)
             sb.Append('[').Append(bursts[i].x.ToString("F0", inv)).Append(',').Append(bursts[i].y.ToString("F0", inv)).Append(',')
               .Append(bursts[i].n).Append(',').Append(bursts[i].t.ToString("F0", inv)).Append(']');
         }
+        sb.Append("],\"containers\":[");
+        int ci = 0;
+        foreach (var kv in reader.Opened)
+        {
+            if (ci++ > 0) sb.Append(',');
+            sb.Append('[').Append(Q(kv.Key)).Append(',').Append(kv.Value.x.ToString("F0", inv)).Append(',').Append(kv.Value.y.ToString("F0", inv)).Append(',').Append(kv.Value.t.ToString("F0", inv)).Append(']');
+        }
         sb.Append("]}");
     }
     catch (Exception e)
@@ -107,10 +114,20 @@ class Spy : ReplayReader
     readonly List<double> offsets = new();
     /// <summary>game clock minus replay time (seconds): turns a game-clock time into the time bursts are stamped with</summary>
     public double ClockOffset => offsets.Count == 0 ? 0 : offsets.OrderBy(x => x).ElementAt(offsets.Count / 2);
+    readonly Dictionary<uint, (double x, double y)> pawnPos = new();
+    /// <summary>container name -> where it was first searched (the searching player's position), game seconds</summary>
+    public readonly Dictionary<string, (double x, double y, double t)> Opened = new();
     protected override void OnExportRead(uint channelIndex, Unreal.Core.Contracts.INetFieldExportGroup? exportGroup)
     {
-        if (exportGroup is FortniteReplayReader.Models.NetFieldExports.PlayerPawn pp && pp.ReplayLastTransformUpdateTimeStamp is float w && w > 100 && offsets.Count < 2000)
-            offsets.Add(w - now);
+        var actor = Channels[channelIndex]?.Actor;
+        if (exportGroup is FortniteReplayReader.Models.NetFieldExports.PlayerPawn pp)
+        {
+            if (pp.ReplayLastTransformUpdateTimeStamp is float w && w > 100 && offsets.Count < 2000) offsets.Add(w - now);
+            if (actor != null && pp.ReplicatedMovement.HasValue) pawnPos[actor.ActorNetGUID.Value] = (pp.ReplicatedMovement.Value.Location.X, pp.ReplicatedMovement.Value.Location.Y);
+        }
+        else if (exportGroup is ContainerExport cx && actor != null && cx.SearchingPawn is uint sp && sp != 0 && pawnPos.TryGetValue(sp, out var pos)
+            && _netGuidCache.TryGetPathName(actor.ActorNetGUID.Value, out var name) && !Opened.ContainsKey(name))
+            Opened[name] = (pos.x, pos.y, now);
         base.OnExportRead(channelIndex, exportGroup);
     }
     public Spy() : base(null, ParseMode.Full) { }

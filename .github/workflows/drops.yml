@@ -37,7 +37,7 @@ jobs:
       - name: Process replays
         env:
           ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
-          LANDINGS_DLL: ${{ github.workspace }}/worker/landings/out/landings.dll
+          LANDINGS_DLL: ${{ github.workspace }}/worker/landings/out/LandingsReplayReader.dll
         run: |
           limit="${{ github.event.inputs.limit || '40' }}"
           if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 4)"; fi

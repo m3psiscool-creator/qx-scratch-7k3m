@@ -38,13 +38,13 @@ _ROT = {"SourSpawn": 1, "PiperBoot": 2}
 _RAW = {"BlastBerry": ("raw-blastberry", "Venture", {"k": 0, "L": 1.59, "cx": 0.507, "cy": 0.423}, 0.86),
         "SourSpawn": ("raw-nitemare", "Nitemare Island", {"k": 0, "L": 1.58, "cx": 0.462, "cy": 0.506}, 0.9),
         "PiperBoot": ("raw-surfcity", "Surf City V1", {"k": 0, "L": 1.61, "cx": 0.500, "cy": 0.510}, 0.9),
-        "DashBerry": ("raw-dashberry", "DashBerry", None, None),
-        "ForbiddenBlastBerry": ("raw-forbiddenblastberry", "Forbidden BlastBerry", None, None),
-        "MatchMist": ("raw-matchmist", "MatchMist", None, None),
-        "PunchBerry": ("raw-punchberry", "PunchBerry", None, None),
+        "DashBerry": ("raw-dashberry", "Springfield", None, None),
+        "ForbiddenBlastBerry": ("raw-forbiddenblastberry", "Venture (Blitz)", None, None),
+        "MatchMist": ("raw-matchmist", "Elite Stronghold", None, None),
+        "PunchBerry": ("raw-punchberry", "Oasis", None, None),
         "RopeSmile": ("raw-ropesmile", "RopeSmile", None, None),
-        "TigerRanch": ("raw-tigerranch", "TigerRanch", None, None),
-        "TimberStake": ("raw-timberstake", "TimberStake", None, None)}
+        "TigerRanch": ("raw-tigerranch", "Slurp Rush", None, None),
+        "TimberStake": ("raw-timberstake", "Squid Grounds", None, None)}
 for _c, (_f, _n, _fit, _min) in _RAW.items():
     MAPS[_c] = {"name": _n, "raw": "/maps/%s.jpg" % _f, "mask": _f, "credit": "Map: %s, Epic Games (map texture from the game files)" % _n}
     if _fit:
@@ -368,6 +368,19 @@ def area(window_id, poly, top=100, game=0):
     names = insights._name_map(ids) if ids else {}
     out["best"] = [{"team": " + ".join(names.get(t, t[:8]) if HEX32.match(t) else t for t in a["team"][i].split("+")),
                     "game": int(a["game"][i]), "points": int(a["points"][i]), "placement": int(a["placement"][i]), "rank": int(a["rank"][i])} for i in best]
+    # the teams that landed here with the best final rank in the event, with what they did from this spot
+    ranked = [i for i in idx if a["rank"][i] > 0]
+    groups = {}
+    for i in ranked:
+        groups.setdefault(a["team"][i], []).append(int(i))
+    order = sorted(groups.items(), key=lambda kv: min(int(a["rank"][i]) for i in kv[1]))[:12]
+    tids = [t for team, _ in order for t in team.split("+") if HEX32.match(t)]
+    tnames = insights._name_map(tids) if tids else {}
+    out["teams"] = [{"team": " + ".join(tnames.get(t, t[:8]) if HEX32.match(t) else t for t in team.split("+")),
+                     "rank": min(int(a["rank"][i]) for i in ids_), "landings": len(ids_),
+                     "games": sorted({int(a["game"][i]) for i in ids_ if a["game"][i] > 0})[:12],
+                     "avg_points": round(float(np.mean([a["points"][i] for i in ids_])), 1),
+                     "best_placement": int(min(a["placement"][i] for i in ids_))} for team, ids_ in order]
     return out
 
 
@@ -513,8 +526,104 @@ MIN_MATCHES = 20      # chest rates need at least this many matches behind them
 _atlas_cache = {}      # key -> (time, atlas): the chest counts are a few hundred KB, do not read them on every request
 
 
-def _sites(w, frac=None, nms=1, smooth=0):
-    """Chest sites of the map this tournament was played on: [{x, y, rate, chests}] with x, y in 0-1 map units."""
+CTN_KINDS = ("chest", "rare", "ammo", "produce", "cash", "fishing")
+CHEST_KINDS = ("chest", "rare")
+
+
+def _map_key(w):
+    """One key per map: its codename, or BR for the Battle Royale island (every BR playlist is the same map)."""
+    code = _code(w)
+    if code in CODENAMES:
+        return code
+    return "BR" if (w.get("meta") or {}).get("game_type") == "br" else code
+
+
+def _ctn_key(w):
+    return "ctn:" + _map_key(w)
+
+
+def _kind(name):
+    """What a placed container is, from the unique name the replay gives it."""
+    if name.startswith("AlwaysSpawn_RareChest"):
+        return "rare"
+    if name.startswith(("Tiered_Chest", "AlwaysSpawn_NormalChest")):
+        return "chest"
+    if name.startswith("Tiered_Ammo"):
+        return "ammo"
+    if name.startswith("FoodBox_Produce"):
+        return "produce"
+    if "CashRegister" in name:
+        return "cash"
+    if name.startswith("Barrel_FishingRod"):
+        return "fishing"
+    return None
+
+
+def _row_of(window_id):
+    return next((r for r in storage.window_list() if r["window_id"] == window_id), None)
+
+
+def add_containers(window_id, batch):
+    """Container positions read from replays (worker/landings Containers.cs): batch = [{session, items: [[name, u, v], ...]}], u, v in the
+    loaders frame. Per container name the site keeps how many matches it was searched in and up to 15 positions (the median is its place)."""
+    w = _row_of(window_id)
+    if not w:
+        raise ValueError("Unknown window")
+    key = _ctn_key(w)
+    atlas = storage.kv_get(key) or {"M": 0, "done": [], "items": {}}
+    done = set(atlas.get("done") or [])
+    added = 0
+    for b in batch or []:
+        sid = str(b.get("session") or "")[:12]
+        if not sid or sid in done:
+            continue
+        done.add(sid)
+        atlas["M"] = int(atlas.get("M") or 0) + 1
+        added += 1
+        for name, u, v in b.get("items") or []:
+            if _kind(str(name)) is None or not (0 <= float(u) <= 1 and 0 <= float(v) <= 1):
+                continue
+            it = atlas["items"].setdefault(str(name), {"n": 0, "p": []})
+            it["n"] += 1
+            it["p"].append([round(float(u), 4), round(float(v), 4)])
+            if len(it["p"]) > 15:
+                it["p"].pop(0)
+    atlas["done"] = sorted(done)
+    storage.kv_set(key, atlas)
+    _atlas_cache.pop(key, None)
+    return {"ok": True, "added": added, "matches": atlas["M"], "containers": len(atlas["items"])}
+
+
+def _container_sites(w, kinds):
+    key = _ctn_key(w)
+    hit = _atlas_cache.get(key)
+    if hit and time.time() - hit[0] < CACHE_TTL:
+        atlas = hit[1]
+    else:
+        atlas = storage.kv_get(key) or {}
+        _atlas_cache[key] = (time.time(), atlas)
+    M = int(atlas.get("M") or 0)
+    if M < MIN_MATCHES:
+        return None, M
+    nrot = _rot_of(w)
+    out = []
+    for name, it in (atlas.get("items") or {}).items():
+        kind = _kind(name)
+        if kind not in kinds or not it.get("p"):
+            continue
+        u = float(np.median([p[0] for p in it["p"]]))
+        v = float(np.median([p[1] for p in it["p"]]))
+        x, y = _turn(u, v, nrot)
+        out.append({"x": round(float(x), 4), "y": round(float(y), 4), "rate": round(min(1.0, it["n"] / M), 3), "chests": 1, "cls": kind})
+    return out, M
+
+
+def _sites(w, frac=None, nms=1, smooth=0, kinds=CHEST_KINDS):
+    """Chest sites of the map this tournament was played on: [{x, y, rate, chests}] with x, y in 0-1 map units. Real container positions
+    (every placed chest, read from replays) when enough matches were processed, else peaks of the loot-burst map."""
+    got, M = _container_sites(w, kinds)
+    if got is not None:
+        return got, M
     key = _atlas_key(w)
     hit = _atlas_cache.get(key)
     if hit and time.time() - hit[0] < CACHE_TTL:
@@ -586,13 +695,17 @@ def _on_land_only(w, sites):
         return sites
 
 
-def loot(window_id, frac=None, nms=1, smooth=0):
+def loot(window_id, frac=None, nms=1, smooth=0, kinds=None):
     w = storage.get_window(window_id)
     if not w:
         raise ValueError("Unknown window")
-    sites, M = _sites(w, frac, nms, smooth)
-    return {"matches": M, "sites": sites, "min_matches": MIN_MATCHES,
-            "chests": sum(s["chests"] for s in sites),
+    want = tuple(k for k in (kinds or CHEST_KINDS) if k in CTN_KINDS) or CHEST_KINDS
+    sites, M = _sites(w, frac, nms, smooth, want)
+    counts = {}
+    for s_ in sites:
+        counts[s_.get("cls", "chest")] = counts.get(s_.get("cls", "chest"), 0) + 1
+    return {"matches": M, "sites": sites, "min_matches": MIN_MATCHES, "kinds": counts, "exact": bool(sites and sites[0].get("cls")),
+            "chests": sum(s["chests"] for s in sites if s.get("cls", "chest") in CHEST_KINDS),
             "note": None if sites else f"Chest positions need at least {MIN_MATCHES} processed matches of this map (have {M})."}
 
 
@@ -679,24 +792,50 @@ def _area_loot(window_id, a, mask, base, poly):
 
 
 # ---------------------------------------------------------------- the interactive map tab: every map with chest data
+# Every map fortnite.gg lists, by the name the game uses: (key, name, mode, picture). The key is the playlist codename (or BR); the
+# picture is the real map texture where the game files have it, else the wiki icon, else none. Matched to the game textures by their
+# named locations and by looking at each map side by side (MatchMist = Elite Stronghold: ELITE EXPERIMENTS, TOP TIER TRAINING...).
+CATALOG = [
+    ("BR", "Battle Royale", "Battle Royale", "/maps/br-island.jpg"),
+    ("OG", "OG", "OG", "/maps/og.jpg"),
+    ("ForbiddenBlastBerry", "Venture", "Blitz", "/maps/raw-forbiddenblastberry.jpg"),
+    ("Asteria", "Asteria Awakened", "Blitz", ""),
+    ("Hawkins", "Stranger Things", "Blitz", "/maps/icon-hawkins.png"),
+    ("Starfall", "Starfall Island", "Blitz", "/maps/icon-starfall.png"),
+    ("Stark", "Stark Island", "Blitz", "/maps/icon-stark.png"),
+    ("BlastBerry", "Venture", "Reload", "/maps/raw-blastberry.jpg"),
+    ("PunchBerry", "Oasis", "Reload", "/maps/raw-punchberry.jpg"),
+    ("TigerRanch", "Slurp Rush", "Reload", "/maps/raw-tigerranch.jpg"),
+    ("TimberStake", "Squid Grounds", "Reload", "/maps/raw-timberstake.jpg"),
+    ("PiperBoot", "Surf City V1", "Reload", "/maps/raw-surfcity.jpg"),
+    ("SourSpawn", "Nitemare Island", "Reload", "/maps/raw-nitemare.jpg"),
+    ("MatchMist", "Elite Stronghold", "Reload", "/maps/raw-matchmist.jpg"),
+    ("DashBerry", "Springfield", "Reload", "/maps/raw-dashberry.jpg"),
+]
+
+
 def maps():
-    """One entry per map (chest atlas) with enough processed matches: the tournament to read its picture and chest sites from."""
+    """Every map with its picture, and for the ones we have chest data for the tournament to read its sites from."""
     avail = storage.drops_available()
     best = {}
     for w in storage.window_list():
         if w["window_id"] not in avail:
             continue
-        key = _atlas_key(w)
+        key = _map_key(w)
         n = avail[w["window_id"]][0]
         if key not in best or n > best[key][0]:
             best[key] = (n, w)
     out = []
-    for key, (n, w) in best.items():
-        sites, M = _sites(w)
-        if not sites:
-            continue
-        code = _code(w)
-        known = MAPS.get(code) or (MAPS["BR"] if (w.get("meta") or {}).get("game_type") == "br" else None)
-        out.append({"window_id": w["window_id"], "code": code, "name": (known or {}).get("name") or code, "matches": M, "chests": sum(s["chests"] for s in sites),
-                    "landings": n, "region": w["region"]})
-    return sorted(out, key=lambda m: -m["matches"])
+    for key, name, mode, picture in CATALOG:
+        row = {"key": key, "name": name, "mode": mode, "image": picture, "window_id": None, "matches": 0, "chests": 0, "kinds": {}, "landings": 0}
+        if key in best:
+            n, w = best[key]
+            sites, M = _sites(w, kinds=CTN_KINDS)
+            if sites:
+                kinds = {}
+                for c in sites:
+                    kinds[c.get("cls", "chest")] = kinds.get(c.get("cls", "chest"), 0) + 1
+                row.update(window_id=w["window_id"], matches=M, landings=n, region=w["region"], kinds=kinds,
+                           chests=sum(v for k, v in kinds.items() if k in CHEST_KINDS))
+        out.append(row)
+    return out

@@ -264,8 +264,9 @@ def api_maps():
 
 
 @app.get("/api/drops/loot")
-def api_drops_loot(window: str, frac: float = 0, nms: int = 1, smooth: int = 0):
-    return _api(drops.loot, window, frac if 0.002 <= frac <= 0.5 else None, min(max(nms, 1), 3), min(max(smooth, 0), 2))
+def api_drops_loot(window: str, frac: float = 0, nms: int = 1, smooth: int = 0, cls: str = ""):
+    kinds = drops.CTN_KINDS if cls == "all" else tuple(c for c in cls.split(",") if c) or None
+    return _api(drops.loot, window, frac if 0.002 <= frac <= 0.5 else None, min(max(nms, 1), 3), min(max(smooth, 0), 2), kinds)
 
 
 @app.get("/api/drops/areas")
@@ -288,6 +289,18 @@ async def admin_drops(req: Request, x_admin_key: str = Header(default="")):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
     try:
         return drops.ingest(await req.json())
+    except Exception as e:
+        return _err(e)
+
+
+@app.post("/api/admin/containers")
+async def admin_containers(req: Request, x_admin_key: str = Header(default="")):
+    """Owner only: container positions read from replays (see worker/landings/Containers.cs)."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await req.json()
+        return drops.add_containers(body.get("window_id"), body.get("matches"))
     except Exception as e:
         return _err(e)
 

@@ -89,6 +89,7 @@ def run_predict(window_id, top, entrants=None, approx=False):
             if wide and not r.get("final"):
                 r["similar_modes"] = True
                 r["method"] = ((r.get("method") or "").rstrip(". ") + " · no past event of this exact gamemode, so this uses the closest gamemodes").lstrip(" ·")
+            _share(window_id, top, entrants, r)
             return r
         except NoHistory as e:
             last = e
@@ -98,6 +99,31 @@ def run_predict(window_id, top, entrants=None, approx=False):
 
 
 MAX_TOP = 10000
+
+
+def _share(window_id, rank, entrants, r):
+    """One answer for one rank: every page (calculator, overview, home, bubble) reads the same latest prediction, so a fresh
+    calculation is also what the home page and the accuracy history show. Only the ranks the site tracks are saved."""
+    try:
+        if entrants or r.get("final"):
+            return
+        from . import insights
+        w = storage.get_window(window_id)
+        if not w or w["final"] or w["begin"] + 600 > time.time():
+            return
+        goal = goal_of(w["meta"])
+        tracked = set(insights.PRED_RANKS) | {k for k, _ in (w["meta"].get("advance") or [])} | ({goal["rank"]} if goal and goal["rank"] <= 1000 else set())
+        if rank not in tracked:
+            return
+        key = f"predlast:{window_id}:{rank}"
+        now = time.time()
+        if now - (storage.kv_get(key) or 0) < 60:
+            return
+        storage.kv_set(key, now)
+        lv = r.get("live") or {}
+        storage.add_predictions([(window_id, now, rank, r["low"], r["likely"], r["safe"], lv.get("progress"), lv.get("current") or r.get("current"))])
+    except Exception:
+        pass
 
 
 def _run_predict(window_id, top, entrants=None):
@@ -343,11 +369,17 @@ def bubble_view(window_id, goal=None, approx=False):
         raise ValueError("There is not enough finished history anywhere yet to simulate this race.")
     prob = res["prob"]
     pts, games = snap["points"], snap["games"]
+    final_at, final_range = round(res["cutoff_median"]), None
+    try:   # the headline is the same number the rank calculator and the home page show
+        pr = run_predict(window_id, goal)
+        final_at, final_range = pr["likely"], [pr["low"], pr["safe"]]
+    except Exception:
+        pass
     rows = [i for i in range(len(pts)) if 0.02 <= prob[i] <= 0.985 or abs(i + 1 - goal) <= 3][:80]
     ids = [a for i in rows for a in (players[i] if players else [])]
     names = _name_map(ids) if ids else {}
     return {"goal": goal, "progress": res["progress"], "age_s": round(time.time() - snap["ts"]),
-            "cutoff_now": pts[goal - 1], "cutoff_final": round(res["cutoff_median"]),
+            "cutoff_now": pts[goal - 1], "cutoff_final": final_at, "cutoff_range": final_range,
             "safe": int((prob >= 0.985).sum()), "in_race": len(rows), "history_used": res["used_history"],
             "rows": [{"rank": i + 1, "points": pts[i], "games": games[i], "prob": round(float(prob[i]), 3),
                       "final": round(float(res["median"][i])),

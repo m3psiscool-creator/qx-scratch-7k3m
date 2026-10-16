@@ -411,7 +411,7 @@ async function bubble() {
   card.style.display = "block";
   if (b.error) { $("#bubble").innerHTML = `<p class="mut">${esc(b.error)}</p>`; return; }
   const col = p => p >= 0.8 ? "var(--good)" : p >= 0.4 ? "var(--warn)" : "var(--mut)";
-  $("#bubble").innerHTML = `<div class="kpis">${kpi("Goal", "Top " + nf(b.goal))}${kpi("Cutoff now", nf(b.cutoff_now))}${kpi("Expected to end near", nf(b.cutoff_final), "", "hero")}${kpi("Virtually safe", b.safe, "players")}</div>` +
+  $("#bubble").innerHTML = `<div class="kpis">${kpi("Goal", "Top " + nf(b.goal))}${kpi("Cutoff now", nf(b.cutoff_now))}${kpi("Expected to end near", nf(b.cutoff_final), b.cutoff_range ? nf(b.cutoff_range[0]) + " – " + nf(b.cutoff_range[1]) : "", "hero")}${kpi("Virtually safe", b.safe, "players")}</div>` +
     table(["#", "Player", "Pts", "G", "Expected final", "Chance"], b.rows.map(r => [r.rank, r.players.length ? r.players.map(p => `<a href="#/player/${p.id}">${esc(p.name)}</a>`).join(" + ") : '<span class="mut">-</span>', nf(r.points), r.games, nf(r.final),
       `<b style="color:${col(r.prob)}">${Math.round(r.prob * 100)}%</b>`]), ["", "", "n", "n", "n", "n"]) +
     `<p class="small">Updated ${ago(b.age_s)}. Each player is simulated game by game with comparable players from past events of this gamemode. In past events the current leaders finished inside the cutoff more often than these percentages say, so the top of the table is conservative.</p>`;

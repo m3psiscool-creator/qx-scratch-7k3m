@@ -469,7 +469,7 @@ MIN_MATCHES = 20      # chest rates need at least this many matches behind them
 _atlas_cache = {}      # key -> (time, atlas): the chest counts are a few hundred KB, do not read them on every request
 
 
-def _sites(w):
+def _sites(w, frac=None, nms=1, smooth=0):
     """Chest sites of the map this tournament was played on: [{x, y, rate, chests}] with x, y in 0-1 map units."""
     key = _atlas_key(w)
     hit = _atlas_cache.get(key)
@@ -485,33 +485,38 @@ def _sites(w):
     C = np.zeros((n, n), dtype=np.float32)
     for k, v in atlas["cells"].items():
         C[int(k) // n, int(k) % n] = v
-    P = np.pad(C, 1)
-    S = sum(P[dy:dy + n, dx:dx + n] for dy in range(3) for dx in range(3))     # 3x3 sum: a chest's openings spread over neighbouring cells
-    P2 = np.pad(S, 2, constant_values=-1)
+    k = 2 * smooth + 1
+    P = np.pad(C, smooth)
+    S = sum(P[dy:dy + n, dx:dx + n] for dy in range(k) for dx in range(k))     # a chest's openings spread over neighbouring cells
+    P2 = np.pad(S, nms, constant_values=-1)
     peak = np.ones_like(S, dtype=bool)
-    for dy in range(5):
-        for dx in range(5):
-            if dy == 2 and dx == 2:
+    for dy in range(2 * nms + 1):
+        for dx in range(2 * nms + 1):
+            if dy == nms and dx == nms:
                 continue
             peak &= S >= P2[dy:dy + n, dx:dx + n]
-    thr = max(3.0, 0.05 * M)                      # opened in at least 5% of matches (and 3 times): not a one-off drop
+    # Placed chests are counted by the peaks of the opening map (one peak per chest: towns hold chests a few metres apart, so no wide
+    # smoothing or merge radius). Calibrated on Nitemare Island: this gives about 470 sites, the number of chests the map has
+    # (437 distinct chest names seen across five replays; fortnite.gg lists about 470).
+    thr = max(3.0, (frac if frac is not None else 0.01) * M)                      # opened in at least 1% of matches (and 3 times): not a one-off drop
+    R3 = sum(np.pad(C, 1)[dy:dy + n, dx:dx + n] for dy in range(3) for dx in range(3))   # the chest's openings spread over a few cells: its rate uses all of them
     ys, xs = np.nonzero(peak & (S >= thr))
     out, taken = [], set()
     for y, x in sorted(zip(ys.tolist(), xs.tolist()), key=lambda p: -S[p[0], p[1]]):
-        if any(abs(x - a) <= 2 and abs(y - b) <= 2 for a, b in taken):
+        if any(abs(x - a) <= nms and abs(y - b) <= nms for a, b in taken):
             continue                              # equal-height neighbours: keep one
         taken.add((x, y))
         r = float(S[y, x]) / M
         k = max(1, int(round(r))) if r > 1.4 else 1   # more than one opening per match at one spot: two chests close together
-        out.append({"x": round((x + 0.5) / n, 4), "y": round((y + 0.5) / n, 4), "rate": round(min(1.0, r / k), 3), "chests": k})
+        out.append({"x": round((x + 0.5) / n, 4), "y": round((y + 0.5) / n, 4), "rate": round(min(1.0, max(r, float(R3[y, x]) / M) / k), 3), "chests": k})
     return out, M
 
 
-def loot(window_id):
+def loot(window_id, frac=None, nms=1, smooth=0):
     w = storage.get_window(window_id)
     if not w:
         raise ValueError("Unknown window")
-    sites, M = _sites(w)
+    sites, M = _sites(w, frac, nms, smooth)
     return {"matches": M, "sites": sites, "min_matches": MIN_MATCHES,
             "chests": sum(s["chests"] for s in sites),
             "note": None if sites else f"Chest positions need at least {MIN_MATCHES} processed matches of this map (have {M})."}

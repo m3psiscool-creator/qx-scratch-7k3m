@@ -254,8 +254,8 @@ def api_drops_pois(window: str, top: int = 100, game: int = 0):
 
 
 @app.get("/api/drops/loot")
-def api_drops_loot(window: str):
-    return _api(drops.loot, window)
+def api_drops_loot(window: str, frac: float = 0, nms: int = 1, smooth: int = 0):
+    return _api(drops.loot, window, frac if 0.002 <= frac <= 0.5 else None, min(max(nms, 1), 3), min(max(smooth, 0), 2))
 
 
 @app.get("/api/drops/areas")

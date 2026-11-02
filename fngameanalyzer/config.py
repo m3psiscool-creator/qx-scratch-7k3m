@@ -21,7 +21,7 @@ LOGIN_URL = f"https://www.epicgames.com/id/api/redirect?clientId={CLIENT_ID}&res
 FAMILIES = {
     "FNCS": ["fncs"],
     "CASHCUP": ["cashcup", "cash_cup"],
-    "TESTCUP": ["reloadsolotestcup", "reload_solo_test_cup"],
+    "TESTCUP": ["reloadsolotest", "reload_solo_test", "reloadtestcup"],
 }
 # Epic's own tournamentType -> our family. Anything else (Ranked, Victory, Workshop...) is ignored.
 TOURNAMENT_TYPES = {"CashCup": "CASHCUP", "FNCS": "FNCS", "ShopCup": "SKINCUP", "VictoryCup": "VICTORYCUP", "WorkshopCup": "WORKSHOP",

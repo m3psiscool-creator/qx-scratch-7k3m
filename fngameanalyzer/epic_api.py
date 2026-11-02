@@ -162,11 +162,11 @@ class Epic:
         for ev in raw.get("events", []):
             fam, reg = classify(ev.get("eventId", ""))
             ttype = (ev.get("metadata") or {}).get("tournamentType")
-            if ttype:  # Epic labels it: trust that over name guesses
-                fam = config.TOURNAMENT_TYPES.get(ttype)
+            if ttype:  # Trust a known Epic type; fall back to the event ID for new/custom types.
+                fam = config.TOURNAMENT_TYPES.get(ttype) or fam
             for w in ev.get("eventWindows", []):
                 f2, r2 = classify(w.get("eventWindowId", ""))
-                fam2 = fam or (f2 if not ttype else None)
+                fam2 = fam or f2
                 if not fam2:
                     continue
                 out.append({

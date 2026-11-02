@@ -1,5 +1,6 @@
 """Server-side collector: keeps windows in sync, snapshots live boards, stores finished boards."""
 import time
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from . import auth, config, storage
@@ -25,6 +26,9 @@ def sync_windows(e, force=False):
         except Exception as ex:
             SYNC_ERRORS.append((region, str(ex).split(" -> ")[-1][:200]))
             continue  # one region failing must not block the rest
+    # Rebuild aggregates whose source boards were collected before this sync.
+    for group in _day_groups(storage.window_list()):
+        _build_cumulative(group)
     storage.kv_set("last_sync", time.time())
     return n
 
@@ -45,14 +49,79 @@ def _snap(e, w):
 
 def _final(e, w):
     try:
-        lb = e.leaderboard(w["event_id"], w["window_id"], MAX_RANK)
+        rows = storage.window_list()
+        cumulative_source = any(w["window_id"] in {x["window_id"] for x in g}
+                                for g in _day_groups(rows))
+        lb = e.leaderboard(w["event_id"], w["window_id"], 2000 if cumulative_source else MAX_RANK)
         if lb["points"]:
             storage.save_final(w["window_id"], lb)
+            for group in _day_groups(storage.window_list()):
+                if any(x["window_id"] == w["window_id"] for x in group):
+                    _build_cumulative(group)
             return ("final", w["window_id"], len(lb["points"]))
         storage.kv_set("empty:" + w["window_id"], time.time())
     except Exception as ex:
         return ("error", w["window_id"], str(ex).split(" -> ")[-1][:200])
     return ("empty", w["window_id"], 0)
+
+
+def _day_groups(rows):
+    """Group day-split windows for the same Epic event and region, across all formats."""
+    groups = {}
+    for w in rows:
+        if (w.get("meta") or {}).get("cumulative"):
+            continue
+        wid = w["window_id"]
+        day = re.search(r"Day(\d+)", wid, re.I)
+        if not day:
+            continue
+        base = re.sub(r"Day\d+", "Day", wid, flags=re.I)
+        key = (w["event_id"], w["region"], base)
+        groups.setdefault(key, {})[int(day.group(1))] = w
+    return [list(by_day.values()) for by_day in groups.values() if len(by_day) > 1]
+
+
+def _build_cumulative(group):
+    """Create the combined leaderboard for every multi-day event-window group."""
+    if len(group) < 2:
+        return False
+    group = [storage.get_window(w["window_id"]) or w for w in group]
+    group = sorted(group, key=lambda w: int(re.search(r"Day(\d+)", w["window_id"], re.I).group(1)))
+    first = group[0]
+    stem = re.sub(r"Day\d+", "Days", first["window_id"], flags=re.I)
+    totals = {}
+    for w in group:
+        for i, team in enumerate(w.get("players") or []):
+            key = tuple(sorted(team))
+            if not key:
+                continue
+            row = totals.setdefault(key, {"points": 0.0, "games": 0, "sessions": []})
+            row["points"] += (w.get("points") or [])[i]
+            row["games"] += (w.get("games") or [])[i]
+            row["sessions"].extend((w.get("sessions") or [[]])[i])
+    if not totals:
+        return False
+    board = sorted(totals.items(), key=lambda x: (-x[1]["points"], x[0]))
+    region_suffix = re.search(r"_(NAC|NAW|EU|BR|ASIA|ME|OCE)$", stem, re.I)
+    if region_suffix:
+        stem = stem[:region_suffix.start()]
+    cumulative_id = f"{stem}Cumulative_{first['region']}"
+    meta = dict(first.get("meta") or {})
+    meta["cumulative"] = True
+    meta["cumulative_sources"] = [w["window_id"] for w in group]
+    advances = sorted({(int(rank), str(label)) for w in group
+                       for rank, label in ((w.get("meta") or {}).get("advance") or [])})
+    meta["advance"] = [[rank, label] for rank, label in advances] or [[2000, "Qualification cutoff"]]
+    aggregate = {"window_id": cumulative_id, "event_id": first["event_id"],
+                           "family": first["family"], "region": first["region"],
+                           "begin": min(w["begin"] for w in group), "end": max(w["end"] for w in group), "meta": meta}
+    storage.upsert_window(aggregate)
+    if any(not w.get("final") for w in group):
+        return True
+    storage.save_final(cumulative_id, {"entrants": len(board), "points": [v["points"] for _, v in board],
+        "games": [v["games"] for _, v in board], "sessions": [v["sessions"] for _, v in board],
+        "players": [list(k) for k, _ in board], "deep": {}})
+    return True
 
 
 def poll_once(e, budget=12.0):

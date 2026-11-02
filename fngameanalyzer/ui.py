@@ -62,7 +62,7 @@ function info(){const w=cur();if(!w){$('info').textContent='';return}
 async function status(){const s=await j('/api/status');
  $('status').textContent=s.logged_in?(s.last_tick_age_s!=null?'collector: '+ago(s.last_tick_age_s):'collector: waiting'):'not logged in';
  if(!s.logged_in){$('loginbox').style.display='block';$('ll').href=s.login_url}}
-const TYPE={FNCS:'FNCS',CASHCUP:'Cash cup',SKINCUP:'Skin cup'};
+const TYPE={FNCS:'FNCS',CASHCUP:'Cash cup',SKINCUP:'Skin cup',TESTCUP:'Test cup'};
 const GROUPS=[['Live now',w=>w.status=='live'||w.status=='games finishing'],['Collecting results',w=>w.status=='ended (collecting)'],
  ['Upcoming (soonest first)',w=>w.status=='upcoming'],['Finished (latest first)',w=>w.status=='finished']];
 function render(){const fr=$('fr').value,ft=$('ft').value,fc=$('fc').value,keep=$('w').value;

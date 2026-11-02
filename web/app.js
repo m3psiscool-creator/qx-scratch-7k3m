@@ -1,7 +1,7 @@
 "use strict";
 // Pages, navigation and the router. Helpers live in lib.js, the Strategy tab in strategy.js.
 const app = $("#app");
-const TYPE = { FNCS: "FNCS", CASHCUP: "Cash cup", SKINCUP: "Skin cup", VICTORYCUP: "Victory cup", WORKSHOP: "Evaluation cup" };
+const TYPE = { FNCS: "FNCS", CASHCUP: "Cash cup", SKINCUP: "Skin cup", VICTORYCUP: "Victory cup", WORKSHOP: "Evaluation cup", TESTCUP: "Test cup" };
 const ACTIVE = ["live", "games finishing"];
 const REGIONS = ["NAC", "NAW", "EU", "BR", "ASIA", "ME", "OCE"];
 const DOT = { live: "#2ecc71", "games finishing": "#2ecc71", "ended (collecting)": "#f5a623", upcoming: "#f5a623", finished: "#9aa3b4", "not collected yet": "#9aa3b4" };

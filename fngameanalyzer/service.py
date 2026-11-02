@@ -43,7 +43,9 @@ def window_info(w):
               else "not collected yet")
     return {
         "window_id": w["window_id"], "family": w["family"], "region": w["region"],
-        "name": pretty(w.get("event_id") or "", w["window_id"]),
+        "name": (pretty(w.get("event_id") or "", w["window_id"]) +
+                 f" · Cumulative leaderboard ({len(m.get('cumulative_sources') or [])} days)"
+                 if m.get("cumulative") else pretty(w.get("event_id") or "", w["window_id"])),
         "begin": w["begin"], "end": w["end"], "final": w["final"], "status": status,
         "category": classify.of(w), "goal": goal_of(m),
         "reward_flags": (m.get("rewards") or {}).get("flags") or {
@@ -95,7 +97,25 @@ def run_predict(window_id, top, entrants=None, approx=False):
             last = e
         finally:
             model._ctx.approx = False
-    raise ValueError("There is not enough finished history anywhere yet to estimate this event.") from last
+    # With no usable historical sample, return the least-assumptive estimate available.
+    # A live cutoff is a hard lower bound; before play, zero is the only supported
+    # score estimate when neither history nor a live board exists.
+    target = storage.get_window(window_id)
+    if not target:
+        raise ValueError("Unknown window") from last
+    live = storage.snapshots(window_id, last=1)
+    snap = live[0] if live else None
+    current = None
+    if snap and snap.get("points"):
+        current = snap["points"][min(max(top, 1), len(snap["points"])) - 1]
+    value = round(current or 0)
+    result = {"rank": min(top, MAX_TOP), "low": value, "likely": value, "safe": value,
+              "current": current, "final": False, "cutoffs": [], "history_events": 0,
+              "method": "best available estimate: no usable event history; based on the current board" if snap
+                       else "best available estimate: no usable event history or live board",
+              "note": "Estimate is based only on the limited data available."}
+    _share(window_id, min(top, MAX_TOP), entrants, result)
+    return result
 
 
 MAX_TOP = 10000
@@ -312,7 +332,14 @@ def deep_predict(target, finished, snap, rank):
             if vals:
                 break
     if not vals:
-        raise NoHistory("no event with data at this rank yet")
+        # Use the nearest available cutoff from any finished board. This keeps deep
+        # predictions useful when no event has reached the requested rank.
+        pool = [w for w in finished if w.get("points")]
+        for w in pool:
+            pts = w["points"]
+            vals.append(pts[min(max(rank, 1), len(pts)) - 1])
+        if not vals:
+            raise NoHistory("no event with data at this rank yet")
     q = lambda f: vals[min(len(vals) - 1, int(f * len(vals)))]
     return {"rank": rank, "low": round(q(0.1)), "likely": round(statistics.median(vals)),
             "safe": round(q(0.9)), "current": None, "history_events": len(vals),

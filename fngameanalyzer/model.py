@@ -56,6 +56,30 @@ def comparable(target, finished):
                 else missing_format and (w.get("meta") or {}).get("match_cap") == target_meta["match_cap"]
             )
             and classify.of(w) == classify.of(target)]
+    # Some new formats have no finished events yet (for example, the first
+    # Squads Victory Cup). After exhausting the exact class, borrow the closest
+    # BR team format with a similar game count rather than returning zero.
+    if approx() and len(same) < MIN_SAME_REGION:
+        mode_size = {"solo": 1, "duo": 2, "trio": 3, "trios": 3, "squads": 4}
+        target_mode = (target_meta.get("mode") or "").lower()
+        target_type = target_meta.get("game_type")
+        target_cap = target_meta.get("match_cap")
+        candidates = [w for w in finished
+                      if w["window_id"] != target["window_id"] and w["points"]
+                      and classify.of(w) != classify.of(target)
+                      and (w.get("meta") or {}).get("game_type") == target_type]
+        candidates.sort(key=lambda w: (
+            w["region"] != target["region"],
+            mode_size.get((w.get("meta") or {}).get("mode"), 9) - mode_size.get(target_mode, 9)
+            if mode_size.get((w.get("meta") or {}).get("mode"), 9) >= mode_size.get(target_mode, 9)
+            else mode_size.get(target_mode, 9) - mode_size.get((w.get("meta") or {}).get("mode"), 9),
+            abs(((w.get("meta") or {}).get("match_cap") or 0) - (target_cap or 0)),
+            (w.get("meta") or {}).get("stage") != target_meta.get("stage"),
+            -w["end"],
+        ))
+        have = {w["window_id"] for w in same}
+        fallback = [w for w in candidates if w["window_id"] not in have]
+        same.extend(fallback[:MIN_SAME_REGION - len(same)])
     reg = sorted([w for w in same if w["region"] == target["region"]], key=lambda w: w["end"], reverse=True)
     if len(reg) >= MIN_SAME_REGION:
         return reg

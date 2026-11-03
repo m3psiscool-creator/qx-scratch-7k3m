@@ -50,7 +50,7 @@ def comparable(target, finished):
     target_format = _fmt(target)
     missing_format = target_format is None and target_meta.get("match_cap") is not None
     same = [w for w in finished
-            if w["family"] == target["family"] and w["window_id"] != target["window_id"]
+            if w["window_id"] != target["window_id"]
             and w["points"] and (
                 _fmt(w) == target_format if target_format is not None
                 else missing_format and (w.get("meta") or {}).get("match_cap") == target_meta["match_cap"]

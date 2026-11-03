@@ -44,10 +44,17 @@ MIN_SAME_REGION = 4    # fewer previous events than this in the region: other re
 
 def comparable(target, finished):
     """Previous events of the same gamemode AND the same format (game count + scoring rules).
-    Same-region events come first (and carry the most weight); other regions are added only when the region has too few."""
+    Same-region events come first (and carry the most weight); other regions are added only when the region has too few.
+    When Epic omits the target's scoring rules, use the same class and match cap as a practical fallback."""
+    target_meta = target.get("meta") or {}
+    target_format = _fmt(target)
+    missing_format = target_format is None and target_meta.get("match_cap") is not None
     same = [w for w in finished
             if w["family"] == target["family"] and w["window_id"] != target["window_id"]
-            and w["points"] and _fmt(w) == _fmt(target)
+            and w["points"] and (
+                _fmt(w) == target_format if target_format is not None
+                else missing_format and (w.get("meta") or {}).get("match_cap") == target_meta["match_cap"]
+            )
             and classify.of(w) == classify.of(target)]
     reg = sorted([w for w in same if w["region"] == target["region"]], key=lambda w: w["end"], reverse=True)
     if len(reg) >= MIN_SAME_REGION:
@@ -383,7 +390,8 @@ def rescored_prior(target, finished, rank, entrants=None, calibrate=True):
 
 def predict(target, finished, rank, entrants=None, snapshot=None, snaps_by_window=None, now=None):
     pr = prior(target, finished, rank, entrants)
-    method = "same-format history"
+    method = ("same-format history" if _fmt(target) is not None
+              else "same-mode, same-game-count history (scoring rules unavailable)")
     if not pr or pr["n"] < 2:
         rp = rescored_prior(target, finished, rank, entrants)
         if rp:

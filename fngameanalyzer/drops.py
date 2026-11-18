@@ -29,8 +29,20 @@ MAPS = {
     # the POI positions fortnite-api.com gives in world coordinates (Pac-Man, Blinky and Pinky Island land within about 80 m of their art).
     "BR": {"name": "Battle Royale island", "raw": "/maps/br-island.jpg", "fit": {"k": 0, "L": 1.07, "cx": 0.5225, "cy": 0.490},
            "mask": "br-island", "min_on_land": 0.85, "rot": 1,
-           "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)"},
+           "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)", "brkey": "BR"},
+    # the Battle Royale island from season 43 on (the One Piece island: Baratie, Loguetown, Arlong Park...). fortnite-api.com's current map image;
+    # fitted on the landings of S43 Trios Cash Cup Event 2 (the landings pile up on the towns: volcano, pink lake, harbours).
+    "BR2": {"name": "Battle Royale island (season 43)", "raw": "/maps/br-island2.jpg", "fit": {"k": 0, "L": 1.06, "cx": 0.53, "cy": 0.52},
+            "mask": "br-island2", "min_on_land": 0.8, "rot": 1,
+            "credit": "Map: Battle Royale island, Epic Games (overview image from fortnite-api.com)", "brkey": "BR2"},
 }
+
+
+def _br(w):
+    """Which Battle Royale picture a window uses: the island changed at season 43."""
+    import re
+    m = re.match(r"S(\d+)_", (w or {}).get("window_id") or "")
+    return "BR2" if m and int(m.group(1)) >= 43 else "BR"
 # Maps read straight from the game files (the minimap texture Epic ships, see tools/mapfit/mapdump): the raw picture is sent as it is
 # and the page turns it into the 0-1 frame with "fit" = {k: quarter turns counter-clockwise, L: width of the picture in frames,
 # cx, cy: centre of the picture in the frame}. A map with a fit that was measured is listed here; a map without one is fitted
@@ -80,7 +92,7 @@ def _turn(x, y, n):
 
 def _known_of(w):
     code = _code(w)
-    return code, (MAPS.get(code) or (MAPS["BR"] if (w.get("meta") or {}).get("game_type") == "br" else None))
+    return code, (MAPS.get(code) or (MAPS[_br(w)] if (w.get("meta") or {}).get("game_type") == "br" else None))
 
 
 def _rot_of(w):
@@ -122,7 +134,7 @@ _views = {}
 
 def _vwin(w):
     code, known = _known_of(w) if w else (None, None)
-    return _view("BR" if known is MAPS["BR"] else code) if known else (0.0, 0.0, 1.0)
+    return _view(known.get("brkey") or code) if known else (0.0, 0.0, 1.0)
 
 
 def _fit_view(fit, v):
@@ -257,7 +269,7 @@ def map_info(window_id):
     codename = next((t for t in CODENAMES if t.lower() in playlist.lower()), None)
     label = "Reload map" if reload_ else "Battle Royale island"
     rec = storage.drop_map_get(window_id) if hasattr(storage, "drop_map_get") else None
-    known = MAPS.get(codename) or (MAPS["BR"] if not reload_ and meta.get("game_type") == "br" else None)
+    known = MAPS.get(codename) or (MAPS[_br(w)] if not reload_ and meta.get("game_type") == "br" else None)
     check = None
     if known:   # a known map picture wins over the background drawn from player movement, but only while the landings agree with it
         rec = {**(rec or {}), **known}
@@ -271,7 +283,7 @@ def map_info(window_id):
             fit = _fit_of(codename, known, window_id) if check["status"] == "ok" else None
             if fit:
                 rec["image"] = known["raw"]
-                rec["fit"] = _fit_view({k: fit[k] for k in ("k", "L", "cx", "cy")}, _view("BR" if known is MAPS["BR"] else codename))
+                rec["fit"] = _fit_view({k: fit[k] for k in ("k", "L", "cx", "cy")}, _view(known.get("brkey") or codename))
             else:
                 rec["image"] = ""
                 rec["name"] = ""
@@ -284,7 +296,7 @@ def map_info(window_id):
         rec.pop("mask", None)
     rec = dict(rec or {})
     if rec.get("pois"):   # stored in the loader's frame: same turn as everything else
-        nrot, vw = _rot_of(w), _view("BR" if known is MAPS["BR"] else codename)
+        nrot, vw = _rot_of(w), _view(known.get("brkey") or codename)
         rec["pois"] = [{**p, "x": round((float(_turn(float(p["x"]), float(p["y"]), nrot)[0]) - vw[0]) / vw[2], 4), "y": round((float(_turn(float(p["x"]), float(p["y"]), nrot)[1]) - vw[1]) / vw[2], 4)} for p in rec["pois"]]
     rec.pop("base", None)      # never a map drawn from player movement: only a real picture of the map, or none
     rec.pop("base_size", None)
@@ -585,7 +597,7 @@ def _map_key(w):
     code = _code(w)
     if code in CODENAMES:
         return code
-    return "BR" if (w.get("meta") or {}).get("game_type") == "br" else code
+    return _br(w) if (w.get("meta") or {}).get("game_type") == "br" else code
 
 
 def _ctn_key(w):
@@ -735,7 +747,7 @@ def _on_land_only(w, sites):
     """A chest is never in the sea: drop the sites that fall in open water of the map's own land outline (a few metres of shore are allowed)."""
     try:
         code = _code(w)
-        known = MAPS.get(code) or (MAPS["BR"] if (w.get("meta") or {}).get("game_type") == "br" else None)
+        known = MAPS.get(code) or (MAPS[_br(w)] if (w.get("meta") or {}).get("game_type") == "br" else None)
         if not known or not known.get("mask") or not sites:
             return sites
         m = _land_mask(known["mask"])
@@ -745,7 +757,7 @@ def _on_land_only(w, sites):
             if not fit:
                 return sites
             m = _oriented_mask(known["mask"], fit["k"])
-        grow = 3 if known is MAPS["BR"] else 2        # the BR outline treats shallows as water: allow more shore there
+        grow = 3 if known.get("brkey") == "BR" else 2        # the BR outline treats shallows as water: allow more shore there
         n = m.shape[0]
         P = np.pad(m, grow)
         near = np.zeros_like(m)
@@ -861,7 +873,8 @@ def _area_loot(window_id, a, mask, base, poly):
 # picture is the real map texture where the game files have it, else the wiki icon, else none. Matched to the game textures by their
 # named locations and by looking at each map side by side (MatchMist = Elite Stronghold: ELITE EXPERIMENTS, TOP TIER TRAINING...).
 CATALOG = [
-    ("BR", "Battle Royale", "Battle Royale", "/maps/br-island.jpg"),
+    ("BR2", "Battle Royale (season 43)", "Battle Royale", "/maps/br-island2.jpg"),
+    ("BR", "Battle Royale (season 42 and earlier)", "Battle Royale", "/maps/br-island.jpg"),
     ("OG", "OG", "OG", "/maps/og.jpg"),
     ("ForbiddenBlastBerry", "Venture", "Blitz", "/maps/raw-forbiddenblastberry.jpg"),
     ("Asteria", "Asteria Awakened", "Blitz", ""),

@@ -31,7 +31,7 @@ async function mapLoad(m) {
     if (info.error || loot.error || !loot.sites) { info = loot = null; }
   }
   MP.info = info; MP.loot = loot;
-  MP.minRate = m.key === "BR" ? 0.1 : 0;   // BR chests spawn at random places: one seen in under 10% of matches is usually not there in a given game
+  MP.minRate = (m.key === "BR" || m.key === "BR2") ? 0.1 : 0;   // BR chests spawn at random places: one seen in under 10% of matches is usually not there in a given game
   const mp = (info && info.map) || {};
   const kinds = (loot && loot.kinds) || {};
   const sites = loot ? loot.sites : [];

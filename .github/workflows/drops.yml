@@ -45,15 +45,17 @@ jobs:
         run: |
           limit="${{ github.event.inputs.limit || '40' }}"
           if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 16)"; fi
-          # windows whose leaderboard Epic no longer serves fail fast and must not use up the slots: work down the list until 4 succeed
+          # windows whose leaderboard Epic no longer serves fail fast and must not use up the slots: work down the list until 6 succeed
           ok=0; good=""; tried=0
           for w in $wins; do
-            [ "$ok" -ge 4 ] && break
+            [ "$ok" -ge 6 ] && break
             tried=$((tried+1))
             if node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }}; then ok=$((ok+1)); good="$good $w"; else echo "window $w failed"; fi
           done
           # full replays of a few matches per window (the ones with the most qualifying teams): movement tracks for the Rotations tab
+          n=0
           for w in $good; do
+            n=$((n+1)); [ "$n" -gt 2 ] && break   # full replays are slow: two windows per run keep the Actions minutes in check
             node worker/tracks.mjs "$w" --limit "${{ github.event.inputs.tracks || '4' }}" || echo "tracks of $w failed"
           done
           # a run where nothing worked (for example the site's Epic login expired) must be red, not green

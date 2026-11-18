@@ -16,6 +16,10 @@ EVENTS = "https://events-public-service-live.ol.epicgames.com/api/v1"
 CLIENT_ID = "ec684b8c687f479fadea3cb2ad83f5c6"
 CLIENT_SECRET = "e1f31c211f28413186262d37a13fc84d"
 LOGIN_URL = f"https://www.epicgames.com/id/api/redirect?clientId={CLIENT_ID}&responseType=code"
+# Permanent login: the Fortnite iOS client may create a "device auth" (a credential that does not expire); the PC client above may not
+IOS_CLIENT_ID = "3446cd72694c4a4485d81b77adbb2141"
+IOS_CLIENT_SECRET = "9209d4a5e25a457fb9b07489d313b41a"
+DEVICE_LOGIN_URL = f"https://www.epicgames.com/id/api/redirect?clientId={IOS_CLIENT_ID}&responseType=code"
 
 # family -> keywords searched (lowercase) in the event id
 FAMILIES = {

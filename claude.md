@@ -1,6 +1,6 @@
 # FN Game Analyzer
 
-Hosted site that predicts the points needed for any rank (1-10,000) in Fortnite FNCS, Cash Cup and Skin Cup (ShopCup) windows, live and before they start. Production: https://fn-game-analyzer.vercel.app (Vercel, project `fn-game-analyzer`, team james-projects-996f2671, Hobby plan). Repo: github.com/m3psiscool-creator/fn-game-analyzer.
+Hosted site that predicts the points needed for any rank (1-10,000) in Fortnite FNCS, Cash Cup and Skin Cup (ShopCup) windows, live and before they start. Production: https://fn-game-analyzer.vercel.app (Vercel, project `fn-game-analyzer`, team james-projects-996f2671, Hobby plan). Repo: github.com/m3psiscool-creator/qx-scratch-7k3m (public on purpose, obscure name: free unlimited Actions minutes).
 
 ## User preferences
 - Short answers; list every step; critique own answer; ask for missing info rather than guess.

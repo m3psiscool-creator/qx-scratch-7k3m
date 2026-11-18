@@ -68,7 +68,7 @@ async function worker() {
     } catch (e) { failed++; console.warn(`skip ${s.session}: ${e.message}`); }
   }
 }
-await Promise.all([worker(), worker()]);
+await Promise.all([worker(), worker(), worker()]);
 
 const rows = [], cells = new Map(), chestCells = new Map(), finished = [], ctnBatch = [], purgeBatch = [];
 let noMatch = 0, synthetic = 0, chestBursts = 0;

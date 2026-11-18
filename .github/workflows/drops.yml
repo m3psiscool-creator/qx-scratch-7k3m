@@ -2,7 +2,7 @@ name: drops
 # Reads the replays of recent tournaments and loads landing spots into the Dropspots tab.
 on:
   schedule:
-    - cron: "17 */3 * * *"
+    - cron: "17 */4 * * *"
   workflow_dispatch:
     inputs:
       window:
@@ -11,11 +11,11 @@ on:
       limit:
         description: "Matches to process per window"
         required: false
-        default: "40"
+        default: "25"
       tracks:
         description: "Full replays to read per window for the Rotations tab"
         required: false
-        default: "4"
+        default: "3"
       purge_from:
         description: "Move matches out of this map's chest atlas (map key, e.g. BR) and re-read them for the right one"
         required: false
@@ -46,20 +46,21 @@ jobs:
           ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
           LANDINGS_DLL: ${{ github.workspace }}/worker/landings/out/LandingsReplayReader.dll
         run: |
-          limit="${{ github.event.inputs.limit || '40' }}"
-          if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 16)"; fi
-          # windows whose leaderboard Epic no longer serves fail fast and must not use up the slots: work down the list until 6 succeed
-          ok=0; good=""; tried=0
+          limit="${{ github.event.inputs.limit || '25' }}"
+          if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 60)"; fi
+          # breadth first: a few matches of every window (fewest landings first) within a time budget, so the Actions minutes (private repo: 2000/month) are spent on windows that have nothing yet.
+          # windows whose leaderboard Epic no longer serves fail fast and do not count.
+          ok=0; good=""; tried=0; SECONDS=0
           for w in $wins; do
-            [ "$ok" -ge 6 ] && break
+            [ "$SECONDS" -ge 360 ] && break
             tried=$((tried+1))
             if node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }} ${{ github.event.inputs.purge_from && format('--purge-from {0}', github.event.inputs.purge_from) || '' }}; then ok=$((ok+1)); good="$good $w"; else echo "window $w failed"; fi
           done
           # full replays of a few matches per window (the ones with the most qualifying teams): movement tracks for the Rotations tab
           n=0
           for w in $good; do
-            n=$((n+1)); [ "$n" -gt 2 ] && break   # full replays are slow: two windows per run keep the Actions minutes in check
-            node worker/tracks.mjs "$w" --limit "${{ github.event.inputs.tracks || '4' }}" || echo "tracks of $w failed"
+            n=$((n+1)); [ "$n" -gt 1 ] && break   # full replays are slow: one window per run keeps the Actions minutes in check
+            node worker/tracks.mjs "$w" --limit "${{ github.event.inputs.tracks || '3' }}" || echo "tracks of $w failed"
           done
           # a run where nothing worked (for example the site's Epic login expired) must be red, not green
           if [ "$tried" -gt 0 ] && [ "$ok" -eq 0 ]; then echo "::error::no window could be processed (check the Epic login on the Status page)"; exit 1; fi

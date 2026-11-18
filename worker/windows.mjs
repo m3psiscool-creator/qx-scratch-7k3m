@@ -6,9 +6,11 @@ const count = Number(process.argv[2] || 4), cap = Number(process.argv[3] || 1e9)
 const j = async (p) => (await fetch(SITE + p)).json();
 const [wins, have] = await Promise.all([j('/api/windows'), j('/api/drops/events')]);
 const now = Date.now() / 1000;
+// a window the worker already read to the end is skipped (windows with downloads that kept failing come back after 3 days)
+const finished = (w) => { const c = (have[w.window_id] || {}).complete; return !!c && (!c.failed || now - c.at < 3 * 86400); };
 const tier = (w) => (/_(EU|NAC)$/i.test(w.window_id) ? 0 : 1);   // owner's priority: EU and NAC first, every other region after them
 const list = wins
-  .filter((w) => w.final && w.end > now - 27 * 86400 && w.end < now - 1800 && ((have[w.window_id] || {}).landings || 0) < cap)
+  .filter((w) => w.final && w.end > now - 27 * 86400 && w.end < now - 1800 && !finished(w) && ((have[w.window_id] || {}).landings || 0) < cap)
   .sort((a, b) => tier(a) - tier(b) || ((have[a.window_id] || {}).landings || 0) - ((have[b.window_id] || {}).landings || 0) || b.end - a.end)
   .slice(0, count);
 for (const w of list) console.log(w.window_id);

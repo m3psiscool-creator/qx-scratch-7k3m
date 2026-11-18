@@ -314,7 +314,10 @@ def map_info(window_id):
 
 def events():
     """Which tournaments have landing data."""
-    return {k: {"landings": v[0], "games": v[1]} for k, v in storage.drops_available().items()}
+    out = {k: {"landings": v[0], "games": v[1]} for k, v in storage.drops_available().items()}
+    for wid, c in (storage.kv_get("drops_complete") or {}).items():   # windows the worker has read to the end (so it does not list them again)
+        out.setdefault(wid, {"landings": 0, "games": 0})["complete"] = c
+    return out
 
 
 # ---------------------------------------------------------------- the data, as arrays

@@ -54,7 +54,10 @@ jobs:
           for w in $wins; do
             [ "$SECONDS" -ge 17400 ] && break
             tried=$((tried+1))
-            if STOP_AFTER_SECONDS=$((17400 - SECONDS)) node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }} ${{ github.event.inputs.purge_from && format('--purge-from {0}', github.event.inputs.purge_from) || '' }}; then ok=$((ok+1)); good="$good $w"; else echo "window $w failed"; fi
+            rc=0
+            STOP_AFTER_SECONDS=$((17400 - SECONDS)) node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }} ${{ github.event.inputs.purge_from && format('--purge-from {0}', github.event.inputs.purge_from) || '' }} || rc=$?
+            if [ "$rc" -eq 3 ]; then echo "database read budget for this month reached: stopping"; ok=$((ok+1)); break; fi   # exit 3 = budget, not a failure
+            if [ "$rc" -eq 0 ]; then ok=$((ok+1)); good="$good $w"; else echo "window $w failed"; fi
           done
           # full replays of a few matches per window (the ones with the most qualifying teams): movement tracks for the Rotations tab
           n=0

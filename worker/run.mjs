@@ -36,6 +36,13 @@ const WIDE = [-0.7, 1.7];   // the islands are bigger than the 0-1 square: keep 
 const in01 = ([u, v]) => u >= 0 && u <= 1 && v >= 0 && v <= 1;
 const inside = ([u, v]) => u >= WIDE[0] && u <= WIDE[1] && v >= WIDE[0] && v <= WIDE[1];
 
+// the free database allows 5,000 MB of reads a month and the site itself needs part of it: stop (exit code 3) well before
+const EGRESS_LIMIT = Number(process.env.EGRESS_LIMIT_MB || 3600);
+async function overBudget() {
+  try { const b = await api('/api/admin/budget'); if (b.egress_mb_month >= EGRESS_LIMIT) { console.log(`database reads this month: ${b.egress_mb_month} MB (limit ${EGRESS_LIMIT}): stopping`); return true; } } catch (e) { /* unknown: carry on */ }
+  return false;
+}
+if (await overBudget()) process.exit(3);
 const listing = await api(`/api/admin/matches?window=${encodeURIComponent(windowId)}`);
 if (process.env.MAP_BOUNDS) [minX, maxX, minY, maxY] = process.env.MAP_BOUNDS.split(',').map(Number);
 else if (listing.game_type === 'br') [minX, maxX, minY, maxY] = [-131072, 131072, -131072, 131072];   // landings reach about +-112,000
@@ -54,10 +61,10 @@ for (let i = 0; todo.length < Math.min(LIMIT, pending.length); i++) {
 }
 const started = Date.now();
 console.log(`${windowId}: ${listing.sessions.length} matches, ${done.size} done, ${cdone.size} with containers, processing ${todo.length}`);
-if (!todo.length) process.exit(0);
+if (!todo.length) { if (!DRY && !PURGE && !pending.length) await api('/api/admin/drops_complete', { method: 'POST', body: JSON.stringify({ window_id: windowId, failed: 0 }) }); process.exit(0); }
 
 const CHUNK = opt('chunk', 150);   // a whole tournament can be 20,000 matches: download, parse, post and delete the files chunk by chunk (disk and memory)
-let totalFailed = 0, totalMatches = 0;
+let totalFailed = 0, totalMatches = 0, stopped = false, budgetStop = false;
 for (let c = 0; c < todo.length; c += CHUNK) {
 const part0 = todo.slice(c, c + CHUNK), firstChunk = c === 0, lastChunk = c + CHUNK >= todo.length;
 const dir = mkdtempSync(join(tmpdir(), 'replays-'));
@@ -133,13 +140,13 @@ for (let i = 0; i < files.length; i += 20) {
   }
 }
 rmSync(dir, { recursive: true, force: true });
-if (!DRY && PURGE) for (let i = 0; i < purgeBatch.length; i += 8) {   // first take the matches out of the wrong map's atlas
-  const res = await api('/api/admin/containers_remove', { method: 'POST', body: JSON.stringify({ map_key: PURGE, matches: purgeBatch.slice(i, i + 8) }) });
-  if (i + 8 >= purgeBatch.length) console.log(`removed from ${PURGE}: ${purgeBatch.length} matches; it now holds ${res.matches} matches and ${res.containers} containers`);
+if (!DRY && PURGE) for (let i = 0; i < purgeBatch.length; i += 30) {   // first take the matches out of the wrong map's atlas
+  const res = await api('/api/admin/containers_remove', { method: 'POST', body: JSON.stringify({ map_key: PURGE, matches: purgeBatch.slice(i, i + 30) }) });
+  if (i + 30 >= purgeBatch.length) console.log(`removed from ${PURGE}: ${purgeBatch.length} matches; it now holds ${res.matches} matches and ${res.containers} containers`);
 }
-if (!DRY) for (let i = 0; i < ctnBatch.length; i += 8) {
-  const res = await api('/api/admin/containers', { method: 'POST', body: JSON.stringify({ window_id: windowId, matches: ctnBatch.slice(i, i + 8) }) });
-  if (i + 8 >= ctnBatch.length) console.log(`containers: ${ctnBatch.length} matches added, ${res.containers} distinct containers on this map so far (${res.matches} matches)`);
+if (!DRY) for (let i = 0; i < ctnBatch.length; i += 30) {   // every post reads and writes the whole chest atlas of the map: few, big posts
+  const res = await api('/api/admin/containers', { method: 'POST', body: JSON.stringify({ window_id: windowId, matches: ctnBatch.slice(i, i + 30) }) });
+  if (i + 30 >= ctnBatch.length) console.log(`containers: ${ctnBatch.length} matches added, ${res.containers} distinct containers on this map so far (${res.matches} matches)`);
 }
 if (!DRY && trackBatch.length) {
   let stored = 0, bytes = 0;
@@ -175,5 +182,8 @@ for (let i = 0; i < Math.max(rows.length, 1); i += 4000) {
 }
   totalFailed += failed; totalMatches += finished.length;
   console.log(`chunk ${Math.floor(c / CHUNK) + 1}/${Math.ceil(todo.length / CHUNK)} done (${totalMatches} matches loaded, ${totalFailed} failed, ${((Date.now() - started) / 60000).toFixed(1)} min)`);
-  if (process.env.STOP_AFTER_SECONDS && (Date.now() - started) / 1000 > Number(process.env.STOP_AFTER_SECONDS)) { console.log('time budget reached, the rest follows on the next run'); break; }
+  if (process.env.STOP_AFTER_SECONDS && (Date.now() - started) / 1000 > Number(process.env.STOP_AFTER_SECONDS)) { console.log('time budget reached, the rest follows on the next run'); stopped = true; break; }
+  if (await overBudget()) { stopped = true; budgetStop = true; break; }
 }
+if (!DRY && !stopped && !PURGE && todo.length >= pending.length) await api('/api/admin/drops_complete', { method: 'POST', body: JSON.stringify({ window_id: windowId, failed: totalFailed }) });
+if (budgetStop) process.exit(3);

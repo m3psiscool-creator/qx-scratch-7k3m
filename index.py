@@ -325,6 +325,26 @@ async def admin_containers_remove(req: Request, x_admin_key: str = Header(defaul
         return _err(e)
 
 
+@app.post("/api/admin/drops_complete")
+async def admin_drops_complete(req: Request, x_admin_key: str = Header(default="")):
+    """Owner only: the worker read every match of this window ({window_id, failed}); it is not listed again for a while."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    b = await req.json()
+    done = storage.kv_get("drops_complete") or {}
+    done[str(b["window_id"])] = {"at": int(time.time()), "failed": int(b.get("failed") or 0)}
+    storage.kv_set("drops_complete", done)
+    return {"ok": True}
+
+
+@app.get("/api/admin/budget")
+def admin_budget(x_admin_key: str = Header(default="")):
+    """Owner only: database data read this month (MB). The free Neon plan allows 5,000 MB; the worker stops well before."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return {"egress_mb_month": round(storage.egress_month() / 1e6, 1)}
+
+
 @app.post("/api/admin/tracks")
 async def admin_tracks(req: Request, x_admin_key: str = Header(default="")):
     """Owner only: one match's movement tracks (see worker/run.mjs --tracks)."""

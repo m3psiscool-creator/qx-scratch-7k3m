@@ -1,8 +1,9 @@
 name: drops
 # Reads the replays of recent tournaments and loads landing spots into the Dropspots tab.
 on:
-  schedule:
-    - cron: "17 */4 * * *"
+  # schedule paused while the free database is over its monthly read quota (re-enable: uncomment)
+  # schedule:
+  #   - cron: "17 */4 * * *"
   workflow_dispatch:
     inputs:
       window:

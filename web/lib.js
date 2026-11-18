@@ -166,7 +166,8 @@ function estimateStrip(d) {
 // grid on/off is remembered across the Dropspots, Map and Rotations maps
 const gridPref = def => { try { const v = localStorage.getItem("fga-grid"); return v === null ? def : v === "1"; } catch (e) { return def; } };
 const gridSave = on => { try { localStorage.setItem("fga-grid", on ? "1" : "0"); } catch (e) { } };
-const kpi = (l, v, d, c) => `<div class="kpi ${c || ""}"><div class="l">${l}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ""}</div>`;
+// bento stat tile: label, big number, optional footer. d = "text", or ["label", "value"] for a label/value footer row.
+const kpi = (l, v, d, c) => `<div class="kpi ${c || ""}"><div class="l">${l}</div><div class="v">${v}</div>${d ? `<div class="d">${Array.isArray(d) ? `<span>${d[0]}</span><b>${d[1]}</b>` : d}</div>` : ""}</div>`;
 const skel = (n = 1, h = 120) => Array.from({ length: n }, () => `<div class="skel" style="height:${h}px;margin:0 0 16px"></div>`).join("");
 // deterministic random numbers so a simulation does not flicker between renders
 function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }

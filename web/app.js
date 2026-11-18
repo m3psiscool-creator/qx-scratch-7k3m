@@ -46,6 +46,10 @@ function applyTheme() {
   const dark = THEME === "dark" || (THEME === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
   $("#theme").innerHTML = icon(dark ? "moon" : "sun"); $("#theme").title = "Theme: " + THEME + " (click to change)";
 }
+// menu: the hamburger collapses the sidebar on a computer and opens it as a drawer on a phone
+{ const off = store.get("navoff", false); document.body.classList.toggle("nav-off", !!off);
+  $("#navtoggle").onclick = () => { if (matchMedia("(max-width:900px)").matches) document.body.classList.toggle("nav-open"); else { const o = !document.body.classList.contains("nav-off"); document.body.classList.toggle("nav-off", o); store.set("navoff", o); } };
+  $("#nav").addEventListener("click", () => document.body.classList.remove("nav-open")); }
 $("#theme").onclick = () => { THEME = { dark: "light", light: "auto", auto: "dark" }[THEME]; store.set("theme", THEME); applyTheme(); route(); };
 applyTheme();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { applyTheme(); if (THEME === "auto") route(); });
@@ -196,21 +200,25 @@ async function home(quiet) {
   const live = d.live.map((w, i) => {
     const goal = w.goal ? w.goal.rank : null, pr = goal ? w.preds[goal] : null, ranks = Object.keys(w.now).map(Number).sort((a, b) => a - b);
     const rows = ranks.map(r => { const p = w.preds[r]; return [(goal === r) ? `<b>★ Top ${r}</b>` : `Top ${r}`, nf(w.now[r]), p ? `<b>${nf(p.likely)}</b> <small>${nf(p.low)}–${nf(p.safe)}</small>` : "<small>calculating…</small>"]; });
-    return `<div class="card"><div class="hd"><h2>${star(w.window_id)}${link(w.window_id, w.name)}</h2><span class="sub">board updated ${ago(w.age_s)}${w.entrants ? " · " + nf(w.entrants) + " entrants" : ""}</span></div>
-      <div class="meta chips"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div>
-      <div class="prog"><i style="width:${Math.min(100, w.progress * 100)}%"></i></div>
-      <div class="small">${Math.round(w.progress * 100)}% of the window · ends ${fmt(w.end)}</div>
-      ${goal ? `<div class="kpis" style="margin-top:14px">${kpi("Goal: top " + nf(goal), nf(w.now[goal]), "points right now")}${kpi("Predicted final", pr ? nf(pr.likely) : "…", pr ? "range " + nf(pr.low) + " – " + nf(pr.safe) : "calculating", "hero")}<div class="kpi"><div class="l">Goal cutoff, recent trend</div><div class="cv spark"><canvas id="sp${i}"></canvas></div></div></div>` : ""}
+    const pct = Math.round(w.progress * 100);
+    return `<div class="card"><div class="lc-head"><div><h2>${star(w.window_id)}${link(w.window_id, w.name)}</h2><div class="meta"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div></div>
+        <span class="sub small">board updated ${ago(w.age_s)}${w.entrants ? " · " + nf(w.entrants) + " entrants" : ""}</span></div>
+      <div class="lc-prog"><div class="prog"><i style="width:${Math.min(100, w.progress * 100)}%"></i></div><span>${pct}% · ends ${fmt(w.end)}</span></div>
+      ${goal ? `<div class="bento">${kpi("Predicted final · top " + nf(goal), pr ? nf(pr.likely) : "…", pr ? ["Likely range", nf(pr.low) + " – " + nf(pr.safe)] : "calculating", "hero wide")}${kpi("Goal cutoff now", nf(w.now[goal]), ["Top " + nf(goal), "points right now"])}<div class="kpi"><div class="l">Goal cutoff, recent trend</div><div class="cv spark"><canvas id="sp${i}"></canvas></div></div></div>` : ""}
       <div class="grid g2"><div><h3>Leaders</h3>${table(["#", "Player", "Pts", "G"], w.top.map(t => [t.rank, esc(t.players.join(" + ")), nf(t.points), t.games]), ["", "", "n", "n"])}</div>
       <div><h3>Cutoffs: now → predicted final</h3>${table(["Rank", "Now", "Predicted"], rows, ["", "n", "n"])}</div></div>
-      <div class="mestrip" id="mh${i}"></div><div class="chips" style="margin-top:12px"><a class="btn" href="#/t/${encodeURIComponent(w.window_id)}/strategy">Strategy ›</a><a class="btn sec" href="#/t/${encodeURIComponent(w.window_id)}/predictions">Predictions</a></div></div>`;
+      <div class="mestrip" id="mh${i}"></div><div class="chips" style="margin-top:14px"><a class="btn" href="#/t/${encodeURIComponent(w.window_id)}/strategy">Strategy ›</a><a class="btn sec" href="#/t/${encodeURIComponent(w.window_id)}/predictions">Predictions</a></div></div>`;
   }).join("");
   const favs = FAVS.size ? (await allWindows()).filter(w => isFav(w.window_id) && (!REGION || w.region === REGION) && w.status !== "not collected yet").sort((a, b) => rank(a) - rank(b)).slice(0, 6) : [];
   const nextUp = (d.upcoming || []).slice(0, 6);
-  app.innerHTML = head("Live now" + (REGION ? " · " + REGION : ""), "Live leaderboards, predicted final cutoffs, and a strategy page for every event.") +
+  const FEAT = [["target", "Strategy", "A game plan for every event: the points to aim for, finisher profiles, pace and a safety margin.", "#/strategy"], ["map", "Dropspots", "Where teams landed and which landings qualified, from thousands of replays.", "#/drops"], ["pin", "Map", "Every chest and container with open rates, so you know which spots are worth the drop.", "#/map"], ["route", "Rotations", "Pick a tournament and a player, then watch every game: the drop and each rotation.", "#/rotations"]];
+  const feats = `<div class="feats">${FEAT.map(([ic, t, dsc, h]) => `<a class="feat" href="${h}"><div class="ic">${icon(ic)}</div><b>${t}</b><span>${dsc}</span><div class="more">Open ›</div></a>`).join("")}</div>`;
+  app.innerHTML = `<section class="hero"><h1>Know the cutoff <em>before it happens</em></h1><p>Live leaderboards, predicted final cutoffs and a game plan for every FNCS, Cash Cup and Skin Cup${REGION ? " · " + REGION : ""}.</p>
+      <div class="cta"><a class="btn" href="#/strategy">Plan my strategy</a><a class="btn sec" href="#/schedule">See the schedule</a></div></section>` + feats +
+    `<div class="kpis">${kpi("Live now", d.live.length, ["Starting soon", (d.upcoming || []).length])}${kpi("Next start", (d.upcoming || [])[0] ? `<span class="cd" data-cd="${d.upcoming[0].begin}"></span>` : "–", (d.upcoming || [])[0] ? ["Event", esc(d.upcoming[0].name)] : "")}${kpi("Finished recently", d.finished.length, ["Latest", d.finished[0] ? esc(d.finished[0].region) : "–"])}</div>` +
     (store.get("seen_new", "") === NEWS_VER ? "" : `<div class="card" id="newscard"><div class="hd"><h2>What's new</h2><button class="sec chip" id="newsx">Got it</button></div><ul style="margin:0;padding-left:18px;line-height:1.6">${NEWS.map(n => `<li>${n}</li>`).join("")}</ul></div>`) +
     (ACCT ? "" : `<div class="card flat" style="display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Add your Epic account once</b><div class="small">Then your rank, points and games are checked automatically on every event, with no login.</div></div><button id="ap-open">Add my account</button></div>`) +
-    (live || `<div class="card flat"><b>Nothing is live right now${REGION ? " in " + REGION : ""}.</b> <span class="mut">Plan ahead with the next events below.</span></div>`) +
+    `<h3 style="margin-top:22px">Live now${REGION ? " · " + REGION : ""}</h3>` + (live || `<div class="card flat"><b>Nothing is live right now${REGION ? " in " + REGION : ""}.</b> <span class="mut">Plan ahead with the next events below.</span></div>`) +
     (favs.length ? `<h3 style="margin-top:22px">★ Your favourites</h3><div class="evgrid" style="margin-bottom:20px">${favs.map(evCard).join("")}</div>` : "") +
     `<h3 style="margin-top:22px">Starting soon</h3><div class="evgrid">${nextUp.map(evCard).join("") || '<div class="card flat mut">No upcoming events.</div>'}</div>
     <div class="card" style="margin-top:20px"><div class="hd"><h2>Just finished</h2></div>${table(["Ended", "Region", "Tournament", ""], d.finished.map(w => [fmt(w.end), w.region, star(w.window_id) + link(w.window_id, w.name), link(w.window_id, "Results ›", "predictions")]))}</div>`;

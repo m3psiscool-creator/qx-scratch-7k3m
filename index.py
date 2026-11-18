@@ -528,13 +528,14 @@ def live(window: str):
 
 @app.post("/api/login_device")
 async def login_device(req: Request):
+    """Turn the current (still valid) login into a permanent device login."""
     body = await req.json()
     if not _is_admin(body.get("key")):
         return {"ok": False, "error": "wrong admin key"}
     try:
-        return {"ok": True, **(auth.device_finish() if body.get("finish") else auth.device_start())}
+        return {"ok": True, **auth.make_permanent(auth.Session().bearer())}
     except Exception as e:
-        return {"ok": False, "error": str(e)[:600]}
+        return {"ok": False, "error": str(e)[:900]}
 
 
 @app.post("/api/login")

@@ -686,27 +686,23 @@ async function status() {
    Data read out of the database this month ≈ <b>${s.egress_mb_month} MB</b> (free plan allows 5,000 MB). Snapshots ${c.snapshots} · series points ${c.series} · stored predictions ${c.predictions} · player names ${c.names} · events still needing deep thresholds ${c.deep_missing}.</p>
    <h3>Epic login events</h3><pre class="small" style="white-space:pre-wrap">${esc((s.auth_log || []).map(x => new Date(x.at * 1000).toLocaleTimeString() + "  " + x.kind + "  " + x.detail).join("\n") || "none yet")}</pre>
    <h3>Last collector pass</h3><pre class="small" style="white-space:pre-wrap">${esc((s.last_tick || []).map(x => x.join(" ")).join("\n"))}</pre></div>
-  <div class="card"><b>Permanent Epic login ${a.permanent ? "(active)" : "(not set up)"}</b><p class="small">${a.permanent ? "The collector logs in by itself with a stored device login, no more pasting codes. Run the steps below again only to replace it." : "Set this up once and the collector never needs a code again. Be logged in to Epic in this browser, then: 1) enter the admin key and press Start, 2) open the link it shows and approve, 3) press Finish."}</p>
-   <input id="dkey" type="password" placeholder="Admin key"><div class="chips" style="margin-top:10px"><button id="dst">1) Start</button><button id="dfin" class="sec">3) Finish</button></div><div id="dlm" class="small" style="margin-top:8px"></div></div>
+  <div class="card"><b>Permanent Epic login ${a.permanent ? "(active)" : "(not set up)"}</b><p class="small">${a.permanent ? "The collector logs in by itself with a stored device login: no more codes." : "Saving a login below now also tries to make it permanent. If the login is still valid you can also upgrade it here."}</p>
+   ${a.permanent ? "" : `<input id="dkey" type="password" placeholder="Admin key"><button id="dst" style="margin-top:10px">Make my login permanent</button> <span id="dlm" class="small"></span>`}</div>
   ${s.login.logged_in ? "" : `<div class="card"><b>Epic login needed</b><p class="small">Log in to Epic in this browser, open <a href="${esc(a.login_url)}" target="_blank">this link</a>, copy the authorizationCode and paste it here.</p>
    <input id="code" placeholder="authorizationCode"><input id="key" type="password" placeholder="Admin key" style="margin-top:6px"><button id="lg" style="margin-top:10px">Save login</button> <span id="lm" class="small"></span></div>`}
   <div class="card"><div class="hd"><h2>Feedback from visitors</h2><span class="sub">owner only</span></div><div class="row"><div><input id="fk" type="password" placeholder="Admin key"></div><div style="flex:0"><button class="sec" id="fkb">Load</button></div></div><div id="fkl" style="margin-top:10px"></div></div>
     <div class="card"><div class="hd"><h2>How the predictions work</h2></div><p class="small">Every player on the live leaderboard is replayed forward. Their remaining games (including the last queue that starts before the cutoff), points per game and chance of catching up come from players in the same spot at the same moment in earlier events <b>of the same gamemode</b> (the closest gamemodes when there is none yet). The result is corrected using a back-test on those past events. Ranks beyond 700 are scaled from the stored thresholds (ranks 1000, 1500 … 10000). Unofficial data; estimates only.</p></div>`;
   $("#fkb").onclick = async () => { const r = await j("/api/feedback", { headers: { "x-admin-key": $("#fk").value } }); $("#fkl").innerHTML = r.error ? `<span class="err">${esc(r.error)}</span>` : (r.length ? table(["When", "Kind", "Page", "Message"], r.map(x => [fmt(x.at), esc(x.kind), esc(x.page), esc(x.text)])) : '<p class="mut">Nothing yet.</p>'); };
-  const dcall = async (finish) => {
+  const dst = $("#dst");
+  if (dst) dst.onclick = async () => {
     $("#dlm").textContent = "Working...";
-    const r = await j("/api/login_device", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: $("#dkey").value, finish }) });
-    if (!r.ok) $("#dlm").innerHTML = `<span class="err">${esc(r.error || "failed")}</span>`;
-    else if (r.pending) $("#dlm").textContent = "Epic has not seen the approval yet: open the link, approve, then press Finish again.";
-    else if (r.url) $("#dlm").innerHTML = `2) Open <a href="${esc(r.url)}" target="_blank">this Epic page</a> (code ${esc(r.user_code || "")}), approve, then press <b>3) Finish</b>. (via ${esc(r.client)})`;
-    else $("#dlm").textContent = "Permanent login saved and tested (" + r.client + "). Reload this page.";
+    const r = await j("/api/login_device", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: $("#dkey").value }) });
+    $("#dlm").innerHTML = r.ok ? "Permanent login saved and tested (" + esc(r.client) + "). Reload this page." : `<span class="err">${esc(r.error || "failed")}</span>`;
   };
-  $("#dst").onclick = () => dcall(false);
-  $("#dfin").onclick = () => dcall(true);
   const lg = $("#lg");
   if (lg) lg.onclick = async () => {
     const r = await j("/api/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: $("#code").value.trim(), key: $("#key").value }) });
-    $("#lm").textContent = r.ok ? "Logged in." : (r.error || "failed");
+    $("#lm").textContent = r.ok ? "Logged in. Reload to see whether the permanent login was set up (see the login events above)." : (r.error || "failed");
   };
 }
 

@@ -477,7 +477,6 @@ def status():
         return {"logged_in": False, "db_error": str(e)[:200], "login_url": config.LOGIN_URL}
     s["last_tick_age_s"] = round(time.time() - tick["at"]) if tick else None
     s["login_url"] = config.LOGIN_URL
-    s["device_login_url"] = config.DEVICE_LOGIN_URL
     s["regions"] = config.TRACKED_REGIONS
     return s
 
@@ -533,9 +532,9 @@ async def login_device(req: Request):
     if not _is_admin(body.get("key")):
         return {"ok": False, "error": "wrong admin key"}
     try:
-        return {"ok": True, "account_id": auth.device_login(body["code"].strip().strip('"'))}
+        return {"ok": True, **(auth.device_finish() if body.get("finish") else auth.device_start())}
     except Exception as e:
-        return {"ok": False, "error": str(e)[:400]}
+        return {"ok": False, "error": str(e)[:600]}
 
 
 @app.post("/api/login")

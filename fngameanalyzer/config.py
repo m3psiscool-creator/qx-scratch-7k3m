@@ -16,10 +16,16 @@ EVENTS = "https://events-public-service-live.ol.epicgames.com/api/v1"
 CLIENT_ID = "ec684b8c687f479fadea3cb2ad83f5c6"
 CLIENT_SECRET = "e1f31c211f28413186262d37a13fc84d"
 LOGIN_URL = f"https://www.epicgames.com/id/api/redirect?clientId={CLIENT_ID}&responseType=code"
-# Permanent login: the Fortnite iOS client may create a "device auth" (a credential that does not expire); the PC client above may not
-IOS_CLIENT_ID = "3446cd72694c4a4485d81b77adbb2141"
-IOS_CLIENT_SECRET = "9209d4a5e25a457fb9b07489d313b41a"
-DEVICE_LOGIN_URL = f"https://www.epicgames.com/id/api/redirect?clientId={IOS_CLIENT_ID}&responseType=code"
+# Permanent login = a "device auth" made through one of Fortnite's own game clients (Epic disables some: the iOS client answers
+# client_disabled 18014). The first that still works is used; the device auth is tied to that client.
+DEVICE_CLIENTS = [
+    ("fortniteNewSwitchGameClient", "98f7e42c2e3a4f86a74eb43fbb41ed39", "0a2449a2-001a-451e-afec-3e812901c4d7"),
+    ("fortniteAndroidGameClient", "3f69e56c7649492c8cc29f1af08a8a12", "b51ee9cb12234f50a69efa67ef53812e"),
+    ("fortniteSwitchGameClient", "5229dcd3ac3845208b496649092f251b", "e3bd2d3e-bf8c-4857-9e7d-f3d947d220c7"),
+    ("fortniteValkyrieGameClient", "3e13c5c57f594a578abe516eecb673fe", "530e316c337e409893c55ec44f22cd62"),
+    ("fortniteXboxGameClient", "cfaa14c4bf8744e3a5ef9a5d6c34558d", "bcb0cd392fcd4e50a76ad4384c620543"),
+    ("fortniteIOSGameClientEUAppstore", "af43dc71dd91452396fcdffbd7a8e8a9", "4YXvSEBLFRPLh1hzGZAkfOi5mqupFohZ"),
+]
 
 # family -> keywords searched (lowercase) in the event id
 FAMILIES = {

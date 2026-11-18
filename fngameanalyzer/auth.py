@@ -11,13 +11,13 @@ class NotLoggedIn(RuntimeError):
     pass
 
 
-def _basic(ios=False):
-    cid, sec = (config.IOS_CLIENT_ID, config.IOS_CLIENT_SECRET) if ios else (config.CLIENT_ID, config.CLIENT_SECRET)
+def _basic(client=None):
+    cid, sec = client or (config.CLIENT_ID, config.CLIENT_SECRET)
     return {"Authorization": "Basic " + base64.b64encode(f"{cid}:{sec}".encode()).decode()}
 
 
-def _token(data, ios=False):
-    r = requests.post(f"{config.ACCOUNT}/oauth/token", data=data, headers=_basic(ios), timeout=30)
+def _token(data, client=None):
+    r = requests.post(f"{config.ACCOUNT}/oauth/token", data=data, headers=_basic(client), timeout=30)
     if r.status_code != 200:
         raise RuntimeError(f"Epic token error {r.status_code}: {r.text[:300]}")
     return r.json()
@@ -64,26 +64,58 @@ def _device():
 
 def _device_grant(dev):
     return _token({"grant_type": "device_auth", "account_id": dev["account_id"], "device_id": dev["device_id"],
-                   "secret": dev["secret"], "token_type": "eg1"}, ios=True)
+                   "secret": dev["secret"], "token_type": "eg1"}, client=tuple(dev["client"][1:]))
 
 
-def device_login(code):
-    """One-time: exchange an authorizationCode (made with the iOS client) and ask Epic for a device auth that is stored for good."""
-    tok = _token({"grant_type": "authorization_code", "code": code, "token_type": "eg1"}, ios=True)
+def device_start():
+    """Step 1 of the permanent login: ask Epic for an activation link. The owner opens it (logged in to Epic) and approves."""
+    errs = []
+    for name, cid, sec in config.DEVICE_CLIENTS:
+        try:
+            tok = _token({"grant_type": "client_credentials", "token_type": "eg1"}, client=(cid, sec))
+            r = requests.post(f"{config.ACCOUNT}/oauth/deviceAuthorization", headers={"Authorization": "Bearer " + tok["access_token"],
+                              "Content-Type": "application/x-www-form-urlencoded"}, data="prompt=login", timeout=30)
+            if r.status_code != 200:
+                raise RuntimeError(f"deviceAuthorization {r.status_code}: {r.text[:200]}")
+            j = r.json()
+        except RuntimeError as e:
+            errs.append(f"{name}: {str(e)[:160]}")
+            continue
+        storage.kv_set("device_pending", {"client": [name, cid, sec], "device_code": j["device_code"],
+                                           "interval": j.get("interval", 10), "expires_at": time.time() + int(j.get("expires_in", 600))})
+        note("device start", name)
+        return {"url": j.get("verification_uri_complete") or j.get("verification_uri"), "user_code": j.get("user_code"),
+                "expires_in": j.get("expires_in"), "client": name}
+    raise RuntimeError("No Epic client accepted the request. " + " | ".join(errs))
+
+
+def device_finish():
+    """Step 2, after the owner approved the link: turn it into a device auth, test it and keep it for good."""
+    p = storage.kv_get("device_pending")
+    if not p or time.time() > p["expires_at"]:
+        raise RuntimeError("No pending activation (or it expired): start again")
+    name, cid, sec = p["client"]
+    try:
+        tok = _token({"grant_type": "device_code", "device_code": p["device_code"], "token_type": "eg1"}, client=(cid, sec))
+    except RuntimeError as e:
+        if "authorization_pending" in str(e):
+            return {"pending": True}
+        raise
     acct = tok["account_id"]
     r = requests.post(f"{config.ACCOUNT}/public/account/{acct}/deviceAuth",
                       headers={"Authorization": "Bearer " + tok["access_token"]}, timeout=30)
     if r.status_code != 200:
-        raise RuntimeError(f"Epic refused to create a device login ({r.status_code}): {r.text[:300]}")
+        raise RuntimeError(f"Epic refused to create a device login with {name} ({r.status_code}): {r.text[:300]}")
     j = r.json()
-    dev = {"account_id": acct, "device_id": j["deviceId"], "secret": j["secret"], "created": time.time()}
+    dev = {"account_id": acct, "device_id": j["deviceId"], "secret": j["secret"], "created": time.time(), "client": [name, cid, sec]}
     t = _device_grant(dev)   # prove it works before keeping it
     _verify(t["access_token"], acct)   # and that it can read what the site needs
     storage.kv_set("device", dev)
     storage.kv_set("dev_tok", {"access_token": t["access_token"], "expires_at": time.time() + int(t.get("expires_in", 7200))})
+    storage.kv_set("device_pending", None)
     Session._mem.update(tok=None, exp=0, dev=False)
-    note("device login", "permanent login saved")
-    return acct
+    note("device login", f"permanent login saved ({name})")
+    return {"account_id": acct, "client": name}
 
 
 def _verify(access, acct):

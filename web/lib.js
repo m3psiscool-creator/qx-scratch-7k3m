@@ -153,9 +153,9 @@ function estimateStrip(d) {
   const pc = p => Math.round(p * 100) + "%";
   return `<div class="est">
     <div class="est-cols">
-      <div class="est-c side"><div class="l">Low case</div><div class="v">${nf(d.low)}</div><div class="d">${pc(pSide)} chance it ends nearest here</div></div>
+      <div class="est-c est-side"><div class="l">Low case</div><div class="v">${nf(d.low)}</div><div class="d">${pc(pSide)} chance it ends nearest here</div></div>
       <div class="est-c mid"><div class="l">Most likely</div><div class="v">${nf(d.likely)}</div><div class="d"><b>${pc(pMid)}</b> chance it ends nearest here: the single best bet</div></div>
-      <div class="est-c side"><div class="l">Safe case</div><div class="v">${nf(d.safe)}</div><div class="d">${pc(pSide)} chance it ends nearest here</div></div>
+      <div class="est-c est-side"><div class="l">Safe case</div><div class="v">${nf(d.safe)}</div><div class="d">${pc(pSide)} chance it ends nearest here</div></div>
     </div>
     <div class="est-bar" title="Thin line: the range the cutoff lands in 8 times out of 10. Thick part: even odds (half of the time).">
       <i class="r80"></i><i class="r50" style="left:${pos(c1)}%;width:${Math.max(pos(c2) - pos(c1), 2)}%"></i><i class="pt" style="left:${pos(d.likely)}%"></i>

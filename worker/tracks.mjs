@@ -7,6 +7,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildReplay } from './replay.mjs';
+import { trackBody } from './trackbody.mjs';
 
 const SITE = process.env.SITE || 'https://fn-game-analyzer.vercel.app';
 const KEY = process.env.ADMIN_KEY;
@@ -28,10 +29,6 @@ const api = async (path, init = {}) => {
 const listing = await api(`/api/admin/matches?window=${encodeURIComponent(windowId)}`);
 if (process.env.MAP_BOUNDS) [minX, maxX, minY, maxY] = process.env.MAP_BOUNDS.split(',').map(Number);
 else if (listing.game_type === 'br') [minX, maxX, minY, maxY] = [-131072, 131072, -131072, 131072];
-const SC = 10000;
-const u = (x, y) => [Math.round((y - minY) / (maxY - minY) * SC), Math.round((maxX - x) / (maxX - minX) * SC)];   // same frame as the landings
-const rad = (r) => Math.round(r / (maxY - minY) * SC);
-
 const tdone = new Set(listing.tdone || []);
 const pending = listing.sessions.filter((s) => !tdone.has(s.session))
   .sort((a, b) => b.teams.filter((t) => t.rank <= TOP).length - a.teams.filter((t) => t.rank <= TOP).length)
@@ -51,13 +48,9 @@ for (const s of pending) {
     if (run.status !== 0) { console.warn('parser failed', (run.stderr || '').slice(0, 200)); failed++; continue; }
     const res = JSON.parse(run.stdout.split('\n').filter(Boolean)[0].replace(/^﻿/, ''));
     if (res.error || !res.tracks || !res.tracks.length) { console.warn(`skip ${s.session}: ${res.error || 'no tracks'}`); failed++; continue; }
-    const body = {
-      window_id: windowId, session: s.session, duration: res.duration,
-      storm: (res.storm || []).filter((z) => z[4] > 0).map(([t, lr, lx, ly, nr, nx, ny, st, fi]) => [t, rad(lr), ...u(lx, ly), rad(nr), ...u(nx, ny), st, fi]),
-      teams: s.teams.map((t) => ({ accounts: t.accounts, rank: t.rank, game: t.game, placement: t.placement, points: t.points, elims: t.elims })),
-      tracks: res.tracks.map((p) => ({ epic: p.epic, team: p.team, placement: p.placement, kills: p.kills,
-        death: p.death ? [...u(p.death[0], p.death[1]), p.death[2]] : null, p: p.p.map(([t, x, y, z]) => [t, ...u(x, y), z]) })),
-    };
+    const tb = trackBody(windowId, s, res, [minX, maxX, minY, maxY], false);
+    if (!tb) { console.warn(`skip ${s.session}: no usable tracks`); failed++; continue; }
+    const body = { window_id: windowId, ...tb };
     if (DRY) { console.log(`${s.session}: ${body.tracks.length} players, ${body.duration}s, ${body.storm.length} storm phases, ${JSON.stringify(body).length} bytes`); ok++; continue; }
     const r = await api('/api/admin/tracks', { method: 'POST', body: JSON.stringify(body) });
     ok++;

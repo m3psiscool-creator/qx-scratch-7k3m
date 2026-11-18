@@ -7,6 +7,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildReplay } from './replay.mjs';
+import { trackBody } from './trackbody.mjs';
 
 const SITE = process.env.SITE || 'https://fn-game-analyzer.vercel.app';
 const KEY = process.env.ADMIN_KEY;
@@ -39,6 +40,7 @@ const listing = await api(`/api/admin/matches?window=${encodeURIComponent(window
 if (process.env.MAP_BOUNDS) [minX, maxX, minY, maxY] = process.env.MAP_BOUNDS.split(',').map(Number);
 else if (listing.game_type === 'br') [minX, maxX, minY, maxY] = [-131072, 131072, -131072, 131072];   // landings reach about +-112,000
 const done = new Set(RESET ? [] : listing.done);
+const tany = new Set(listing.tany || []);   // matches that already have movement data (early-game or full)
 const cdone = new Set(listing.cdone || []);   // matches whose containers (chests, ammo boxes...) were already read   // --reset starts this window over: rows, finished matches and chest counts
 // A tournament has thousands of matches. Alternate between the matches with the most qualifying teams (the ones that
 // answer "where did the qualifiers land") and a random draw (so "everyone else" is not skewed towards qualifiers).
@@ -74,18 +76,22 @@ async function worker() {
 }
 await Promise.all([worker(), worker(), worker()]);
 
-const rows = [], cells = new Map(), chestCells = new Map(), finished = [], ctnBatch = [], purgeBatch = [];
+const rows = [], cells = new Map(), chestCells = new Map(), finished = [], ctnBatch = [], purgeBatch = [], trackBatch = [];
 let noMatch = 0, synthetic = 0, chestBursts = 0;
 const CHEST = 360;   // chest map: CHEST x CHEST cells over the map square (about 3 m each)
 for (let i = 0; i < files.length; i += 20) {
   const part = files.slice(i, i + 20);
-  const run = spawnSync(DOTNET, [DLL, ...part.map((p) => p.f)], { encoding: 'utf8', maxBuffer: 1 << 29 });
+  const run = spawnSync(DOTNET, [DLL, ...part.map((p) => p.f)], { encoding: 'utf8', maxBuffer: 1 << 29, env: { ...process.env, TRACKS: '1' } });   // TRACKS=1: also print every player's path (same replay, nothing more is downloaded)
   if (run.status !== 0) { console.warn('parser failed', (run.stderr || '').slice(0, 300)); continue; }
   const out = run.stdout.split('\n').filter(Boolean).map((l) => JSON.parse(l.replace(/^\uFEFF/, '')));
   for (const res of out) {
     const { s } = part.find((p) => res.file === `${p.s.session}.replay`) || {};
     if (!s || res.error) { console.warn(`parse error ${res.file}: ${res.error}`); continue; }
     // containers: every chest the players searched, at the searching player's position (stored frame u, v)
+    if (!tany.has(s.session) && res.tracks && res.tracks.length) {   // movement of the leaderboard players in the first minutes
+      const tb = trackBody(windowId, s, res, [minX, maxX, minY, maxY], true);
+      if (tb) trackBatch.push(tb);
+    }
     if (!cdone.has(s.session)) purgeBatch.push({ session: s.session, items: (res.containers || []).map(([n, x, y]) => [n, ...toUnit(x, y)]).filter(([, u, v]) => inside([u, v])) });
     if (!cdone.has(s.session)) ctnBatch.push({ session: s.session, items: (res.containers || []).map(([n, x, y]) => [n, ...toUnit(x, y)]).filter(([, u, v]) => inside([u, v])) });
     if (done.has(s.session)) continue;   // landings of this match are already loaded
@@ -134,6 +140,16 @@ if (!DRY && PURGE) for (let i = 0; i < purgeBatch.length; i += 8) {   // first t
 if (!DRY) for (let i = 0; i < ctnBatch.length; i += 8) {
   const res = await api('/api/admin/containers', { method: 'POST', body: JSON.stringify({ window_id: windowId, matches: ctnBatch.slice(i, i + 8) }) });
   if (i + 8 >= ctnBatch.length) console.log(`containers: ${ctnBatch.length} matches added, ${res.containers} distinct containers on this map so far (${res.matches} matches)`);
+}
+if (!DRY && trackBatch.length) {
+  let stored = 0, bytes = 0;
+  for (let i = 0; i < trackBatch.length; i += 15) {
+    try {
+      const res = await api('/api/admin/tracks', { method: 'POST', body: JSON.stringify({ window_id: windowId, partial: true, matches: trackBatch.slice(i, i + 15) }) });
+      stored += res.stored || 0; bytes += res.bytes || 0;
+    } catch (e) { console.warn('movement not stored:', e.message); break; }
+  }
+  console.log(`movement: ${stored} of ${trackBatch.length} matches stored, ${bytes} bytes compressed`);
 }
 console.log(`landings for ${rows.length} teams from ${finished.length} matches (${failed} downloads failed, ${synthetic} teams were not on the leaderboard); ${chestBursts} chest openings in ${chestCells.size} map cells, in ${((Date.now() - started) / 1000).toFixed(0)}s`);
 

@@ -88,9 +88,10 @@ def matches(window_id, pages=100):
     cdone = sorted(sid for sid in sessions if sid[:12] in cdone_ids)
     try:
         tdone = sorted(storage.tracks_done(window_id) & set(sessions))
+        tany = sorted(storage.tracks_any(window_id) & set(sessions))
     except Exception:
-        tdone = []
+        tdone, tany = [], []
     out = sorted(sessions.values(), key=lambda r: r["end"] or "")
     return {"window_id": window_id, "begin": w["begin"], "end": w["end"], "final": bool(w["final"]), "playlist": (w.get("meta") or {}).get("playlist"),
             "game_type": (w.get("meta") or {}).get("game_type"),
-            "sessions": out, "done": sorted(done & set(sessions)), "cdone": cdone, "tdone": tdone, "pages": total}
+            "sessions": out, "done": sorted(done & set(sessions)), "cdone": cdone, "tdone": tdone, "tany": tany, "pages": total}

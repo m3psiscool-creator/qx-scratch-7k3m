@@ -367,7 +367,7 @@ class TracksTest(unittest.TestCase):
                "tracks": [{"a": "a" * 32, "t": 0, "pl": 3, "k": 1, "x": [4000, 2000, 500], "p": [[0, 2000, 3000, 5], [30, 2500, 3500, 5]]}]}
         blob = zlib.compress(json.dumps(doc).encode())
         win = {"window_id": "w", "event_id": "e", "region": "NAC", "meta": {"playlist": "Playlist_X_SourSpawn", "game_type": "reload"}}
-        with (mock.patch.object(storage, "tracks_get", return_value=("w", 600, blob), create=True), mock.patch.object(storage, "window_list", return_value=[win]),
+        with (mock.patch.object(storage, "tracks_get", return_value=("w", 600, blob, 0), create=True), mock.patch.object(storage, "window_list", return_value=[win]),
               mock.patch.object(tracks.insights, "_name_map", return_value={"a" * 32: "Ana"}), mock.patch.object(tracks.service, "pretty", return_value="Cup"),
               mock.patch.object(tracks.service, "goal_of", return_value={"rank": 20})):
             g = tracks.game("s")

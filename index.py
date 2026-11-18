@@ -19,7 +19,7 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
              "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
              "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
              "/api/players": 300, "/api/player": 300,
-             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/pois": 120, "/api/drops/loot": 300, "/api/maps": 300, "/api/tracks/player": 60, "/api/tracks/recent": 120, "/api/tracks/game": 600, "/api/drops/areas": 120, "/api/calendar.ics": 300, "/api/health": 30}
+             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/pois": 120, "/api/drops/loot": 300, "/api/maps": 300, "/api/tracks/player": 60, "/api/tracks/recent": 120, "/api/tracks/windows": 120, "/api/tracks/window": 120, "/api/tracks/playerwindow": 120, "/api/tracks/game": 600, "/api/drops/areas": 120, "/api/calendar.ics": 300, "/api/health": 30}
 
 
 @app.middleware("http")
@@ -339,6 +339,21 @@ async def admin_tracks(req: Request, x_admin_key: str = Header(default="")):
 @app.get("/api/tracks/player")
 def api_tracks_player(account: str):
     return _api(tracks.player_games, account)
+
+
+@app.get("/api/tracks/windows")
+def api_tracks_windows():
+    return _api(tracks.windows)
+
+
+@app.get("/api/tracks/window")
+def api_tracks_window(window: str):
+    return _api(tracks.window_players, window)
+
+
+@app.get("/api/tracks/playerwindow")
+def api_tracks_playerwindow(window: str, account: str):
+    return _api(tracks.player_window, window, account)
 
 
 @app.get("/api/tracks/recent")

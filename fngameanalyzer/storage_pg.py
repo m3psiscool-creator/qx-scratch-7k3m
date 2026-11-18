@@ -43,7 +43,8 @@ ALTERS = ["ALTER TABLE windows ADD COLUMN IF NOT EXISTS deep TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS category TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS prow TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS timed TEXT",
-          "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS deep TEXT"]
+          "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS deep TEXT",
+          "ALTER TABLE tracks ADD COLUMN IF NOT EXISTS partial INTEGER DEFAULT 0"]
 _ready = False
 _lock = threading.Lock()
 _EG = {"bytes": 0, "by": {}}   # bytes read out of the database by this process (approximate), by query
@@ -640,31 +641,55 @@ def drop_map_set(window_id, d):
 
 
 # ---------------------------------------------------------------- movement tracks (the rotation viewer)
-def tracks_put(session, window_id, duration, blob, players):
-    """players: (account, game, placement, kills, rank, team) per tracked player. Replaces the match if it was stored before."""
+def tracks_put(session, window_id, duration, blob, players, partial=0):
+    """players: (account, game, placement, kills, rank, team) per tracked player. Replaces the match if it was stored before,
+    except that an early-game-only (partial) read never replaces a full replay. Returns False when it was not stored."""
     with db() as c:
+        old = c.execute("SELECT partial FROM tracks WHERE session=%s", (session,)).fetchone()
+        if old and not (old[0] or 0) and partial:
+            return False
         c.execute("DELETE FROM track_players WHERE session=%s", (session,))
-        c.execute("INSERT INTO tracks(session,window_id,duration,players,d) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(session) DO UPDATE SET window_id=excluded.window_id, "
-                  "duration=excluded.duration, players=excluded.players, d=excluded.d", (session, window_id, duration, len(players), blob))
+        c.execute("INSERT INTO tracks(session,window_id,duration,players,d,partial) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(session) DO UPDATE SET window_id=excluded.window_id, "
+                  "duration=excluded.duration, players=excluded.players, d=excluded.d, partial=excluded.partial", (session, window_id, duration, len(players), blob, partial))
         with c.cursor() as cur:
             cur.executemany("INSERT INTO track_players(account,session,window_id,game,placement,kills,rank,team) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
                             [(a, session, window_id, g, pl, k, r, t) for a, g, pl, k, r, t in players])
+    return True
+
+
+_dbmb = {"at": 0, "v": 0.0}
+
+
+def db_mb():
+    """Database size in MB (cached for a minute): the early-game movement rows stop when the free plan is nearly full."""
+    import time as _t
+    if _t.time() - _dbmb["at"] > 60:
+        with db() as c:
+            _dbmb.update(at=_t.time(), v=c.execute("SELECT pg_database_size(current_database())").fetchone()[0] / 1e6)
+    return _dbmb["v"]
 
 
 def tracks_get(session):
     with db() as c:
-        r = c.execute("SELECT window_id,duration,d FROM tracks WHERE session=%s", (session,)).fetchone()
-    return (r[0], r[1], bytes(r[2])) if r else None
+        r = c.execute("SELECT window_id,duration,d,partial FROM tracks WHERE session=%s", (session,)).fetchone()
+    return (r[0], r[1], bytes(r[2]), int(r[3] or 0)) if r else None
 
 
-def tracks_for_account(account):
+def tracks_for_account(account, window_id=None):
+    q = ("SELECT p.session,p.window_id,p.game,p.placement,p.kills,p.rank,p.team,t.duration,t.partial FROM track_players p JOIN tracks t ON t.session=p.session "
+         "WHERE p.account=%s" + (" AND p.window_id=%s" if window_id else "") + " ORDER BY p.window_id DESC, p.game")
     with db() as c:
-        return [{"session": r[0], "window_id": r[1], "game": r[2], "placement": r[3], "kills": r[4], "rank": r[5], "team": r[6], "duration": r[7]}
-                for r in c.execute("SELECT p.session,p.window_id,p.game,p.placement,p.kills,p.rank,p.team,t.duration FROM track_players p JOIN tracks t ON t.session=p.session "
-                                   "WHERE p.account=%s ORDER BY p.window_id DESC, p.game", (account,)).fetchall()]
+        return [{"session": r[0], "window_id": r[1], "game": r[2], "placement": r[3], "kills": r[4], "rank": r[5], "team": r[6], "duration": r[7], "partial": int(r[8] or 0)}
+                for r in c.execute(q, (account, window_id) if window_id else (account,)).fetchall()]
 
 
 def tracks_done(window_id):
+    """Matches with a FULL replay read (an early-game-only read does not count, a full one may still replace it)."""
+    with db() as c:
+        return {r[0] for r in c.execute("SELECT session FROM tracks WHERE window_id=%s AND COALESCE(partial,0)=0", (window_id,)).fetchall()}
+
+
+def tracks_any(window_id):
     with db() as c:
         return {r[0] for r in c.execute("SELECT session FROM tracks WHERE window_id=%s", (window_id,)).fetchall()}
 
@@ -673,6 +698,22 @@ def tracks_available():
     """window_id -> number of matches with movement tracks."""
     with db() as c:
         return {r[0]: r[1] for r in c.execute("SELECT window_id, count(*) FROM tracks GROUP BY 1").fetchall()}
+
+
+def tracks_by_window():
+    """[(window_id, matches, early_only_matches, players)] for the tournament picker."""
+    with db() as c:
+        return [(r[0], r[1], int(r[2] or 0), r[3] or 0) for r in c.execute(
+            "SELECT t.window_id, count(*), sum(COALESCE(t.partial,0)), (SELECT count(DISTINCT q.account) FROM track_players q WHERE q.window_id=t.window_id) FROM tracks t GROUP BY 1").fetchall()]
+
+
+def tracks_window_players(window_id, limit=3000):
+    """Every player with movement data in a tournament, best final rank first: (account, rank, games, full_games, team)."""
+    with db() as c:
+        return [(r[0], r[1], r[2], int(r[3] or 0), r[4]) for r in c.execute(
+            "SELECT p.account, min(NULLIF(p.rank,0)), count(*), sum(CASE WHEN COALESCE(t.partial,0)=0 THEN 1 ELSE 0 END), max(p.team) "
+            "FROM track_players p JOIN tracks t ON t.session=p.session WHERE p.window_id=%s GROUP BY p.account "
+            "ORDER BY min(NULLIF(p.rank,0)) NULLS LAST LIMIT %s", (window_id, limit)).fetchall()]
 
 
 def tracks_recent(limit=30):

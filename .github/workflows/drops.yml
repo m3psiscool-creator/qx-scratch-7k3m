@@ -11,7 +11,7 @@ on:
       limit:
         description: "Matches to process per window"
         required: false
-        default: "25"
+        default: "1000000"
       tracks:
         description: "Full replays to read per window for the Rotations tab"
         required: false
@@ -28,7 +28,7 @@ concurrency: drops
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -46,15 +46,15 @@ jobs:
           ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
           LANDINGS_DLL: ${{ github.workspace }}/worker/landings/out/LandingsReplayReader.dll
         run: |
-          limit="${{ github.event.inputs.limit || '25' }}"
-          if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 60)"; fi
-          # breadth first: a few matches of every window (fewest landings first) within a time budget, so the Actions minutes (private repo: 2000/month) are spent on windows that have nothing yet.
+          limit="${{ github.event.inputs.limit || '1000000' }}"
+          if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 400)"; fi
+          # EU and NAC windows first, then the rest (fewest landings first); every match of a window is read (in chunks of 150). The repo is public (unlimited minutes); a run stops starting work after 290 min and the next run carries on (already finished matches are skipped).
           # windows whose leaderboard Epic no longer serves fail fast and do not count.
           ok=0; good=""; tried=0; SECONDS=0
           for w in $wins; do
-            [ "$SECONDS" -ge 360 ] && break
+            [ "$SECONDS" -ge 17400 ] && break
             tried=$((tried+1))
-            if node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }} ${{ github.event.inputs.purge_from && format('--purge-from {0}', github.event.inputs.purge_from) || '' }}; then ok=$((ok+1)); good="$good $w"; else echo "window $w failed"; fi
+            if STOP_AFTER_SECONDS=$((17400 - SECONDS)) node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }} ${{ github.event.inputs.purge_from && format('--purge-from {0}', github.event.inputs.purge_from) || '' }}; then ok=$((ok+1)); good="$good $w"; else echo "window $w failed"; fi
           done
           # full replays of a few matches per window (the ones with the most qualifying teams): movement tracks for the Rotations tab
           n=0

@@ -54,12 +54,16 @@ const started = Date.now();
 console.log(`${windowId}: ${listing.sessions.length} matches, ${done.size} done, ${cdone.size} with containers, processing ${todo.length}`);
 if (!todo.length) process.exit(0);
 
+const CHUNK = opt('chunk', 150);   // a whole tournament can be 20,000 matches: download, parse, post and delete the files chunk by chunk (disk and memory)
+let totalFailed = 0, totalMatches = 0;
+for (let c = 0; c < todo.length; c += CHUNK) {
+const part0 = todo.slice(c, c + CHUNK), firstChunk = c === 0, lastChunk = c + CHUNK >= todo.length;
 const dir = mkdtempSync(join(tmpdir(), 'replays-'));
 const files = [];
 let next = 0, failed = 0;
 async function worker() {
-  while (next < todo.length) {
-    const s = todo[next++];
+  while (next < part0.length) {
+    const s = part0[next++];
     try {
       const { buffer } = await buildReplay(s.session, KEY, { maxMs: MAXMS });
       const f = join(dir, `${s.session}.replay`);
@@ -133,23 +137,27 @@ if (!DRY) for (let i = 0; i < ctnBatch.length; i += 8) {
 }
 console.log(`landings for ${rows.length} teams from ${finished.length} matches (${failed} downloads failed, ${synthetic} teams were not on the leaderboard); ${chestBursts} chest openings in ${chestCells.size} map cells, in ${((Date.now() - started) / 1000).toFixed(0)}s`);
 
-if (DRY) {
+if (DRY) {   // (dry run: first chunk only)
   const w = (v, lo, hi) => (lo + v * (hi - lo)).toFixed(0);
   const xs = rows.map((r) => r.x), ys = rows.map((r) => r.y);
   console.log('world extent of landings: east (Y)', w(Math.min(...xs), minY, maxY), 'to', w(Math.max(...xs), minY, maxY), ', north (X)', w(1 - Math.max(...ys), minX, maxX), 'to', w(1 - Math.min(...ys), minX, maxX));
   console.log(JSON.stringify(rows.slice(0, 2)));
   process.exit(0);
 }
-if (!rows.length && !finished.length) process.exit(0);   // nothing new for the landing tables (only containers were read)
+if (!rows.length && !finished.length) continue;   // nothing new for the landing tables (only containers were read)
 const code = (listing.playlist || '').match(/SourSpawn|BlastBerry|DashBerry|PiperBoot|JumpBear/i)?.[0] || '';
 const kind = listing.game_type === 'reload' || /reload/i.test(listing.playlist || '') ? 'Reload map' : 'Battle Royale island';
 for (let i = 0; i < Math.max(rows.length, 1); i += 4000) {
   const chunk = rows.slice(i, i + 4000);
-  const first = i === 0, last = i + 4000 >= rows.length;
+  const first = i === 0, last = i + 4000 >= rows.length;   // first/last piece of THIS chunk
   const res = await api('/api/admin/drops', { method: 'POST', body: JSON.stringify({
-    window_id: windowId, append: !(first && RESET), reset: first && RESET, coords: 'unit', drops: chunk,
+    window_id: windowId, append: !(first && firstChunk && RESET), reset: first && firstChunk && RESET, coords: 'unit', drops: chunk,
     map: { name: code ? `${kind} (${code})` : kind, credit: 'Map drawn from where players moved in the replays', base: last ? { size: BASE, cells: [...cells] } : undefined },
     chests: last ? { size: CHEST, matches: finished.length, cells: [...chestCells] } : undefined,
     sessions_done: last ? finished : undefined }) });
   console.log('stored', res.stored, 'skipped', res.skipped);
+}
+  totalFailed += failed; totalMatches += finished.length;
+  console.log(`chunk ${Math.floor(c / CHUNK) + 1}/${Math.ceil(todo.length / CHUNK)} done (${totalMatches} matches loaded, ${totalFailed} failed, ${((Date.now() - started) / 60000).toFixed(1)} min)`);
+  if (process.env.STOP_AFTER_SECONDS && (Date.now() - started) / 1000 > Number(process.env.STOP_AFTER_SECONDS)) { console.log('time budget reached, the rest follows on the next run'); break; }
 }

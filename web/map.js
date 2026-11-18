@@ -2,7 +2,7 @@
 // Map: every map in the game by its in-game name. Maps we have replays for show every container (chests, rare chests, ammo boxes, ...) at its
 // real position (read from replays, see worker/landings/Containers.cs); the others show their picture.
 const MP = { list: [], key: null, entry: null, info: null, loot: null, grid: null, img: null, z: 1, ox: 0, oy: 0,
-  layers: { chests: true, grid: false, heat: false }, kinds: { chest: true, rare: true, ammo: false, produce: false, cash: false, fishing: false },
+  layers: { chests: true, grid: gridPref(false), heat: false }, kinds: { chest: true, rare: true, ammo: false, produce: false, cash: false, fishing: false },
   minRate: 0, sel: null, hover: null, drag: null };
 const MP_KINDS = [["chest", "Chests"], ["rare", "Rare chests"], ["ammo", "Ammo boxes"], ["produce", "Produce boxes"], ["cash", "Cash registers"], ["fishing", "Fishing barrels"]];
 const MP_KIND_ONE = { chest: "Chest", rare: "Rare chest", ammo: "Ammo box", produce: "Produce box", cash: "Cash register", fishing: "Fishing barrel" };
@@ -42,7 +42,7 @@ async function mapLoad(m) {
   box.innerHTML = `<div class="card"><div class="hd"><h2>${esc(m.name)} <span class="pill">${esc(m.mode)}</span></h2><span class="sub">${loot ? nf(loot.chests) + " chests plotted · " + nf(loot.matches) + " matches read" : "picture only"}</span></div>
     ${loot ? `<div class="kpis" style="margin:0 0 12px">${kpi("Chests", nf(kinds.chest || 0), (kinds.rare ? "+ " + nf(kinds.rare) + " rare" : ""))}${kpi("Ammo boxes", nf(kinds.ammo || 0))}${kpi("Opened early, on average", pc(avg, 0), "share of games")}${kpi("Often opened (60%+)", nf(hot), nf(cold) + " rarely (under 20%)")}</div>
     <div class="chips" id="mpkinds" style="margin:0 0 8px">${MP_KINDS.filter(([k]) => kinds[k]).map(([k, l]) => `<button class="chip ${MP.kinds[k] ? "on" : ""}" data-k="${k}">${l} <small>${nf(kinds[k])}</small></button>`).join("")}</div>` : `<p class="mut">There is no replay data for this map yet, so no chest positions: the picture is the map as the game draws it. Chests appear here as soon as a tournament is played on it and its replays are read.</p>`}
-    <div class="chips" id="mplay" style="margin:0 0 8px">${loot ? `<button class="chip" data-l="grid">Grid</button><button class="chip" data-l="heat">Where teams land</button>` : ""}
+    <div class="chips" id="mplay" style="margin:0 0 8px"><button class="chip ${MP.layers.grid ? "on" : ""}" data-l="grid">Grid</button>${loot ? `<button class="chip" data-l="heat">Where teams land</button>` : ""}
       <span style="flex:1"></span><button class="chip" id="mpz1">Zoom +</button><button class="chip" id="mpz2">Zoom −</button><button class="chip" id="mpreset">Reset view</button></div>
     ${loot ? `<div style="margin:0 0 10px"><label>Show chests opened in at least <b id="mpminv">${Math.round(MP.minRate * 100)}%</b> of games</label><input id="mpmin" type="range" min="0" max="100" value="${Math.round(MP.minRate * 100)}"></div>` : ""}
     <div class="dr-canvas" style="position:relative"><canvas id="mpc"></canvas><div id="mptip" class="mp-tip" style="display:none"></div></div>
@@ -53,7 +53,7 @@ async function mapLoad(m) {
   if (imgUrl) { const im = new Image(); im.onload = () => { MP.img = (info && mp.fit) ? warp(im, mp.fit) : im; mapDraw(); }; im.src = imgUrl; }
   $$("#mpkinds button").forEach(b => b.onclick = () => { MP.kinds[b.dataset.k] = !MP.kinds[b.dataset.k]; b.classList.toggle("on", MP.kinds[b.dataset.k]); mapDraw(); mapRows(); });
   $$("#mplay button[data-l]").forEach(b => b.onclick = async () => {
-    const l = b.dataset.l; MP.layers[l] = !MP.layers[l]; b.classList.toggle("on", MP.layers[l]);
+    const l = b.dataset.l; MP.layers[l] = !MP.layers[l]; b.classList.toggle("on", MP.layers[l]); if (l === "grid") gridSave(MP.layers.grid);
     if (l === "heat" && MP.layers.heat && !MP.grid) { MP.grid = await j(`/api/drops/grid?window=${encodeURIComponent(m.window_id)}&top=1000`); }
     mapDraw();
   });

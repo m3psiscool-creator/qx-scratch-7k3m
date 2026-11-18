@@ -1,7 +1,7 @@
 "use strict";
 // Rotations: where everyone moved in one match. Search a player, open one of their games, then watch every team move over the map
 // with the storm circles, or click a team to follow it. Data: worker/run.mjs --tracks (full replays), /api/tracks/*.
-const RT = { g: null, info: null, img: null, t: 0, speed: 8, playing: false, sel: null, trails: true, storm: true, qOnly: false, z: 1, ox: 0, oy: 0, drag: null, raf: 0, last: 0, W: 800 };
+const RT = { g: null, info: null, img: null, t: 0, speed: 8, playing: false, sel: null, trails: true, storm: true, grid: gridPref(false), qOnly: false, z: 1, ox: 0, oy: 0, drag: null, raf: 0, last: 0, W: 800 };
 
 async function rotationsPage(arg) {
   cancelAnimationFrame(RT.raf); RT.playing = false;
@@ -43,7 +43,7 @@ async function rotGame(session) {
   g.byTeam = {}; g.tracks.forEach(p => { (g.byTeam[p.t] = g.byTeam[p.t] || []).push(p); });
   $("#rgame").innerHTML = `<div class="card"><div class="hd"><h2>${esc(g.event)} <span class="pill">${esc(g.region || "")}</span></h2><span class="sub">${Math.round(g.duration / 60)} min · ${g.tracks.length} players · ${g.teams.length} teams</span></div>
     <div class="chips" style="margin-bottom:8px"><button class="chip on" id="rplay">▶ Play</button><button class="chip" id="rs1">1×</button><button class="chip" id="rs2">4×</button><button class="chip on" id="rs3">8×</button><button class="chip" id="rs4">30×</button>
-      <label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rtr" checked> Trails</label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rst" checked> Storm</label>
+      <label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rtr" checked> Trails</label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rst" checked> Storm</label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rgr" ${RT.grid ? "checked" : ""}> Grid</label>
       ${goal ? `<label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="rq"> Only teams that finished top ${nf(goal)}</label>` : ""}<span style="flex:1"></span><b id="rtime">0:00</b></div>
     <input id="rslider" type="range" min="0" max="${g.duration}" value="0" style="width:100%"><div class="rt-grid"><div class="dr-canvas" style="position:relative"><canvas id="rc"></canvas></div><div id="rside"></div></div>
     <p class="small">Each dot is a player (a cross is where they were eliminated); the line behind it is where they have been. White circle = the safe zone, dashed = the next one. Click a team to follow it.</p></div>`;
@@ -51,7 +51,7 @@ async function rotGame(session) {
   if (imgUrl) { const im = new Image(); im.onload = () => { RT.img = RT.info.map.fit ? warp(im, RT.info.map.fit) : im; rotDraw(); }; im.src = imgUrl; }
   $("#rplay").onclick = () => { RT.playing = !RT.playing; $("#rplay").textContent = RT.playing ? "❚❚ Pause" : "▶ Play"; $("#rplay").classList.toggle("on", RT.playing); if (RT.playing) { RT.last = performance.now(); rotLoop(); } };
   [[1, 1], [2, 4], [3, 8], [4, 30]].forEach(([i, sp]) => $("#rs" + i).onclick = () => { RT.speed = sp; [1, 2, 3, 4].forEach(k => $("#rs" + k).classList.toggle("on", k === i)); });
-  $("#rtr").onchange = e => { RT.trails = e.target.checked; rotDraw(); }; $("#rst").onchange = e => { RT.storm = e.target.checked; rotDraw(); };
+  $("#rtr").onchange = e => { RT.trails = e.target.checked; rotDraw(); }; $("#rst").onchange = e => { RT.storm = e.target.checked; rotDraw(); }; $("#rgr").onchange = e => { RT.grid = e.target.checked; gridSave(RT.grid); rotDraw(); };
   if ($("#rq")) $("#rq").onchange = e => { RT.qOnly = e.target.checked; rotDraw(); rotSide(); };
   $("#rslider").oninput = e => { RT.t = +e.target.value; rotDraw(); rotSide(); };
   rotWire(); RT.playing = true; RT.last = performance.now(); $("#rplay").textContent = "❚❚ Pause"; rotLoop(); rotSide(); rotDraw();
@@ -97,6 +97,11 @@ function rotDraw() {
   const x = c.getContext("2d"), W = c.width, S = W * RT.z, P = rotView(), g = RT.g, sc = g.scale, t = RT.t;
   x.fillStyle = "#0d2748"; x.fillRect(0, 0, W, W);
   if (RT.img) { x.drawImage(RT.img, RT.ox, RT.oy, S, S); x.fillStyle = "rgba(8,10,16,.35)"; x.fillRect(RT.ox, RT.oy, S, S); }
+  if (RT.grid) {   // A1-J10, same squares as the Dropspots and Map tabs
+    x.strokeStyle = "rgba(255,255,255,0.35)"; x.lineWidth = 1; x.fillStyle = "rgba(255,255,255,0.85)"; x.font = `${Math.max(11, 13 * (W / 900))}px sans-serif`;
+    for (let i = 0; i <= 10; i++) { const [a, b] = P(i / 10, i / 10); x.beginPath(); x.moveTo(a, RT.oy); x.lineTo(a, RT.oy + S); x.moveTo(RT.ox, b); x.lineTo(RT.ox + S, b); x.stroke(); }
+    for (let i = 0; i < 10; i++) { const [a, b] = P((i + 0.5) / 10, (i + 0.5) / 10); x.fillText("ABCDEFGHIJ"[i], a - 4, RT.oy + 14 * (W / 900) + 2); x.fillText(String(i + 1), RT.ox + 4, b + 4); }
+  }
   if ($("#rtime")) $("#rtime").textContent = rotMmss(t);
   if (RT.storm) {
     const z = rotStorm(t);

@@ -336,3 +336,22 @@ pre{background:var(--sf2);padding:10px;border-radius:10px;overflow:auto}
 .rt-scroll{max-height:420px;overflow:auto}
 .rt-row{cursor:pointer}.rt-row:hover td,.rt-row.on td{background:var(--ac-soft)}
 @media(max-width:900px){.rt-grid{grid-template-columns:1fr}}
+
+/* estimate strip: Low / Most likely / Safe */
+.est{margin:4px 0 14px}
+.est-cols{display:grid;grid-template-columns:1fr 1.5fr 1fr;gap:10px;align-items:stretch}
+.est-c{border-radius:12px;padding:10px 14px;min-width:0;background:var(--sf2);opacity:.78}
+.est-c .l{font-size:.74rem;color:var(--mut);font-weight:600}
+.est-c .v{font-size:1.35rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15;margin-top:2px}
+.est-c .d{font-size:.74rem;color:var(--mut);margin-top:3px}
+.est-c.mid{background:var(--ac-soft);opacity:1;box-shadow:inset 0 0 0 2px var(--ac)}
+.est-c.mid .l{color:var(--ac);font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+.est-c.mid .v{font-size:2.1rem;color:var(--ac)}
+.est-bar{position:relative;height:18px;margin:12px 4px 6px}
+.est-bar i{position:absolute;display:block}
+.est-bar .r80{left:0;right:0;top:8px;height:2px;background:var(--line2);border-radius:2px}
+.est-bar .r50{top:4px;height:10px;background:var(--ac);opacity:.45;border-radius:5px}
+.est-bar .pt{top:0;width:4px;height:18px;margin-left:-2px;background:var(--ac);border-radius:2px}
+.est-note{margin:0}
+td.mid,th.mid{background:var(--ac-soft)}
+@media(max-width:560px){.est-cols{grid-template-columns:1fr}.est-c{opacity:1}}

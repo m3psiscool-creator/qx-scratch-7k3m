@@ -44,11 +44,17 @@ jobs:
           LANDINGS_DLL: ${{ github.workspace }}/worker/landings/out/LandingsReplayReader.dll
         run: |
           limit="${{ github.event.inputs.limit || '40' }}"
-          if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 4)"; fi
+          if [ -n "${{ github.event.inputs.window }}" ]; then wins="${{ github.event.inputs.window }}"; else wins="$(node worker/windows.mjs 16)"; fi
+          # windows whose leaderboard Epic no longer serves fail fast and must not use up the slots: work down the list until 4 succeed
+          ok=0; good=""; tried=0
           for w in $wins; do
-            node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }} || echo "window $w failed"
+            [ "$ok" -ge 4 ] && break
+            tried=$((tried+1))
+            if node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }}; then ok=$((ok+1)); good="$good $w"; else echo "window $w failed"; fi
           done
           # full replays of a few matches per window (the ones with the most qualifying teams): movement tracks for the Rotations tab
-          for w in $wins; do
+          for w in $good; do
             node worker/tracks.mjs "$w" --limit "${{ github.event.inputs.tracks || '4' }}" || echo "tracks of $w failed"
           done
+          # a run where nothing worked (for example the site's Epic login expired) must be red, not green
+          if [ "$tried" -gt 0 ] && [ "$ok" -eq 0 ]; then echo "::error::no window could be processed (check the Epic login on the Status page)"; exit 1; fi

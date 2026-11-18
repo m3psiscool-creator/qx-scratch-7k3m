@@ -21,6 +21,18 @@ def approx():
 DECAY = 0.7
 BETA_GRID = [0.0, 0.25, 0.5, 0.75, 1.0]
 Z90 = 1.645
+Z80 = 1.2816          # Low = 10th percentile, Safe = 90th: an 80% band (was 90%), so the two ends sit closer together
+# Back-test of 500+ finished events: the centre is well calibrated, but the real spread was wider than the model's sd before
+# the event and a quarter in (heavy tails), about right at the half, and slightly narrower late. Multiplier on the sd by progress.
+BAND_SCALE = [(0.0, 1.15), (0.25, 1.10), (0.5, 0.95), (0.75, 0.90), (1.0, 0.85)]
+
+
+def band_scale(p):
+    p = min(max(p, 0.0), 1.0)
+    for (a, x), (b, y) in zip(BAND_SCALE, BAND_SCALE[1:]):
+        if p <= b:
+            return x + (y - x) * (p - a) / (b - a)
+    return BAND_SCALE[-1][1]
 MIN_VAR = 0.02 ** 2
 NAIVE_SD = 0.30      # log-space sd when no snapshots are available
 PRIOR_SD_FLOOR = 0.10
@@ -129,8 +141,25 @@ def choose_beta(pool, rank):
     return best
 
 
+def expected_field(target, pool):
+    """Teams to expect: the target's own count when known, else the median of its most recent comparable events."""
+    n = target.get("entrants")
+    if n:
+        return n
+    sizes = [w["entrants"] for w in pool[:6] if w.get("entrants")]
+    return statistics.median(sizes) if sizes else None
+
+
 def prior(target, finished, rank, entrants=None):
     pool = comparable(target, finished)
+    field = entrants or expected_field(target, pool)
+    if field:
+        # A 100-team final says nothing about a 3000-team cup: keep events of a similar size when there are enough,
+        # and never ask for a place deeper than the field (that is last place).
+        near = [w for w in pool if w.get("entrants") and 0.5 <= w["entrants"] / field <= 2]
+        if len(near) >= 3:
+            pool = near
+        rank = max(1, min(rank, int(field)))
     beta = choose_beta(pool, rank)
     vals, ws = _prior_vals(pool, rank, entrants, beta)
     if not vals:
@@ -425,12 +454,15 @@ def predict(target, finished, rank, entrants=None, snapshot=None, snaps_by_windo
     if not c:
         return None
     m, sd = c
+    prog = (lv or {}).get("progress") or 0.0
+    sd *= band_scale(prog)
     f = lambda z: round(math.expm1(z))
     ws = [(name, e) for name, e in (("history", pr), ("live", lv)) if e]
     tot = sum(1 / e["var"] for _, e in ws)
     parts = {name: {"likely": f(e["mean"]), "weight": round(1 / e["var"] / tot, 2)} for name, e in ws}
     return {
-        "rank": rank, "low": f(m - Z90 * sd), "likely": f(m), "safe": f(m + Z90 * sd),
+        "rank": rank, "low": f(m - Z80 * sd), "likely": f(m), "safe": f(m + Z80 * sd),
+        "sd": round(sd, 4), "band": "80%",
         "parts": parts,
         "prior": pr, "live": lv, "method": method if pr else None,
     }

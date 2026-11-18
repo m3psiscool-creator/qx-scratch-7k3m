@@ -373,11 +373,11 @@ async function predictInto(el, rank, o = {}) {
   const d = await j("/api/predict?" + q);
   if (d.error) return el.innerHTML = `<p class="${o.compact ? "mut" : "err"}">${esc(d.error)}</p>`;
   if (o.compact) {
-    el.innerHTML = `<div class="kpis">${kpi("Low (~5%)", nf(d.low))}${kpi("Most likely", nf(d.likely), "", "hero")}${kpi("Safe (~95%)", nf(d.safe))}</div>` + miniEvidence(d) + noteLine(d);
+    el.innerHTML = (d.final || !(d.safe > d.low) ? `<div class="kpis">${kpi("Low", nf(d.low))}${kpi("Most likely", nf(d.likely), "", "hero")}${kpi("Safe", nf(d.safe))}</div>` : estimateStrip(d)) + miniEvidence(d) + noteLine(d);
     return;
   }
-  const row = (l, r, b) => `<tr><td>${l}</td><td class="n">${nf(r.low)}</td><td class="n" style="${b ? "font-weight:800;font-size:1.15rem" : ""}">${nf(r.likely)}</td><td class="n">${nf(r.safe)}</td></tr>`;
-  el.innerHTML = `<div class="scroll" style="margin-top:12px"><table><tr><th>Rank</th><th class="n">Low</th><th class="n">Most likely</th><th class="n">Safe (~95%)</th></tr>${row("Top " + nf(d.rank), d, 1)}${(d.cutoffs || []).map(c => row("Top " + c.rank + " <small>(advance)</small>", c)).join("")}</table></div>${noteLine(d)}${evidence(d)}`;
+  const row = (l, r, b) => `<tr><td>${l}</td><td class="n">${nf(r.low)}</td><td class="n mid" style="${b ? "font-weight:800;font-size:1.15rem" : ""}">${nf(r.likely)}</td><td class="n">${nf(r.safe)}</td></tr>`;
+  el.innerHTML = estimateStrip(d) + `<div class="scroll" style="margin-top:12px"><table><tr><th>Rank</th><th class="n">Low (10%)</th><th class="n mid">Most likely</th><th class="n">Safe (90%)</th></tr>${row("Top " + nf(d.rank), d, 1)}${(d.cutoffs || []).map(c => row("Top " + c.rank + " <small>(advance)</small>", c)).join("")}</table></div>${noteLine(d)}${evidence(d)}`;
 }
 function noteLine(d) {   // why the answer is not the plain one: last place of a small field, or the closest gamemodes were used
   return (d.note ? `<p class="small">${esc(d.note)}</p>` : "") + (d.similar_modes ? `<p class="small">No past event of this exact gamemode yet, so this estimate comes from the closest gamemodes.</p>` : "");

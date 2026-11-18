@@ -53,14 +53,17 @@ def matches(window_id, pages=100):
     epic = Epic(auth.Session())
     rl = (w.get("meta") or {}).get("rules") or []
 
+    err = []
+
     def page(pg):
         try:
             return epic.page(w["event_id"], window_id, pg)
-        except Exception:
+        except Exception as e:
+            err.append(f"{type(e).__name__}: {str(e)[:300]}")
             return None
     first = page(0)
     if not first:
-        raise ValueError("Leaderboard not available")
+        raise ValueError("Leaderboard not available" + (f" ({err[0]})" if err else ""))
     total = min(first.get("totalPages", 1) or 1, pages)
     with ThreadPoolExecutor(max_workers=6) as ex:
         got = [first] + list(ex.map(page, range(1, total)))

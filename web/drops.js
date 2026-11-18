@@ -2,7 +2,7 @@
 // Dropspots: where teams landed in a tournament, for the teams that qualified and for everyone.
 // Landing rows are loaded by the owner (docs/dropspots-data.md); this page only reads them.
 const DR = { wid: null, info: null, grid: null, pois: null, area: null, top: 100, game: 0, mode: "cell", z: 1, ox: 0, oy: 0, poly: null, draft: null, hover: null,
-  layers: { q: true, all: true, spots: false, grid: true, chests: true }, loot: null, areas: null, mark: null, blur: 5, alpha: 0.9, img: null, imgUrl: "", heat: {}, S: 700, sortBy: "landings", fq: "", freg: "" };
+  layers: { q: true, all: true, spots: false, grid: gridPref(true), chests: true }, loot: null, areas: null, mark: null, blur: 5, alpha: 0.9, img: null, imgUrl: "", heat: {}, S: 700, sortBy: "landings", fq: "", freg: "" };
 const MODES = [["cell", "Grid square"], ["move", "Move"], ["box", "Box"], ["draw", "Draw"], ["spot", "Spot"]];
 
 async function dropsPage(wid) {
@@ -85,14 +85,14 @@ function controls() {
   $("#dcontrols").innerHTML = `<div class="card"><div class="row" style="align-items:flex-end">
     <div style="flex:1"><label>Qualified = finished top…</label><input id="dtop" type="number" min="1" max="10000" value="${DR.top}"></div>
     <div style="flex:1"><label>Game</label><select id="dgame"><option value="0">All games</option>${DR.grid ? "" : ""}</select></div>
-    <div style="flex:2"><label>Layers</label><div class="chips"><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lq" checked> <span style="color:#3aa0ff">● Qualified</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="la" checked> <span style="color:#ffb02e">● Everyone</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lc" checked> <span style="color:#5be38a">◉ Chests</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lg" checked> Grid</label></div></div></div>
+    <div style="flex:2"><label>Layers</label><div class="chips"><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lq" checked> <span style="color:#3aa0ff">● Qualified</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="la" checked> <span style="color:#ffb02e">● Everyone</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lc" checked> <span style="color:#5be38a">◉ Chests</span></label><label class="chk" style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="lg" ${DR.layers.grid ? "checked" : ""}> Grid</label></div></div></div>
     <div class="chips" style="margin-top:8px"><small>Quick pick:</small>${chips.map(c => `<button class="chip ${c === DR.top ? "on" : ""}" data-t="${c}">${c === goal ? "★ " : ""}Top ${c.toLocaleString()}</button>`).join("")}</div>
     <div class="row" style="margin-top:10px;align-items:center"><div><label>Heat spread</label><input id="dblur" type="range" min="0" max="16" value="${DR.blur}" style="padding:0;min-height:0"></div><div><label>Heat strength</label><input id="dalpha" type="range" min="20" max="100" value="${Math.round(DR.alpha * 100)}" style="padding:0;min-height:0"></div></div></div>`;
   const sel = $("#dgame"); (DR.grid.games || []).forEach(g => sel.insertAdjacentHTML("beforeend", `<option value="${g}">Game ${g}</option>`));
   const redo = () => { DR.top = clamp(Math.round(+$("#dtop").value || 100), 1, 10000); DR.game = +$("#dgame").value; $$("[data-t]").forEach(b => b.classList.toggle("on", +b.dataset.t === DR.top)); refresh(false); };
   $("#dtop").onchange = redo; $("#dgame").onchange = redo;
   $$("[data-t]").forEach(b => b.onclick = () => { $("#dtop").value = b.dataset.t; redo(); });
-  $("#lq").onchange = e => { DR.layers.q = e.target.checked; draw(); }; $("#la").onchange = e => { DR.layers.all = e.target.checked; draw(); }; $("#lg").onchange = e => { DR.layers.grid = e.target.checked; draw(); }; $("#lc").onchange = e => { DR.layers.chests = e.target.checked; draw(); };
+  $("#lq").onchange = e => { DR.layers.q = e.target.checked; draw(); }; $("#la").onchange = e => { DR.layers.all = e.target.checked; draw(); }; $("#lg").onchange = e => { DR.layers.grid = e.target.checked; gridSave(DR.layers.grid); draw(); }; $("#lc").onchange = e => { DR.layers.chests = e.target.checked; draw(); };
   $("#dblur").oninput = e => { DR.blur = +e.target.value; draw(); }; $("#dalpha").oninput = e => { DR.alpha = +e.target.value / 100; draw(); };
 }
 

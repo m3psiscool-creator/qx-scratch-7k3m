@@ -141,6 +141,31 @@ function table(head, rows, cls = []) {
   return `<div class="scroll"><table><tr>${head.map((h, i) => `<th class="${cls[i] || ""}">${h}</th>`).join("")}</tr>` +
     rows.map(r => `<tr>${r.map((c, i) => `<td class="${cls[i] || ""}">${c}</td>`).join("")}</tr>`).join("") + "</table></div>";
 }
+// Low / Most likely / Safe as one picture. Low and Safe are the 10th and 90th percentile, so the chance that the final cutoff lands
+// nearest each of the three numbers follows from the bell curve (log scale): the middle one always carries the most.
+const _Phi = z => { const t = 1 / (1 + 0.2316419 * Math.abs(z)), d = 0.3989423 * Math.exp(-z * z / 2), p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return z > 0 ? 1 - p : p; };
+function estimateStrip(d) {
+  if (!d || d.final || !(d.safe > d.low)) return "";
+  const L = x => Math.log1p(Math.max(x, 0)), m = L(d.likely), sd = Math.max((L(d.safe) - L(d.low)) / (2 * 1.2816), 1e-6);
+  const pMid = 2 * _Phi(0.6408) - 1, pSide = (1 - pMid) / 2, core = z => Math.round(Math.expm1(m + z * 0.6745 * sd));
+  const lo = L(d.low), hi = L(d.safe), pos = x => 100 * (L(x) - lo) / (hi - lo);
+  const c1 = Math.max(core(-1), d.low), c2 = Math.min(core(1), d.safe);
+  const pc = p => Math.round(p * 100) + "%";
+  return `<div class="est">
+    <div class="est-cols">
+      <div class="est-c side"><div class="l">Low case</div><div class="v">${nf(d.low)}</div><div class="d">${pc(pSide)} chance it ends nearest here</div></div>
+      <div class="est-c mid"><div class="l">Most likely</div><div class="v">${nf(d.likely)}</div><div class="d"><b>${pc(pMid)}</b> chance it ends nearest here: the single best bet</div></div>
+      <div class="est-c side"><div class="l">Safe case</div><div class="v">${nf(d.safe)}</div><div class="d">${pc(pSide)} chance it ends nearest here</div></div>
+    </div>
+    <div class="est-bar" title="Thin line: the range the cutoff lands in 8 times out of 10. Thick part: even odds (half of the time).">
+      <i class="r80"></i><i class="r50" style="left:${pos(c1)}%;width:${Math.max(pos(c2) - pos(c1), 2)}%"></i><i class="pt" style="left:${pos(d.likely)}%"></i>
+    </div>
+    <div class="est-note small">The cutoff lands between <b>${nf(d.low)}</b> and <b>${nf(d.safe)}</b> about 8 times in 10, and between <b>${nf(c1)}</b> and <b>${nf(c2)}</b> about half of the time.</div>
+  </div>`;
+}
+// grid on/off is remembered across the Dropspots, Map and Rotations maps
+const gridPref = def => { try { const v = localStorage.getItem("fga-grid"); return v === null ? def : v === "1"; } catch (e) { return def; } };
+const gridSave = on => { try { localStorage.setItem("fga-grid", on ? "1" : "0"); } catch (e) { } };
 const kpi = (l, v, d, c) => `<div class="kpi ${c || ""}"><div class="l">${l}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ""}</div>`;
 const skel = (n = 1, h = 120) => Array.from({ length: n }, () => `<div class="skel" style="height:${h}px;margin:0 0 16px"></div>`).join("");
 // deterministic random numbers so a simulation does not flicker between renders

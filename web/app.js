@@ -22,7 +22,6 @@ const NAV = [
   { g: "", items: [["home", "Home", "home", "#/"]] },
   { g: "Plan", items: [["strategy", "Strategy", "target", "#/strategy"], ["me", "My results", "user", "#/me"], ["drops", "Dropspots", "map", "#/drops"], ["map", "Map", "pin", "#/map"], ["rotations", "Rotations", "route", "#/rotations"], ["schedule", "Schedule", "cal", "#/schedule"], ["fncs", "FNCS", "trophy", "#/fncs"]] },
   { g: "Research", items: [["archive", "Archive", "archive", "#/archive"], ["classes", "Gamemodes", "layers", "#/classes"], ["players", "Players", "user", "#/players"]] },
-  { g: "Site", items: [["accuracy", "Accuracy", "gauge", "#/accuracy"], ["status", "Status", "gear", "#/status"]] },
 ];
 const MOBILE = ["home", "strategy", "schedule", "archive"];
 const flat = NAV.flatMap(g => g.items);
@@ -643,8 +642,21 @@ async function fncs() {
 }
 
 // ---------------------------------------------------------------- Accuracy
+// Accuracy and Status are owner pages: no menu entry, the data needs the admin key (asked once, remembered in this browser)
+async function aj(url) {
+  const r = await fetch(url, { headers: { "x-admin-key": store.get("akey", "") } });
+  if (r.status === 401) return { unauthorized: true };
+  return r.json();
+}
+function askKey(what, wrong) {
+  app.innerHTML = head(what, "Owner only.") + `<div class="card"><b>Admin key</b><p class="small">${wrong ? '<span class="err">That key was not accepted.</span> ' : ""}Enter the admin key to open this page. It is remembered in this browser.</p>
+   <input id="akey" type="password" placeholder="Admin key" autocomplete="off"><button id="akb" style="margin-top:10px">Unlock</button></div>`;
+  const go = () => { store.set("akey", $("#akey").value.trim()); route(); };
+  $("#akb").onclick = go; $("#akey").onkeydown = e => { if (e.key === "Enter") go(); };
+}
 async function accuracy() {
-  const d = await j("/api/accuracy");
+  const d = await aj("/api/accuracy");
+  if (d.unauthorized) return askKey("Prediction accuracy", !!store.get("akey", ""));
   if (d.error) return app.innerHTML = `<div class="card err">${esc(d.error)}</div>`;
   const b = d.buckets, list = d.list || [];
   const lab = x => x.progress === 0 ? "Start" : Math.round(x.progress * 100) + "%";
@@ -674,7 +686,8 @@ async function accuracy() {
 
 // ---------------------------------------------------------------- Status
 async function status() {
-  const [s, a] = await Promise.all([j("/api/status_full"), j("/api/status")]);
+  const [s, a] = await Promise.all([aj("/api/status_full"), aj("/api/status")]);
+  if (s.unauthorized || a.unauthorized) return askKey("Status", !!store.get("akey", ""));
   if (s.error) return app.innerHTML = `<div class="card err">${esc(s.error)}</div>`;
   const c = s.counts || {};
   app.innerHTML = head("Status", "Is the collector running, and is Epic login valid?") + `<div class="kpis">
@@ -692,6 +705,7 @@ async function status() {
    <input id="code" placeholder="authorizationCode"><input id="key" type="password" placeholder="Admin key" style="margin-top:6px"><button id="lg" style="margin-top:10px">Save login</button> <span id="lm" class="small"></span></div>`}
   <div class="card"><div class="hd"><h2>Feedback from visitors</h2><span class="sub">owner only</span></div><div class="row"><div><input id="fk" type="password" placeholder="Admin key"></div><div style="flex:0"><button class="sec" id="fkb">Load</button></div></div><div id="fkl" style="margin-top:10px"></div></div>
     <div class="card"><div class="hd"><h2>How the predictions work</h2></div><p class="small">Every player on the live leaderboard is replayed forward. Their remaining games (including the last queue that starts before the cutoff), points per game and chance of catching up come from players in the same spot at the same moment in earlier events <b>of the same gamemode</b> (the closest gamemodes when there is none yet). The result is corrected using a back-test on those past events. Ranks beyond 700 are scaled from the stored thresholds (ranks 1000, 1500 … 10000). Unofficial data; estimates only.</p></div>`;
+  for (const id of ["#key", "#dkey", "#fk"]) { const el = $(id); if (el) el.value = store.get("akey", ""); }   // the key is already known here
   $("#fkb").onclick = async () => { const r = await j("/api/feedback", { headers: { "x-admin-key": $("#fk").value } }); $("#fkl").innerHTML = r.error ? `<span class="err">${esc(r.error)}</span>` : (r.length ? table(["When", "Kind", "Page", "Message"], r.map(x => [fmt(x.at), esc(x.kind), esc(x.page), esc(x.text)])) : '<p class="mut">Nothing yet.</p>'); };
   const dst = $("#dst");
   if (dst) dst.onclick = async () => {
@@ -736,11 +750,9 @@ async function route() {
 // live data health: tell visitors when the collector is paused (Epic login expired or no pass for a while)
 async function checkHealth() {
   try {
-    const s = await j("/api/health"), el = $("#banner"); if (!el || s.error) return;
+    const s = await j("/api/health"); if (s.error) return;
     const idle = s.idle_s, down = s.logged_in === false || (idle != null && idle > 900);
-    el.hidden = !down;
     const lv = $("#live"); if (lv) { lv.classList.toggle("off", down); $("#livet").textContent = down ? "Live data paused" : "Collector live"; $("#livep").textContent = idle != null ? "Last update " + ago(idle) : ""; }
-    if (down) el.innerHTML = `<b>Live data is paused.</b> ${s.logged_in === false ? "The Epic login behind the collector needs renewing" : "The collector has not run for " + Math.round(idle / 60) + " minutes"}${idle != null ? " (last update " + ago(idle) + ")" : ""}. Boards and live predictions may be out of date; stored history still works. <a href="#/status">Status</a>`;
   } catch (e) { }
 }
 checkHealth(); setInterval(checkHealth, 60000);

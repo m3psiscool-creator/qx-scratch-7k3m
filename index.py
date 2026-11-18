@@ -305,6 +305,18 @@ async def admin_containers(req: Request, x_admin_key: str = Header(default="")):
         return _err(e)
 
 
+@app.post("/api/admin/containers_remove")
+async def admin_containers_remove(req: Request, x_admin_key: str = Header(default="")):
+    """Owner only: take matches out of a map's container atlas (they were filed under the wrong map)."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    try:
+        body = await req.json()
+        return drops.remove_containers(body.get("map_key"), body.get("matches"))
+    except Exception as e:
+        return _err(e)
+
+
 @app.post("/api/admin/tracks")
 async def admin_tracks(req: Request, x_admin_key: str = Header(default="")):
     """Owner only: one match's movement tracks (see worker/run.mjs --tracks)."""

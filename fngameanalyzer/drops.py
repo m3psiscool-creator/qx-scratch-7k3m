@@ -656,6 +656,39 @@ def add_containers(window_id, batch):
     return {"ok": True, "added": added, "matches": atlas["M"], "containers": len(atlas["items"])}
 
 
+def remove_containers(map_key, batch):
+    """Undo add_containers for matches that were filed under the wrong map (for example season 43 Battle Royale matches read before the
+    island got its own atlas): batch as in add_containers. Takes the session out of the atlas of map_key, lowers each container's count and
+    drops the positions that match."""
+    key = "ctn2:" + str(map_key)
+    atlas = storage.kv_get(key)
+    if not atlas:
+        return {"ok": True, "removed": 0, "matches": 0, "containers": 0}
+    done = set(atlas.get("done") or [])
+    removed = 0
+    for b in batch or []:
+        sid = str(b.get("session") or "")[:12]
+        if not sid or sid not in done:
+            continue
+        done.discard(sid)
+        atlas["M"] = max(0, int(atlas.get("M") or 0) - 1)
+        removed += 1
+        for name, u, v in b.get("items") or []:
+            it = (atlas.get("items") or {}).get(str(name))
+            if not it:
+                continue
+            it["n"] -= 1
+            pos = [round(float(u), 4), round(float(v), 4)]
+            if pos in it["p"]:
+                it["p"].remove(pos)
+            if it["n"] <= 0:
+                del atlas["items"][str(name)]
+    atlas["done"] = sorted(done)
+    storage.kv_set(key, atlas)
+    _atlas_cache.pop(key, None)
+    return {"ok": True, "removed": removed, "matches": atlas["M"], "containers": len(atlas["items"])}
+
+
 def _container_sites(w, kinds):
     def load(key):
         hit = _atlas_cache.get(key)

@@ -18,6 +18,7 @@ const BASE = 128;
 const args = process.argv.slice(2);
 const windowId = args[0];
 const opt = (name, d) => { const i = args.indexOf(`--${name}`); return i >= 0 ? Number(args[i + 1]) : d; };
+const PURGE = (() => { const i = args.indexOf('--purge-from'); return i >= 0 ? args[i + 1] : null; })();   // map key whose chest atlas holds these matches by mistake
 const LIMIT = opt('limit', 50), MAXMS = opt('maxms', 240000), DRY = args.includes('--dry'), RESET = args.includes('--reset');
 if (!windowId || !KEY) { console.error('usage: ADMIN_KEY=... node run.mjs <window_id> [--limit N] [--maxms MS] [--dry]'); process.exit(2); }
 
@@ -42,7 +43,7 @@ const cdone = new Set(listing.cdone || []);   // matches whose containers (chest
 // A tournament has thousands of matches. Alternate between the matches with the most qualifying teams (the ones that
 // answer "where did the qualifiers land") and a random draw (so "everyone else" is not skewed towards qualifiers).
 const TOP = opt('top', 1000);
-const pending = listing.sessions.filter((s) => !done.has(s.session) || !cdone.has(s.session));
+const pending = listing.sessions.filter((s) => PURGE ? (done.has(s.session) && !cdone.has(s.session)) : (!done.has(s.session) || !cdone.has(s.session)));   // --purge-from: only matches already loaded for landings, re-read for their containers
 const byQual = [...pending].sort((a, b) => b.teams.filter((t) => t.rank <= TOP).length - a.teams.filter((t) => t.rank <= TOP).length);
 const shuffled = [...pending].sort(() => Math.random() - 0.5);
 const todo = [], seen = new Set();
@@ -69,7 +70,7 @@ async function worker() {
 }
 await Promise.all([worker(), worker()]);
 
-const rows = [], cells = new Map(), chestCells = new Map(), finished = [], ctnBatch = [];
+const rows = [], cells = new Map(), chestCells = new Map(), finished = [], ctnBatch = [], purgeBatch = [];
 let noMatch = 0, synthetic = 0, chestBursts = 0;
 const CHEST = 360;   // chest map: CHEST x CHEST cells over the map square (about 3 m each)
 for (let i = 0; i < files.length; i += 20) {
@@ -81,6 +82,7 @@ for (let i = 0; i < files.length; i += 20) {
     const { s } = part.find((p) => res.file === `${p.s.session}.replay`) || {};
     if (!s || res.error) { console.warn(`parse error ${res.file}: ${res.error}`); continue; }
     // containers: every chest the players searched, at the searching player's position (stored frame u, v)
+    if (!cdone.has(s.session)) purgeBatch.push({ session: s.session, items: (res.containers || []).map(([n, x, y]) => [n, ...toUnit(x, y)]).filter(([, u, v]) => inside([u, v])) });
     if (!cdone.has(s.session)) ctnBatch.push({ session: s.session, items: (res.containers || []).map(([n, x, y]) => [n, ...toUnit(x, y)]).filter(([, u, v]) => inside([u, v])) });
     if (done.has(s.session)) continue;   // landings of this match are already loaded
     finished.push(s.session);
@@ -121,6 +123,10 @@ for (let i = 0; i < files.length; i += 20) {
   }
 }
 rmSync(dir, { recursive: true, force: true });
+if (!DRY && PURGE) for (let i = 0; i < purgeBatch.length; i += 8) {   // first take the matches out of the wrong map's atlas
+  const res = await api('/api/admin/containers_remove', { method: 'POST', body: JSON.stringify({ map_key: PURGE, matches: purgeBatch.slice(i, i + 8) }) });
+  if (i + 8 >= purgeBatch.length) console.log(`removed from ${PURGE}: ${purgeBatch.length} matches; it now holds ${res.matches} matches and ${res.containers} containers`);
+}
 if (!DRY) for (let i = 0; i < ctnBatch.length; i += 8) {
   const res = await api('/api/admin/containers', { method: 'POST', body: JSON.stringify({ window_id: windowId, matches: ctnBatch.slice(i, i + 8) }) });
   if (i + 8 >= ctnBatch.length) console.log(`containers: ${ctnBatch.length} matches added, ${res.containers} distinct containers on this map so far (${res.matches} matches)`);

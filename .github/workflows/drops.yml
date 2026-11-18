@@ -16,6 +16,9 @@ on:
         description: "Full replays to read per window for the Rotations tab"
         required: false
         default: "4"
+      purge_from:
+        description: "Move matches out of this map's chest atlas (map key, e.g. BR) and re-read them for the right one"
+        required: false
       reset:
         description: "Start the window over (drops its loaded landings, finished matches and chest counts)"
         required: false
@@ -50,7 +53,7 @@ jobs:
           for w in $wins; do
             [ "$ok" -ge 6 ] && break
             tried=$((tried+1))
-            if node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }}; then ok=$((ok+1)); good="$good $w"; else echo "window $w failed"; fi
+            if node worker/run.mjs "$w" --limit "$limit" ${{ github.event.inputs.reset == 'true' && '--reset' || '' }} ${{ github.event.inputs.purge_from && format('--purge-from {0}', github.event.inputs.purge_from) || '' }}; then ok=$((ok+1)); good="$good $w"; else echo "window $w failed"; fi
           done
           # full replays of a few matches per window (the ones with the most qualifying teams): movement tracks for the Rotations tab
           n=0

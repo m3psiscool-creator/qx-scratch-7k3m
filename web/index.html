@@ -2,21 +2,26 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>FN Game Analyzer</title>
-<meta name="description" content="Predicts the points needed for any rank in Fortnite FNCS, Cash Cup and Skin Cup windows, and turns them into a strategy.">
+<title>FNCS Lab</title>
+<meta name="description" content="FNCS Lab: cutoff predictions, strategy, drop spots and rotations for Fortnite FNCS, Cash Cup and Skin Cup tournaments. Unofficial.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0d14'/%3E%3Cg fill='%237c6cff'%3E%3Crect x='10' y='10' width='44' height='7' rx='3.5'/%3E%3Crect x='10' y='21' width='36' height='7' rx='3.5'/%3E%3Crect x='10' y='32' width='29' height='7' rx='3.5'/%3E%3C/g%3E%3Crect x='10' y='46' width='22' height='7' rx='3.5' fill='%23eef0f8' opacity='.3'/%3E%3Crect x='4' y='42' width='56' height='2.5' rx='1.2' fill='%23ffb547'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/style.css">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<clipPath id="cutTop"><rect x="0" y="0" width="300" height="34"/></clipPath><clipPath id="cutBot"><rect x="0" y="38" width="300" height="40"/></clipPath>
+<symbol id="bars" viewBox="0 0 64 64"><g class="p"><rect x="6" y="8" width="52" height="7" rx="3.5"/><rect x="6" y="19" width="44" height="7" rx="3.5"/><rect x="6" y="30" width="37" height="7" rx="3.5"/></g><g class="q"><rect x="6" y="45" width="29" height="7" rx="3.5"/><rect x="6" y="56" width="21" height="7" rx="3.5"/></g><rect class="z" x="0" y="40" width="64" height="2.5" rx="1.25"/></symbol>
+</defs></svg>
 <div class="shell">
   <aside class="side">
-    <a class="logo" href="#/">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--ac)"/><path d="M7 22l6-7 4 4 8-10" fill="none" stroke="var(--ac-tx)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="25" cy="9" r="2.2" fill="var(--ac-tx)"/></svg>
-      <span>FN <b>Game Analyzer</b></span>
-    </a>
+    <a class="logo" href="#/" aria-label="FNCS Lab home"><svg class="wm" viewBox="0 0 230 62" role="img" aria-label="FNCS Lab"><g font-family="Space Grotesk,system-ui,sans-serif" font-weight="700" font-size="56" letter-spacing="1"><text class="a" x="0" y="50" clip-path="url(#cutTop)">FNCS</text><text class="b" x="0" y="50" clip-path="url(#cutBot)">FNCS</text></g><rect class="z" x="0" y="35.5" width="152" height="2.6" rx="1.3"/><text class="l" x="164" y="50" font-family="Space Grotesk,system-ui,sans-serif" font-weight="600" font-size="24" letter-spacing="5">LAB</text></svg></a>
     <nav class="nav" id="nav" aria-label="Main"></nav>
-    <div class="foot"><a href="javascript:void 0" id="fbk">Send feedback</a><br>Unofficial. Data from Epic's public tournament endpoints.</div>
+    <div class="live" id="live"><div class="r"><span class="d"></span><span id="livet">Checking collector…</span></div><p id="livep"></p></div>
+    <div class="foot"><a href="javascript:void 0" id="fbk">Send feedback</a><br>Unofficial fan site, not affiliated with Epic Games. Data from Epic's public tournament endpoints.</div>
   </aside>
   <div class="col">
     <header class="top">
-      <a class="logo" href="#/"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--ac)"/><path d="M7 22l6-7 4 4 8-10" fill="none" stroke="var(--ac-tx)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+      <a class="logo" href="#/" aria-label="FNCS Lab home"><svg class="bars" viewBox="0 0 64 64" aria-hidden="true"><use href="#bars"/></svg></a>
       <div class="gsearch">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
         <input id="gs" type="search" placeholder="Find a tournament…  name, region, class" autocomplete="off" aria-label="Find a tournament">

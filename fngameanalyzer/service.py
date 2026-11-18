@@ -499,14 +499,14 @@ def calendar_ics(site, region="", family="", category="", q="", window="", favs=
               and (not keys or _event_key(w["window_id"]) in keys)]
     stamp = lambda t: time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(t))
     now = stamp(time.time())
-    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//FN Game Analyzer//EN", "CALSCALE:GREGORIAN",
-             "X-WR-CALNAME:FN Game Analyzer tournaments"]
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//FNCS Lab//EN", "CALSCALE:GREGORIAN",
+             "X-WR-CALNAME:FNCS Lab tournaments"]
     for w in wl[:120]:
         goal = w.get("goal")
         link = f"{site}/#/t/{w['window_id']}/strategy"
         desc = (f"{w['category']} - {w.get('match_cap') or '?'} games" + (f" - goal: top {goal['rank']}" if goal else "")
                 + "\nPlan your strategy: " + link)
-        lines += ["BEGIN:VEVENT", f"UID:{w['window_id']}@fn-game-analyzer", f"DTSTAMP:{now}",
+        lines += ["BEGIN:VEVENT", f"UID:{w['window_id']}@fncslab", f"DTSTAMP:{now}",
                   f"DTSTART:{stamp(w['begin'])}", f"DTEND:{stamp(w['end'])}",
                   "SUMMARY:" + _ics_text(f"{w['name']} ({w['region']})"), "DESCRIPTION:" + _ics_text(desc),
                   "URL:" + link, "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Starts in 30 minutes",

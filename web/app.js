@@ -731,6 +731,7 @@ async function checkHealth() {
     const s = await j("/api/health"), el = $("#banner"); if (!el || s.error) return;
     const idle = s.idle_s, down = s.logged_in === false || (idle != null && idle > 900);
     el.hidden = !down;
+    const lv = $("#live"); if (lv) { lv.classList.toggle("off", down); $("#livet").textContent = down ? "Live data paused" : "Collector live"; $("#livep").textContent = idle != null ? "Last update " + ago(idle) : ""; }
     if (down) el.innerHTML = `<b>Live data is paused.</b> ${s.logged_in === false ? "The Epic login behind the collector needs renewing" : "The collector has not run for " + Math.round(idle / 60) + " minutes"}${idle != null ? " (last update " + ago(idle) + ")" : ""}. Boards and live predictions may be out of date; stored history still works. <a href="#/status">Status</a>`;
   } catch (e) { }
 }

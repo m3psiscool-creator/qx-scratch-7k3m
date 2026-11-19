@@ -40,7 +40,7 @@ pre{background:var(--sf2);border-radius:12px;padding:12px;font-size:.78rem;overf
   <div class="grid">
     <div class="k"><div class="l">Database</div><div class="v" id="kdb">…</div></div>
     <div class="k"><div class="l">Epic login</div><div class="v" id="klg">…</div></div>
-    <div class="k"><div class="l">Collector last ran</div><div class="v" id="ktk">…</div></div>
+    <div class="k"><div class="l">Collector last ran <span title="Between tournaments it checks about every 30 minutes">ⓘ</span></div><div class="v" id="ktk">…</div></div>
     <div class="k"><div class="l">Database reads, month</div><div class="v" id="keg">…</div></div>
   </div>
   <p id="dbnote" class="small" style="margin-top:10px"></p>
@@ -56,9 +56,9 @@ pre{background:var(--sf2);border-radius:12px;padding:12px;font-size:.78rem;overf
     <p id="msg" style="margin-top:10px"></p>
   </div>
 
-  <div class="card" style="margin-top:14px">
+  <div class="card" id="loginCard" style="margin-top:14px" hidden>
     <h2>Provide the Epic login</h2>
-    <p class="small">Needed when the login shows "needed" or the test fails. Your Epic account must be signed in on epicgames.com in this browser.</p>
+    <p class="small">This card only appears when the login is needed or the test fails. Your Epic account must be signed in on epicgames.com in this browser.</p>
     <ol>
       <li>Open <a id="lurl" href="#" target="_blank" rel="noopener">the Epic authorization page</a>. It shows a short block of text containing an <b>authorizationCode</b>.</li>
       <li>Copy the code (the long string only) and paste it here.<div class="row" style="margin-top:8px"><input id="code" placeholder="authorizationCode" autocomplete="off" style="flex:1;min-width:220px"><button id="save">Save login</button></div></li>
@@ -96,6 +96,7 @@ async function load(test){
   else if(L.permanent){txt="permanent";cls="good"}
   else {const h=Math.round((L.refresh_valid_for_s||0)/360)/10; txt=(L.refresh_valid_for_s>0?h+" h left":"expired?"); cls=L.refresh_valid_for_s>0?"warn":"bad"; if(T&&T.ok){txt="valid · "+txt;cls="good"}}
   lg.textContent=txt; lg.className="v "+cls;
+  $("#loginCard").hidden=(cls==="good"||L.permanent)&&!(T&&!T.ok);   // the login steps only show when a login is needed
   const tk=$("#ktk"); tk.textContent=age(d.last_tick_age_s); tk.className="v "+((d.last_tick_age_s!=null&&d.last_tick_age_s<2400)?"good":"warn");
   $("#keg").textContent=d.egress_mb_month+" MB";
   $("#lurl").href=d.login_url;

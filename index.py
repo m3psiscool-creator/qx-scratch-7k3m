@@ -508,7 +508,8 @@ def health():
     except Exception as e:
         return {"ok": False, "error": str(e)[:80]}
     idle = round(time.time() - tick["at"]) if tick else None
-    return {"ok": bool(s.get("logged_in")) and (idle is not None and idle < 900), "logged_in": bool(s.get("logged_in")), "idle_s": idle}
+    napping = bool(tick) and time.time() < (tick.get("idle_until") or 0) + 600   # quiet on purpose between tournaments
+    return {"ok": bool(s.get("logged_in")) and (idle is not None and (idle < 900 or napping)), "logged_in": bool(s.get("logged_in")), "idle_s": idle}
 
 
 @app.get("/api/status")
@@ -602,8 +603,8 @@ def tick(authorization: str = Header(default=""), x_admin_key: str = Header(defa
     # cron-job.org calls this every minute; only every TICK_EVERY_MIN-th minute does work, the others return before touching the
     # database (so it can scale to zero in between and use less compute). ?sync=1 always runs.
     every = int(os.environ.get("TICK_EVERY_MIN", "5"))
-    if every > 1 and not sync and (int(time.time()) // 60) % every != 0:
-        return {"skipped": True, "reason": f"runs every {every} minutes"}
+    if not sync and ((every > 1 and (int(time.time()) // 60) % every != 0) or not collector.should_run()):
+        return {"skipped": True, "reason": f"runs every {every} minutes while a tournament is on, about every 30 minutes otherwise"}
     return collector.run_tick(duration=int(os.environ.get("TICK_SECONDS", "25")), force_sync=bool(sync))
 
 

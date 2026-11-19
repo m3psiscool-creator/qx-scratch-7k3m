@@ -3,13 +3,43 @@ import time
 import re
 from concurrent.futures import ThreadPoolExecutor
 
-from . import auth, config, storage
+from . import auth, classify, config, storage
 from .epic_api import Epic
 
 SYNC_ERRORS = []
 SYNC_EVERY = 600       # refresh the event list this often (seconds)
 MAX_RANK = 1000
 BACKFILL_PER_POLL = 2  # old finished windows downloaded per pass when time allows
+
+
+# ---- quiet outside tournaments: the database may sleep, so the collector only works while a tournament with prizes or
+# advancement (NAC/EU) is running, plus a margin before and after; otherwise it checks about every 30 minutes.
+IDLE_CHECK = 25 * 60    # when nothing is on, the next check is this far away (the 5-minute slot after it runs)
+ACTIVE_LEAD = 5 * 60    # start this long before a tournament
+ACTIVE_TAIL = config.FINALIZE_AFTER + 5 * 60   # last games finish, the final board is stored, then stop
+_IDLE_UNTIL = 0.0       # in process memory: a cold start simply checks once
+
+
+def prized(w):
+    m = w.get("meta") or {}
+    return bool(classify.goal_of(m) or m.get("advance"))
+
+
+def should_run(now=None):
+    return (now or time.time()) >= _IDLE_UNTIL
+
+
+def _activity(now):
+    """(is a prized tracked tournament on or about to start / just ended, start time of the next one)"""
+    nxt = None
+    for w in storage.window_list():
+        if w["region"] not in config.TRACKED_REGIONS or not prized(w):
+            continue
+        if w["begin"] - ACTIVE_LEAD <= now <= w["end"] + ACTIVE_TAIL and not (w.get("final") and now > w["end"] + 60):
+            return True, None
+        if w["begin"] > now and (nxt is None or w["begin"] < nxt):
+            nxt = w["begin"]
+    return False, nxt
 
 
 def sync_windows(e, force=False):
@@ -129,7 +159,7 @@ def poll_once(e, budget=12.0):
     t0 = time.time()
     now = t0
     # live = open, or closed but with games still finishing (they started before the end)
-    live = storage.live_windows(now, config.FINALIZE_AFTER)
+    live = [w for w in storage.live_windows(now, config.FINALIZE_AFTER) if prized(w)]
     done = []
     if live:
         with ThreadPoolExecutor(max_workers=min(8, len(live))) as ex:
@@ -146,6 +176,8 @@ def poll_once(e, budget=12.0):
     # the final board is stored only once every in-flight game has had time to finish;
     # older windows we never saw are backfilled newest first
     for w in storage.ended_unfinished(now, config.FINALIZE_AFTER, BACKFILL_PER_POLL):
+        if not prized(w):
+            continue
         if time.time() - t0 > budget:
             break
         done.append(_final(e, w))
@@ -286,9 +318,16 @@ def run_tick(duration=50, interval=30, force_sync=False):
                 log.append(("names", "", nn))
     except Exception as ex:
         log.append(("error", "extras", str(ex)[:120]))
+    global _IDLE_UNTIL
+    active, nxt = _activity(time.time())
+    if active:
+        _IDLE_UNTIL = 0.0
+    else:   # nothing on: sleep until the next check, or shortly before the next tournament starts
+        _IDLE_UNTIL = max(time.time() + 60, min(time.time() + IDLE_CHECK, (nxt or 1e18) - ACTIVE_LEAD))
+    log.append(("mode", "active" if active else "idle", ""))
     out = {"ok": True, "synced": synced, "log": log[-12:], "seconds": round(time.time() - t0, 1)}
     used = storage.egress_bytes() - eg0
     log.append(("meter", f"process age {round(time.time() - _BOOT)}s", f"{round(used / 1000)} KB read this pass"))
-    storage.kv_set("last_tick", {"at": time.time(), "synced": synced, "log": log[-12:]})
+    storage.kv_set("last_tick", {"at": time.time(), "synced": synced, "log": log[-12:], "idle_until": _IDLE_UNTIL})
     storage.egress_flush()
     return out

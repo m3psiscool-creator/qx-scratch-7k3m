@@ -182,7 +182,7 @@ const goalText = w => w.goal ? `Top ${nf(w.goal.rank)} · ${w.goal.kind}` : "no 
 // a clickable event card: opens the strategy page of that event
 function evCard(w) {
   const when = w.status === "upcoming" ? `starts in <span class="cd" data-cd="${w.begin}"></span>` : w.status === "finished" ? "finished " + fmt(w.end) : esc(w.status);
-  return `<a class="ev" href="#/t/${encodeURIComponent(w.window_id)}/strategy"><div class="meta"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${ACTIVE.includes(w.status) ? pill(w.status) : ""}</div>
+  return `<a class="ev" data-art="${esc(w.window_id)}" data-fam="${esc(w.family)}" href="#/t/${encodeURIComponent(w.window_id)}/strategy"><div class="meta"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${ACTIVE.includes(w.status) ? pill(w.status) : ""}</div>
     <div class="t">${isFav(w.window_id) ? "★ " : ""}${esc(w.name)}</div><div class="small">${when} · ${w.match_cap || "?"} games</div>
     <div class="go"><span>${esc(goalText(w))}</span><b>Plan strategy ›</b></div></a>`;
 }
@@ -201,7 +201,7 @@ async function home(quiet) {
     const goal = w.goal ? w.goal.rank : null, pr = goal ? w.preds[goal] : null, ranks = Object.keys(w.now).map(Number).sort((a, b) => a - b);
     const rows = ranks.map(r => { const p = w.preds[r]; return [(goal === r) ? `<b>★ Top ${r}</b>` : `Top ${r}`, nf(w.now[r]), p ? `<b>${nf(p.likely)}</b> <small>${nf(p.low)}–${nf(p.safe)}</small>` : "<small>calculating…</small>"]; });
     const pct = Math.round(w.progress * 100);
-    return `<div class="card"><div class="lc-head"><div><h2>${star(w.window_id)}${link(w.window_id, w.name)}</h2><div class="meta"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div></div>
+    return `<div class="card"><div class="lc-head" data-art="${esc(w.window_id)}" data-fam="${esc(w.family)}"><div><h2>${star(w.window_id)}${link(w.window_id, w.name)}</h2><div class="meta"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div></div>
         <span class="sub small">board updated ${ago(w.age_s)}${w.entrants ? " · " + nf(w.entrants) + " entrants" : ""}</span></div>
       <div class="lc-prog"><div class="prog"><i style="width:${Math.min(100, w.progress * 100)}%"></i></div><span>${pct}% · ends ${fmt(w.end)}</span></div>
       ${goal ? `<div class="bento">${kpi("Predicted final · top " + nf(goal), pr ? nf(pr.likely) : "…", pr ? ["Likely range", nf(pr.low) + " – " + nf(pr.safe)] : "calculating", "hero wide")}${kpi("Goal cutoff now", nf(w.now[goal]), ["Top " + nf(goal), "points right now"])}<div class="kpi"><div class="l">Goal cutoff, recent trend</div><div class="cv spark"><canvas id="sp${i}"></canvas></div></div></div>` : ""}
@@ -309,7 +309,7 @@ async function tournament(id, tab) {
   TTOP = w.goal ? w.goal.rank : (w.advance && w.advance[0] ? w.advance[0][0] : 100);
   app.innerHTML = `
   <div class="crumb"><a href="#/schedule">Schedule</a> › ${esc(w.region)}</div>
-  <div class="card"><div class="hd" style="margin:0"><div><h1 style="font-size:1.45rem">${star(w.window_id)}${esc(w.name)}</h1>
+  <div class="card" data-art="${esc(w.window_id)}" data-fam="${esc(w.family)}"><div class="hd" style="margin:0"><div><h1 style="font-size:1.45rem">${star(w.window_id)}${esc(w.name)}</h1>
     <div class="chips" style="margin-top:8px"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}${w.status === "upcoming" || ACTIVE.includes(w.status) ? `<a class="pill ac" href="${calUrl({ window: w.window_id })}" title="Download a calendar entry with a 30 minute reminder">＋ Calendar</a>` : ""}</div></div>
     <div class="small" style="text-align:right" id="cd"></div></div>${regionChips(w, tab)}<div class="mestrip" id="mestrip"></div><div id="sessions"></div></div>
   <div class="tabbar">${TABS.map(([k, label]) => `<a href="#/t/${encodeURIComponent(w.window_id)}/${k}" class="${k === tab ? "on" : ""}">${label}${k === "strategy" ? '<span class="new">NEW</span>' : ""}</a>`).join("")}</div>

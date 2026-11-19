@@ -25,7 +25,7 @@ async function dropsPage(wid) {
 }
 function drawList() {
   const l = DR.events.filter(w => (!DR.freg || w.region === DR.freg) && (!DR.fq || matches(w, DR.fq))).slice(0, 80);
-  $("#dlist").innerHTML = l.map(w => `<a href="#/drops/${encodeURIComponent(w.window_id)}" class="dr-item ${w.window_id === DR.wid ? "on" : ""}"><b>${esc(w.name)}</b><small>${esc(w.region)} · ${esc(gm(w.category))} · ${fmt(w.end)}</small><small class="${w.n ? "ok" : "mut"}">${w.n ? nf(w.n) + " landings" : "no landing data"}</small></a>`).join("") || '<p class="mut">No tournament matches.</p>';
+  $("#dlist").innerHTML = l.map(w => `<a href="#/drops/${encodeURIComponent(w.window_id)}" data-art="${esc(w.window_id)}" data-fam="${esc(w.family)}" class="dr-item ${w.window_id === DR.wid ? "on" : ""}"><b>${esc(w.name)}</b><small>${esc(w.region)} · ${esc(gm(w.category))} · ${fmt(w.end)}</small><small class="${w.n ? "ok" : "mut"}">${w.n ? nf(w.n) + " landings" : "no landing data"}</small></a>`).join("") || '<p class="mut">No tournament matches.</p>';
 }
 
 async function loadDrops(wid) {

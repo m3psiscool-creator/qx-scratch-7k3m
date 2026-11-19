@@ -8,7 +8,7 @@ import time
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from fngameanalyzer import auth, collector, config, drops, insights, me, service, storage, strategy, tracks
+from fngameanalyzer import art, auth, collector, config, drops, insights, me, service, storage, strategy, tracks
 
 app = FastAPI()
 
@@ -19,7 +19,7 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
              "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
              "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
              "/api/players": 300, "/api/player": 300,
-             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/pois": 120, "/api/drops/loot": 300, "/api/maps": 300, "/api/tracks/player": 60, "/api/tracks/recent": 120, "/api/tracks/windows": 120, "/api/tracks/window": 120, "/api/tracks/playerwindow": 120, "/api/tracks/game": 600, "/api/drops/areas": 120, "/api/calendar.ics": 300, "/api/health": 30}
+             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/pois": 120, "/api/drops/loot": 300, "/api/maps": 300, "/api/tracks/player": 60, "/api/tracks/recent": 120, "/api/tracks/windows": 120, "/api/tracks/window": 120, "/api/tracks/playerwindow": 120, "/api/tracks/game": 600, "/api/drops/areas": 120, "/api/calendar.ics": 300, "/api/health": 30, "/api/art": 21600}
 
 
 @app.middleware("http")
@@ -66,6 +66,12 @@ def home_page():
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page():
     return Response(open(os.path.join(WEB, "admin.html"), encoding="utf-8").read(), media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/art")
+def tournament_art():
+    """Epic's tournament pictures and colours (public list, no database); cached for hours at the CDN."""
+    return art.compact()
 
 
 @app.get("/api/admin/overview")

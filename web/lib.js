@@ -226,3 +226,69 @@ function drawChest(x, cx, cy, s, ring, kind) {
   }
   x.restore();
 }
+
+// ---------------------------------------------------------------- tournament art (Epic's own pictures, matched to our events)
+const ART = { items: null, imgs: [], cache: new Map(), ready: null };
+const _an = s => String(s || "").toLowerCase().replace(/arenas/g, "arena").replace(/solos/g, "solo").replace(/[^a-z0-9]/g, "");
+const ART_ALIAS = { perfeval: "performanceevaluation" };   // Epic's short key -> the words our event ids use
+const ART_FAM = { CASHCUP: "cashcup", VICTORYCUP: "victory", FNCS: "fncs", WORKSHOP: "performance", SKINCUP: "cup", TESTCUP: "test" };
+function loadArt() {
+  return ART.ready || (ART.ready = fetch("/api/art").then(r => r.json()).then(d => {
+    ART.imgs = d.imgs || [];
+    ART.items = (d.items || []).map(([s, k, t, i, c1, c2]) => ({ s, k: _an(k), t: _an(t), i, c1, c2 }));
+  }).catch(() => { ART.items = []; }));
+}
+// the picture of an event window ({window_id, family}): same title in the same season, else an earlier season, else the type's newest
+function artFor(w) {
+  if (!ART.items || !ART.items.length) return null;
+  const ck = (w.window_id || "") + "|" + (w.family || "");
+  if (ART.cache.has(ck)) return ART.cache.get(ck);
+  const m = /^S(\d+)_(.+?)(?:_(?:Event|Round|Heat|Final|Day|Qual|Last|Semi|Group|Playin|Lcq|Opens|Stage|Cumulative|Fast)\w*)?_(NAC|NAW|EU|BR|ASIA|ME|OCE)$/.exec((w.window_id || "").replace(/(All)(NAC|NAW|EU|BR|ASIA|ME|OCE)$/, "$1_$2"));
+  let best = null;
+  if (m) {
+    const season = +m[1], raw = m[2], full = _an(raw), zb = /zb/i.test(raw), mob = /mobile/i.test(raw);
+    const base = _an(raw.replace(/_ZB/gi, "").replace(/_?Mobile\w*?All/gi, "").replace(/ZB$/i, ""));
+    let bs = 0;
+    for (const it of ART.items) {
+      if (it.s > season) continue;
+      let sc = 0;
+      const kk = ART_ALIAS[it.k] || it.k;
+      if (it.t && (it.t === full || it.t === base)) sc = 100;
+      else if (it.t.length >= 6 && base.length >= 6 && (full.includes(it.t) || base.includes(it.t) || it.t.includes(base))) sc = 80;
+      else if (ART_ALIAS[it.k] && base.includes(kk)) sc = 90;
+      else if (kk.length >= 4 && (base.includes(kk) || (base.length >= 8 && kk.includes(base)))) sc = 60;
+      if (!sc) continue;
+      const imob = /mobile/.test(it.k + it.t), izb = /zb/.test(it.k);
+      sc += (mob === imob ? 5 : -20) + (zb === izb ? 3 : -3) - 25 * (season - it.s);
+      if (sc > bs) { bs = sc; best = it; }
+    }
+    if (bs < 30) best = null;
+  }
+  if (!best) {   // no same-name cup: the closest title (shared letter triples), preferring the same type and the newest
+    const word = ART_FAM[w.family] || "", tri = x => { const o = new Set(); for (let i = 0; i + 3 <= x.length; i++) o.add(x.slice(i, i + 3)); return o; };
+    const me = tri(_an((/^S\d+_(.+?)(_|$)/.exec(w.window_id || "") || [])[1] || ""));
+    let bs = -1;
+    for (const it of ART.items) {
+      const t = tri(it.t + it.k); let c = 0; me.forEach(g => { if (t.has(g)) c++; });
+      const sc = c + (word && (it.t + it.k).includes(word) ? 6 : 0) + it.s / 100;
+      if (sc > bs) { bs = sc; best = it; }
+    }
+  }
+  const res = { img: ART.imgs[best.i], c1: best.c1, c2: best.c2 };
+  ART.cache.set(ck, res);
+  return res;
+}
+// every element with data-art="<window id>" and data-fam="<family>" gets the tournament's picture behind it
+function paintArt(root) {
+  for (const el of (root || document).querySelectorAll("[data-art]:not([data-arted])")) {
+    el.dataset.arted = "1";
+    const a = artFor({ window_id: el.dataset.art, family: el.dataset.fam });
+    if (!a) continue;
+    el.style.setProperty("--art", `url("${a.img}")`);
+    if (a.c1) el.style.setProperty("--art-c1", "#" + a.c1);
+    if (a.c2) el.style.setProperty("--art-c2", "#" + a.c2);
+    el.classList.add("art");
+  }
+}
+{ let t = 0; new MutationObserver(() => { if (!t) t = requestAnimationFrame(() => { t = 0; if (ART.items) paintArt(); }); }).observe(document.body, { childList: true, subtree: true }); }
+loadArt().then(() => paintArt());

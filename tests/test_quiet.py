@@ -23,6 +23,11 @@ class QuietTest(unittest.TestCase):
         self.assertFalse(self.act([W("EU", n - 100, n + 5000, goal=False)], n)[0])   # no prizes
         self.assertFalse(self.act([W("BR", n - 100, n + 5000)], n)[0])               # untracked region
 
+    def test_skin_cups_always(self):
+        n = 100000
+        w = W("NAC", n - 100, n + 5000, goal=False); w["family"] = "SKINCUP"
+        self.assertTrue(self.act([w], n)[0])
+
     def test_next_start_and_gate(self):
         n = 100000
         a, nxt = self.act([W("NAC", n + 4000, n + 9000), W("EU", n + 2000, n + 6000)], n)

@@ -21,6 +21,8 @@ _IDLE_UNTIL = 0.0       # in process memory: a cold start simply checks once
 
 
 def prized(w):
+    if w.get("family") == "SKINCUP":   # skin cups are always collected, even if Epic's reward data is missing
+        return True
     m = w.get("meta") or {}
     return bool(classify.goal_of(m) or m.get("advance"))
 

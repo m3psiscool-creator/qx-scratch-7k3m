@@ -48,7 +48,8 @@ FINALIZE_AFTER = 25 * 60       # keep polling this long after the end, then stor
 REQUEST_DELAY =float(os.environ.get("FNGA_DELAY", "0.4"))  # seconds between API calls
 # Regions the hosted collector tracks (comma separated Epic region codes in event ids).
 ALL_REGIONS = ["NAC", "NAW", "EU", "BR", "ASIA", "ME", "OCE"]
-TRACKED_REGIONS = [r for r in os.environ.get("FNGA_REGIONS", ",".join(ALL_REGIONS)).split(",") if r]
+# Only NAC and EU are collected (keeps the database compute low); FNGA_REGIONS overrides, e.g. "NAC,EU,BR"
+TRACKED_REGIONS = [r for r in os.environ.get("FNGA_REGIONS", "NAC,EU").split(",") if r]
 # region parameter of Epic's event download call (NAE returns both NAC and NAW events)
 DOWNLOAD_REGIONS = ["NAC", "NAW", "NAE", "EU", "BR", "ASIA", "ME", "OCE"]
 

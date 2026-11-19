@@ -599,6 +599,11 @@ def tick(authorization: str = Header(default=""), x_admin_key: str = Header(defa
     secret = os.environ.get("CRON_SECRET", "")
     if not (secret and hmac.compare_digest(authorization, f"Bearer {secret}")) and not _is_admin(x_admin_key):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
+    # cron-job.org calls this every minute; only every TICK_EVERY_MIN-th minute does work, the others return before touching the
+    # database (so it can scale to zero in between and use less compute). ?sync=1 always runs.
+    every = int(os.environ.get("TICK_EVERY_MIN", "5"))
+    if every > 1 and not sync and (int(time.time()) // 60) % every != 0:
+        return {"skipped": True, "reason": f"runs every {every} minutes"}
     return collector.run_tick(duration=int(os.environ.get("TICK_SECONDS", "25")), force_sync=bool(sync))
 
 

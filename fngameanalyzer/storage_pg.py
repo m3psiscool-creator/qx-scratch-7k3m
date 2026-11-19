@@ -41,6 +41,7 @@ CREATE INDEX IF NOT EXISTS track_players_sess ON track_players(session);
 """
 ALTERS = ["ALTER TABLE windows ADD COLUMN IF NOT EXISTS deep TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS category TEXT",
+          "ALTER TABLE drops ADD COLUMN IF NOT EXISTS session TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS prow TEXT",
           "ALTER TABLE windows ADD COLUMN IF NOT EXISTS timed TEXT",
           "ALTER TABLE snapshots ADD COLUMN IF NOT EXISTS deep TEXT",
@@ -609,18 +610,18 @@ def status_counts():
 
 # ---- landing locations (where each team dropped in each game of a tournament)
 def drops_replace(window_id, rows, append=False):
-    """rows: (game, team, x, y, poi, placement, points, rank, win). x and y are 0-1 across the map image."""
+    """rows: (game, team, x, y, poi, placement, points, rank, win, session). x and y are 0-1 across the map image."""
     with db() as c:
         if not append:
             c.execute("DELETE FROM drops WHERE window_id=%s", (window_id,))
         with c.cursor() as cur:
-            cur.executemany("INSERT INTO drops(window_id,game,team,x,y,poi,placement,points,rank,win) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            cur.executemany("INSERT INTO drops(window_id,game,team,x,y,poi,placement,points,rank,win,session) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                             [(window_id, *r) for r in rows])
 
 
 def drops_rows(window_id):
     with db() as c:
-        return c.execute("SELECT game,team,x,y,poi,placement,points,rank,win FROM drops WHERE window_id=%s", (window_id,)).fetchall()
+        return c.execute("SELECT game,team,x,y,poi,placement,points,rank,win,session FROM drops WHERE window_id=%s", (window_id,)).fetchall()
 
 
 def drops_available():

@@ -345,7 +345,9 @@ def _arrays(window_id):
          "x": xt.astype(np.float32), "y": yt.astype(np.float32), "x0": x0, "y0": y0, "rot": nrot,
          "poi": [r[4] or "" for r in rows], "placement": np.array([r[5] or 0 for r in rows], dtype=np.int16),
          "points": np.array([r[6] or 0 for r in rows], dtype=np.int32), "rank": np.array([r[7] or 0 for r in rows], dtype=np.int32),
-         "win": np.array([r[8] or 0 for r in rows], dtype=np.int8)}
+         "win": np.array([r[8] or 0 for r in rows], dtype=np.int8),
+         "sess": np.array([(r[9] if len(r) > 9 and r[9] else "") for r in rows], dtype=object)}
+    a["has_sess"] = bool((a["sess"] != "").any())
     lobby = {int(g): max(1, int(a["placement"][a["game"] == g].max())) for g in np.unique(a["game"])}
     a["lobby"] = np.array([lobby[int(g)] for g in a["game"]], dtype=np.int16)
     a["poi_arr"] = np.array(a["poi"], dtype=object)
@@ -422,11 +424,11 @@ def area(window_id, poly, top=100, game=0):
         by_game[int(g)] = int((a["game"][idx] == g).sum())
     out["by_game"] = by_game
     out["loot"] = _area_loot(window_id, a, mask, base, poly)
-    pois = {}
-    for p in a["poi_arr"][idx]:
-        if p:
-            pois[p] = pois.get(p, 0) + 1
-    out["pois"] = sorted(([k, v] for k, v in pois.items()), key=lambda kv: -kv[1])[:6]
+    sess_n = len({x for x in a["sess"][base] if x}) if a.get("has_sess") else len((storage.kv_get("drops_done:" + window_id) or {}).get("sessions") or [])
+    ct = _contest(a, mask)
+    if ct.get("rate") is None:
+        ct = {"rate": _contest_est(int(mask.sum()), max(1, sess_n)), "estimated": True}
+    out["contest"] = ct
     # the best-scoring teams that landed here
     best = idx[np.argsort(-a["points"][idx])[:10]] if len(idx) else []
     ids = [t for i in best for t in a["team"][i].split("+") if HEX32.match(t)]
@@ -449,24 +451,77 @@ def area(window_id, poly, top=100, game=0):
     return out
 
 
-def pois(window_id, top=100, game=0):
-    """The named landing spots, compared."""
+def _contest(a, mask):
+    """Contest rate of the landings in `mask` (an area): of the matches in which at least one team landed there, the share in which
+    two or more different teams did (players on one team never contest each other). Needs the match id of each landing; older
+    data has none, so the rate is then estimated from the average number of teams landing there per match (Poisson)."""
+    idx = np.where(mask)[0]
+    if not len(idx):
+        return {"rate": None}
+    if a.get("has_sess"):
+        by = {}
+        for i in idx:
+            if a["sess"][i]:
+                by.setdefault(a["sess"][i], set()).add(a["team"][i])
+        if by:
+            n = [len(v) for v in by.values()]
+            return {"rate": round(sum(1 for c in n if c >= 2) / len(n), 4), "matches": len(n), "avg_teams": round(sum(n) / len(n), 2),
+                    "max_teams": max(n), "shared_landings": round(sum(c for c in n if c >= 2) / max(1, sum(n)), 4), "estimated": False}
+    return {"rate": None, "estimated": True}
+
+
+def _contest_est(landings, matches):
+    """Poisson estimate of the contest rate when match ids are missing: P(2+ teams | at least 1 team)."""
+    lam = landings / max(1, matches)
+    if lam <= 1e-9:
+        return None
+    return round(1 - lam * math.exp(-lam) / (1 - math.exp(-lam)), 4)
+
+
+def _match_count(a, window_id, base):
+    if a.get("has_sess"):
+        return max(1, len({s for s in a["sess"][base] if s}))
+    return max(1, len((storage.kv_get("drops_done:" + window_id) or {}).get("sessions") or []))
+
+
+def hotspots(window_id, top=100, game=0, radius=0.04, count=14):
+    """The busiest places teams landed: greedy circles on the landing density, each with its stats and contest rate."""
     a = _arrays(window_id)
     base = _sel(a, game)
-    qm = (a["rank"] > 0) & (a["rank"] <= top)
-    total, qtotal = int(base.sum()), int((base & qm).sum())
-    rows = []
-    for name in sorted({p for p in a["poi"] if p}):
-        m = base & (a["poi_arr"] == name)
-        s = _stats(a, m, top)
-        if not s["landings"]:
-            continue
-        s.update(name=name, share_of_landings=round(s["landings"] / max(1, total), 4),
-                 share_of_qualifier_landings=round(s["qualifier_landings"] / max(1, qtotal), 4),
-                 x=round(float(a["x"][m].mean()), 4), y=round(float(a["y"][m].mean()), 4))
-        rows.append(s)
-    rows.sort(key=lambda r: -r["landings"])
-    return {"pois": rows, "total": total, "baseline": _stats(a, base, top)}
+    xs, ys = a["x"][base], a["y"][base]
+    if not len(xs):
+        return {"spots": [], "total": 0}
+    n = 48
+    H, _, _ = np.histogram2d(ys, xs, bins=n, range=[[0, 1], [0, 1]])
+    k = max(1, int(round(radius * n)))
+    P = np.pad(H, k)
+    S = np.zeros_like(H)
+    for dy in range(-k, k + 1):
+        for dx in range(-k, k + 1):
+            if dx * dx + dy * dy <= k * k:
+                S += P[k + dy:k + dy + n, k + dx:k + dx + n]
+    matches = _match_count(a, window_id, base)
+    cc = (np.arange(n) + 0.5) / n
+    CX, CY = np.meshgrid(cc, cc)
+    out = []
+    for _ in range(count):
+        iy, ix = np.unravel_index(int(np.argmax(S)), S.shape)
+        if S[iy, ix] < max(6, len(xs) * 0.004):
+            break
+        cx, cy = (ix + 0.5) / n, (iy + 0.5) / n
+        near = base & ((a["x"] - cx) ** 2 + (a["y"] - cy) ** 2 <= radius ** 2)
+        cx, cy = float(a["x"][near].mean()), float(a["y"][near].mean())          # centre on the landings themselves
+        near = base & ((a["x"] - cx) ** 2 + (a["y"] - cy) ** 2 <= radius ** 2)
+        st = _stats(a, near, top)
+        ct = _contest(a, near)
+        if ct.get("rate") is None:
+            ct = {"rate": _contest_est(st["landings"], matches), "estimated": True}
+        st.update(x=round(cx, 4), y=round(cy, 4), r=radius, contest=ct.get("rate"), contest_estimated=bool(ct.get("estimated")),
+                  avg_teams=ct.get("avg_teams"), share_of_landings=round(st["landings"] / len(xs), 4),
+                  teams_per_game=round(st["landings"] / matches, 2))
+        out.append(st)
+        S[(CX - cx) ** 2 + (CY - cy) ** 2 < (radius * 1.8) ** 2] = 0         # keep the next circles apart from this one
+    return {"spots": out, "total": int(base.sum()), "matches": matches, "has_match_ids": bool(a.get("has_sess"))}
 
 
 # ---------------------------------------------------------------- loading data (owner only)
@@ -513,7 +568,7 @@ def ingest(body):
         if pts is None and rl and d.get("elims") is not None:
             pts = rules.game_points(rl, {rules.STATS[0]: place, rules.STATS[1]: int(d["elims"]), rules.STATS[2]: 1 if d.get("win") else 0})
         rank = int(d.get("rank") or 0) or min((rank_of[t] for t in team.split("+") if t in rank_of), default=0)
-        rows.append((int(d.get("game") or 1), team, x, y, str(d.get("poi") or "")[:60], place, int(pts or 0), rank, 1 if d.get("win") else 0))
+        rows.append((int(d.get("game") or 1), team, x, y, str(d.get("poi") or "")[:60], place, int(pts or 0), rank, 1 if d.get("win") else 0, str(d.get("session") or "")[:48]))
     if not rows and not body.get("sessions_done"):
         raise ValueError("No usable rows (coordinates must be inside the map).")
     if rows:
@@ -822,10 +877,6 @@ def loot(window_id, frac=None, nms=1, smooth=0, kinds=None):
             "note": None if sites else f"Chest positions need at least {MIN_MATCHES} processed matches of this map (have {M})."}
 
 
-def _label(u, v):
-    return f"{chr(65 + min(9, int(u * 10)))}{min(9, int(v * 10)) + 1}"
-
-
 TEAM = {"solo": 1, "duos": 2, "trios": 3, "squads": 4}
 
 
@@ -862,21 +913,17 @@ def areas(window_id, top=100, game=0, radius=0.055, min_chests=4):
         teams = landings / nbase * per_match                   # average teams landing here per game
         players = teams * team_size
         s = _stats(a, near, top)
-        out.append({"label": _label(cx, cy), "x": round(cx, 4), "y": round(cy, 4), "r": round(reach, 3), "chests": ch,
+        ct = _contest(a, near)
+        out.append({"contest": ct.get("rate") if ct.get("rate") is not None else _contest_est(landings, matches), "label": "", "x": round(cx, 4), "y": round(cy, 4), "r": round(reach, 3), "chests": ch,
                     "lootage": round(rate, 3), "landings": landings, "teams_per_game": round(teams, 2),
                     "players_per_game": round(players, 2), "chests_per_player": round(ch / max(players, 0.25), 2),
                     "score": round(ch / (players + 1), 2),   # loot per crowd: many chests AND few players (an empty corner with 3 chests is not the best pick)
                     "free_chests": round(ch * (1 - rate), 1),
                     "qualifier_share": s.get("qualifier_share"), "avg_points": s.get("avg_points"), "avg_placement_pct": s.get("avg_placement_pct")})
     out = [o for o in out if o["chests"] >= min_chests]
-    groups = {}
-    for o in out:
-        groups.setdefault(o["label"], []).append(o)
-    for label, g in groups.items():          # several areas in one grid square: A1a, A1b, ... from left to right
-        if len(g) > 1:
-            for n, o in enumerate(sorted(g, key=lambda o: (o["x"], o["y"]))):
-                o["label"] = label + chr(97 + n)
     out.sort(key=lambda o: -o["score"])
+    for n, o in enumerate(out, 1):
+        o["label"] = str(n)
     return {"areas": out, "matches": matches, "chest_matches": M, "team_size": team_size,
             "teams_per_match": round(per_match, 1), "game": game,
             "lobby": (w.get("meta") or {}).get("lobby") or config.LOBBY.get(((w.get("meta") or {}).get("game_type"), (w.get("meta") or {}).get("mode")))

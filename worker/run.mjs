@@ -114,12 +114,12 @@ for (let i = 0; i < files.length; i += 20) {
       const u = toUnit(x, y);
       if (!inside(u)) continue;
       if (t) rows.push({ game: t.game, team: t.accounts.map((a) => a.toLowerCase()).join('+'), x: u[0], y: u[1], placement: t.placement || 0,
-        points: t.points ?? undefined, elims: t.elims, rank: t.rank || 0, win: !!t.win });
+        points: t.points ?? undefined, elims: t.elims, rank: t.rank || 0, win: !!t.win, session: s.session });
       else {   // a team that is not on the stored leaderboard: no rank, game number unknown (0), points from the replay's own numbers
         noMatch++; synthetic++;
         const place = Math.min(...ps.map((p) => p.placement || 999));
         rows.push({ game: 0, team: ps.map((p) => p.epic.toLowerCase()).sort().join('+'), x: u[0], y: u[1], placement: place === 999 ? 0 : place,
-          elims: ps.reduce((a, p) => a + (p.kills || 0), 0), rank: 0, win: place === 1 });
+          elims: ps.reduce((a, p) => a + (p.kills || 0), 0), rank: 0, win: place === 1, session: s.session });
       }
     }
     for (const [x, y] of res.trail || []) {

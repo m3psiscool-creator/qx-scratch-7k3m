@@ -166,7 +166,7 @@ class DropsTest(unittest.TestCase):
               mock.patch.object(storage, "drop_map_set", side_effect=lambda w, d: saved.update(map=d), create=True)):
             out = drops.ingest(body)
         self.assertEqual((out["stored"], out["skipped"]), (1, 1))
-        game, team, x, y, poi, place, pts, rank, win = saved["rows"][0]
+        game, team, x, y, poi, place, pts, rank, win, _sess = saved["rows"][0]
         self.assertAlmostEqual(x, 0.75)
         self.assertAlmostEqual(y, 0.25)                  # flipped
         self.assertEqual(rank, 1)                        # found in the stored final board

@@ -551,3 +551,13 @@ td.n.good{color:var(--good)}td.n.warn{color:var(--warn)}td.n.bad{color:var(--bad
 .dr-side .kpi .v{font-size:1.45rem;margin:6px 0 8px}
 .dr-side .kpi .d,.dr-side .kpi small{font-size:.76rem}
 .dr-side table{font-size:.8rem}
+
+/* Custom scrollbars, site-wide */
+*{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--ac) 55%,var(--sf2)) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--ac) 45%,var(--sf2));border-radius:10px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:var(--ac);background-clip:content-box}
+::-webkit-scrollbar-corner{background:transparent}
+html{scrollbar-gutter:stable}
+.dr-stage{grid-template-columns:minmax(0,1fr) 430px}

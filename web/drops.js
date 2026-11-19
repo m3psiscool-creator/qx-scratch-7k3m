@@ -118,7 +118,7 @@ function clearSel() { DR.poly = DR.draft = DR.area = DR.mark = null; $$(".dr-row
 
 // ---- the map canvas: view transform, heat layers, selection
 function sizeCanvas() {
-  const c = $("#dc"), w = Math.min(1000, c.parentElement.clientWidth || 700), r = window.devicePixelRatio || 1;
+  const c = $("#dc"), w = Math.min(860, c.parentElement.clientWidth || 700), r = window.devicePixelRatio || 1;
   DR.S = w; c.style.width = w + "px"; c.style.height = w + "px"; c.width = Math.round(w * r); c.height = Math.round(w * r); c.getContext("2d").setTransform(r, 0, 0, r, 0, 0);
 }
 const toPx = (u, v) => [(u * DR.z + DR.ox) * DR.S, (v * DR.z + DR.oy) * DR.S];
@@ -153,6 +153,8 @@ function draw() {
     const t = clamp(c.rate, 0, 1), col = `rgb(${Math.round(70 + 185 * t)},${Math.round(220 - 150 * t)},${Math.round(110 - 40 * t)})`;   // green = rarely looted, red = looted almost every game
     drawChest(x, sx, sy, Math.min(9, 3 + 1.5 * Math.sqrt(DR.z)), col);
   });
+  { const sel = DR.draft || DR.poly;   // shade everything outside the selected area
+    if (sel && sel.length > 2) { x.save(); x.beginPath(); x.rect(px, py, W, W); sel.forEach(([u, v], i) => { const [a, b] = toPx(u, v); i ? x.lineTo(a, b) : x.moveTo(a, b); }); x.closePath(); x.fillStyle = "rgba(4,6,12,0.52)"; x.fill("evenodd"); x.restore(); } }
   if (DR.mark) { const [mx, my] = toPx(DR.mark.x, DR.mark.y); x.beginPath(); x.arc(mx, my, DR.mark.r * S * DR.z, 0, 7); x.setLineDash([6, 4]); x.lineWidth = 2.5; x.strokeStyle = "#fff"; x.stroke(); x.setLineDash([]);
     x.font = "700 12px system-ui"; x.lineWidth = 4; x.strokeStyle = "#000c"; x.strokeText(DR.mark.label, mx - 8, my - DR.mark.r * S * DR.z - 6); x.fillStyle = "#fff"; x.fillText(DR.mark.label, mx - 8, my - DR.mark.r * S * DR.z - 6); }
   const poly = DR.draft || DR.poly;

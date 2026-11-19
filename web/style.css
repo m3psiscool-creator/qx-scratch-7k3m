@@ -415,3 +415,12 @@ td.mid,th.mid{background:var(--ac-soft)}
 .art .pill{background:color-mix(in srgb,var(--sf) 82%,transparent);backdrop-filter:blur(4px)}
 .art .pill.live{color:var(--good)}
 .lc-head.art .sub{background:color-mix(in srgb,var(--sf) 78%,transparent);padding:3px 11px;border-radius:99px;backdrop-filter:blur(4px)}
+
+/* your games on a tournament page */
+.myg .kpis{margin:0 0 14px}
+.plc{display:inline-block;min-width:3.2em;text-align:center;padding:2px 10px;border-radius:99px;background:var(--sf2);border:1px solid var(--line);font-weight:650;font-variant-numeric:tabular-nums}
+.plc.t{background:var(--good-bg);border-color:transparent;color:var(--good)}
+.plc.w{background:var(--ac);border-color:transparent;color:var(--ac-tx)}
+.myg tr.tot td{border-top:2px solid var(--line2)}
+.good{color:var(--good)}
+.card.art #cd{background:color-mix(in srgb,var(--sf) 78%,transparent);padding:3px 11px;border-radius:99px;backdrop-filter:blur(4px)}

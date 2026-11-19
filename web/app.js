@@ -94,6 +94,18 @@ renderAcct();
 // one line about the player's own result in an event
 const meLine = (d, wid) => !d || d.error ? "" : d.found ? `<span class="dot" style="width:8px;height:8px;border-radius:50%;background:var(--good);display:inline-block"></span> <b>${esc(d.name)}</b> · rank <b>#${nf(d.rank)}</b> · <b>${nf(d.points)}</b> points · ${d.games_played} games${d.team && d.team.length ? " · with " + esc(d.team.join(", ")) : ""} <a href="#/t/${encodeURIComponent(wid)}/strategy">Your games ›</a>` : `<span class="mut">${esc(d.message || "")}</span>`;
 
+// "Your games" card on a tournament page: every game's placement and elims, plus your averages (only when you played the event)
+function myGames(d) {
+  if (!d || d.error || !d.found || !(d.games || []).length) return "";
+  const g = d.games, best = Math.min(...g.map(x => x.placement || 99)), worst = Math.max(...g.map(x => x.placement || 0));
+  const chip = p => `<span class="plc ${p === 1 ? "w" : p <= 10 ? "t" : ""}">${p ? "#" + p : "-"}</span>`;
+  const tm = e => e ? new Date(e * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
+  return `<div class="card myg"><div class="hd"><h2>Your games · ${esc(d.name)}</h2><span class="small">${d.games_played} played${d.team && d.team.length ? " · with " + esc(d.team.join(", ")) : ""}</span></div>
+    <div class="kpis">${kpi("Rank", "#" + nf(d.rank), ["Points", nf(d.points)], "hero")}${kpi("Avg placement", nd(d.avg_place), ["Best / worst", "#" + best + " / #" + worst])}${kpi("Avg elims", nd(d.elims_per_game), ["Total elims", nf(g.reduce((a, x) => a + (x.elims || 0), 0))])}${kpi("Wins", d.wins, ["Points per game", nd(d.pts_per_game)])}</div>
+    <div class="scroll"><table><tr><th>Game</th><th>Placement</th><th class="n">Elims</th><th class="n">Points</th><th class="n">Ended</th></tr>${g.map(x => `<tr><td>${x.n}</td><td>${chip(x.placement)}${x.win ? ' <span class="small good">win</span>' : ""}</td><td class="n">${nf(x.elims)}</td><td class="n">${x.points == null ? "-" : nf(x.points)}</td><td class="n">${tm(x.end)}</td></tr>`).join("")}
+    <tr class="tot"><td><b>Average</b></td><td><b>#${nd(d.avg_place)}</b></td><td class="n"><b>${nd(d.elims_per_game)}</b></td><td class="n"><b>${nd(d.pts_per_game)}</b></td><td></td></tr></table></div></div>`;
+}
+
 // ---------------------------------------------------------------- feedback from anyone (read by the owner on the Status page)
 function feedbackPop() {
   const old = $(".acctpop"); if (old) old.remove();
@@ -312,12 +324,13 @@ async function tournament(id, tab) {
   <div class="card" data-art="${esc(w.window_id)}" data-fam="${esc(w.family)}"><div class="hd" style="margin:0"><div><h1 style="font-size:1.45rem">${star(w.window_id)}${esc(w.name)}</h1>
     <div class="chips" style="margin-top:8px"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}${w.status === "upcoming" || ACTIVE.includes(w.status) ? `<a class="pill ac" href="${calUrl({ window: w.window_id })}" title="Download a calendar entry with a 30 minute reminder">＋ Calendar</a>` : ""}</div></div>
     <div class="small" style="text-align:right" id="cd"></div></div>${regionChips(w, tab)}<div class="mestrip" id="mestrip"></div><div id="sessions"></div></div>
+  <div id="myg"></div>
   <div class="tabbar">${TABS.map(([k, label]) => `<a href="#/t/${encodeURIComponent(w.window_id)}/${k}" class="${k === tab ? "on" : ""}">${label}${k === "strategy" ? '<span class="new">NEW</span>' : ""}</a>`).join("")}</div>
   <div id="panel"></div>`;
   const tick = () => { const t = w.begin - Date.now() / 1000, e = w.end - Date.now() / 1000; $("#cd") && ($("#cd").innerHTML = t > 0 ? `starts in <b class="cd">${dur(t)}</b>` : e > 0 ? `games can start for <b class="cd">${dur(e)}</b>` : ""); };
   tick(); every(1000, tick);
   const open = w.status === "upcoming" || ACTIVE.includes(w.status);
-  const stripMe = async force => { if (!ACCT || w.status === "upcoming") return; const r = await fetchMe(w.window_id, force); const el = $("#mestrip"); if (el) el.innerHTML = meLine(r, w.window_id); };
+  const stripMe = async force => { if (!ACCT || w.status === "upcoming") return; const r = await fetchMe(w.window_id, force); const el = $("#mestrip"); if (el) el.innerHTML = meLine(r, w.window_id); const mg = $("#myg"); if (mg) mg.innerHTML = myGames(r); };
   loadSessions(w, tab);
   stripMe(); if (open) every(180000, () => stripMe(true));   // your own result, checked automatically on every event page
   if (tab === "overview") await tabOverview(w, open);

@@ -20,10 +20,10 @@ def w(i, region="NAC", cat="reload zb duo", fmt="f1", end=None):
 class HistoryTest(unittest.TestCase):
     def test_same_region_only_when_enough(self):
         target = w(20, "NAC")
-        same = [w(i, "NAC") for i in range(1, 6)]
+        same = [w(i, "NAC") for i in range(1, model.MIN_SAME_REGION + 2)]
         other = [w(i + 10, "EU") for i in range(1, 6)]
         pool = model.comparable(target, same + other)
-        self.assertEqual({x["region"] for x in pool}, {"NAC"})   # five NAC events: no other region needed
+        self.assertEqual({x["region"] for x in pool}, {"NAC"})   # enough NAC events: no other region needed
 
     def test_other_regions_fill_in_behind_the_region(self):
         target = w(20, "NAC")

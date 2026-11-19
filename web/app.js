@@ -102,8 +102,8 @@ function myGames(d) {
   const tm = e => e ? new Date(e * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "-";
   return `<div class="card myg"><div class="hd"><h2>Your games · ${esc(d.name)}</h2><span class="small">${d.games_played} played${d.team && d.team.length ? " · with " + esc(d.team.join(", ")) : ""}</span></div>
     <div class="kpis">${kpi("Rank", "#" + nf(d.rank), ["Points", nf(d.points)], "hero")}${kpi("Avg placement", nd(d.avg_place), ["Best / worst", "#" + best + " / #" + worst])}${kpi("Avg elims", nd(d.elims_per_game), ["Total elims", nf(g.reduce((a, x) => a + (x.elims || 0), 0))])}${kpi("Wins", d.wins, ["Points per game", nd(d.pts_per_game)])}</div>
-    <div class="scroll"><table><tr><th>Game</th><th>Placement</th><th class="n">Elims</th><th class="n">Points</th><th class="n">Ended</th></tr>${g.map(x => `<tr><td>${x.n}</td><td>${chip(x.placement)}${x.win ? ' <span class="small good">win</span>' : ""}</td><td class="n">${nf(x.elims)}</td><td class="n">${x.points == null ? "-" : nf(x.points)}</td><td class="n">${tm(x.end)}</td></tr>`).join("")}
-    <tr class="tot"><td><b>Average</b></td><td><b>#${nd(d.avg_place)}</b></td><td class="n"><b>${nd(d.elims_per_game)}</b></td><td class="n"><b>${nd(d.pts_per_game)}</b></td><td></td></tr></table></div></div>`;
+    <div class="scroll"><table><tr><th>Game</th><th>Placement</th><th class="n">Elims</th><th class="n">Points</th><th class="n">Ended</th><th>Replay ID</th></tr>${g.map(x => `<tr><td>${x.n}</td><td>${chip(x.placement)}${x.win ? ' <span class="small good">win</span>' : ""}</td><td class="n">${nf(x.elims)}</td><td class="n">${x.points == null ? "-" : nf(x.points)}</td><td class="n">${tm(x.end)}</td><td>${x.session ? `<button class="sid" data-sid="${esc(x.session)}" title="Copy replay ID: ${esc(x.session)}">${esc(x.session.slice(0, 8))}… ⧉</button>` : "-"}</td></tr>`).join("")}
+    <tr class="tot"><td><b>Average</b></td><td><b>#${nd(d.avg_place)}</b></td><td class="n"><b>${nd(d.elims_per_game)}</b></td><td class="n"><b>${nd(d.pts_per_game)}</b></td><td></td><td></td></tr></table></div></div>`;
 }
 
 // ---------------------------------------------------------------- feedback from anyone (read by the owner on the Status page)
@@ -211,29 +211,28 @@ async function home(quiet) {
   HOME_SIG = sig; destroyCharts();
   const live = d.live.map((w, i) => {
     const goal = w.goal ? w.goal.rank : null, pr = goal ? w.preds[goal] : null, ranks = Object.keys(w.now).map(Number).sort((a, b) => a - b);
-    const rows = ranks.map(r => { const p = w.preds[r]; return [(goal === r) ? `<b>★ Top ${r}</b>` : `Top ${r}`, nf(w.now[r]), p ? `<b>${nf(p.likely)}</b> <small>${nf(p.low)}–${nf(p.safe)}</small>` : "<small>calculating…</small>"]; });
+    const shown = ranks.filter((r, ix) => ix < 4 || r === goal).slice(0, 5), rows = shown.map(r => { const p = w.preds[r]; return [(goal === r) ? `<b>★ Top ${r}</b>` : `Top ${r}`, nf(w.now[r]), p ? `<b>${nf(p.likely)}</b> <small>${nf(p.low)}–${nf(p.safe)}</small>` : "<small>calculating…</small>"]; });
     const pct = Math.round(w.progress * 100);
     return `<div class="card"><div class="lc-head" data-art="${esc(w.window_id)}" data-fam="${esc(w.family)}"><div><h2>${star(w.window_id)}${link(w.window_id, w.name)}</h2><div class="meta"><span class="pill">${esc(w.region)}</span><span class="pill">${esc(gm(w.category))}</span><span class="pill">${TYPE[w.family]}</span>${pill(w.status)}</div></div>
         <span class="sub small">board updated ${ago(w.age_s)}${w.entrants ? " · " + nf(w.entrants) + " entrants" : ""}</span></div>
       <div class="lc-prog"><div class="prog"><i style="width:${Math.min(100, w.progress * 100)}%"></i></div><span>${pct}% · ends ${fmt(w.end)}</span></div>
       ${goal ? `<div class="bento">${kpi("Predicted final · top " + nf(goal), pr ? nf(pr.likely) : "…", pr ? ["Likely range", nf(pr.low) + " – " + nf(pr.safe)] : "calculating", "hero wide")}${kpi("Goal cutoff now", nf(w.now[goal]), ["Top " + nf(goal), "points right now"])}<div class="kpi"><div class="l">Goal cutoff, recent trend</div><div class="cv spark"><canvas id="sp${i}"></canvas></div></div></div>` : ""}
-      <div class="grid g2"><div><h3>Leaders</h3>${table(["#", "Player", "Pts", "G"], w.top.map(t => [t.rank, esc(t.players.join(" + ")), nf(t.points), t.games]), ["", "", "n", "n"])}</div>
+      <div class="grid g2"><div><h3>Leaders</h3>${table(["#", "Player", "Pts", "G"], w.top.slice(0, 5).map(t => [t.rank, esc(t.players.join(" + ")), nf(t.points), t.games]), ["", "", "n", "n"])}</div>
       <div><h3>Cutoffs: now → predicted final</h3>${table(["Rank", "Now", "Predicted"], rows, ["", "n", "n"])}</div></div>
       <div class="mestrip" id="mh${i}"></div><div class="chips" style="margin-top:14px"><a class="btn" href="#/t/${encodeURIComponent(w.window_id)}/strategy">Strategy ›</a><a class="btn sec" href="#/t/${encodeURIComponent(w.window_id)}/predictions">Predictions</a></div></div>`;
   }).join("");
   const favs = FAVS.size ? (await allWindows()).filter(w => isFav(w.window_id) && (!REGION || w.region === REGION) && w.status !== "not collected yet").sort((a, b) => rank(a) - rank(b)).slice(0, 6) : [];
   const nextUp = (d.upcoming || []).slice(0, 6);
-  const FEAT = [["target", "Strategy", "A game plan for every event: the points to aim for, finisher profiles, pace and a safety margin.", "#/strategy"], ["map", "Dropspots", "Where teams landed and which landings qualified, from thousands of replays.", "#/drops"], ["pin", "Map", "Every chest and container with open rates, so you know which spots are worth the drop.", "#/map"], ["route", "Rotations", "Pick a tournament and a player, then watch every game: the drop and each rotation.", "#/rotations"]];
-  const feats = `<div class="feats">${FEAT.map(([ic, t, dsc, h]) => `<a class="feat" href="${h}"><div class="ic">${icon(ic)}</div><b>${t}</b><span>${dsc}</span><div class="more">Open ›</div></a>`).join("")}</div>`;
-  app.innerHTML = `<section class="hero"><h1>Know the cutoff <em>before it happens</em></h1><p>Live leaderboards, predicted final cutoffs and a game plan for every FNCS, Cash Cup and Skin Cup${REGION ? " · " + REGION : ""}.</p>
-      <div class="cta"><a class="btn" href="#/strategy">Plan my strategy</a><a class="btn sec" href="#/schedule">See the schedule</a></div></section>` + feats +
-    `<div class="kpis">${kpi("Live now", d.live.length, ["Starting soon", (d.upcoming || []).length])}${kpi("Next start", (d.upcoming || [])[0] ? `<span class="cd" data-cd="${d.upcoming[0].begin}"></span>` : "–", (d.upcoming || [])[0] ? ["Event", esc(d.upcoming[0].name)] : "")}${kpi("Finished recently", d.finished.length, ["Latest", d.finished[0] ? esc(d.finished[0].region) : "–"])}</div>` +
-    (store.get("seen_new", "") === NEWS_VER ? "" : `<div class="card" id="newscard"><div class="hd"><h2>What's new</h2><button class="sec chip" id="newsx">Got it</button></div><ul style="margin:0;padding-left:18px;line-height:1.6">${NEWS.map(n => `<li>${n}</li>`).join("")}</ul></div>`) +
-    (ACCT ? "" : `<div class="card flat" style="display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><b>Add your Epic account once</b><div class="small">Then your rank, points and games are checked automatically on every event, with no login.</div></div><button id="ap-open">Add my account</button></div>`) +
-    `<h3 style="margin-top:22px">Live now${REGION ? " · " + REGION : ""}</h3>` + (live || `<div class="card flat"><b>Nothing is live right now${REGION ? " in " + REGION : ""}.</b> <span class="mut">Plan ahead with the next events below.</span></div>`) +
-    (favs.length ? `<h3 style="margin-top:22px">★ Your favourites</h3><div class="evgrid" style="margin-bottom:20px">${favs.map(evCard).join("")}</div>` : "") +
-    `<h3 style="margin-top:22px">Starting soon</h3><div class="evgrid">${nextUp.map(evCard).join("") || '<div class="card flat mut">No upcoming events.</div>'}</div>
-    <div class="card" style="margin-top:20px"><div class="hd"><h2>Just finished</h2></div>${table(["Ended", "Region", "Tournament", ""], d.finished.map(w => [fmt(w.end), w.region, star(w.window_id) + link(w.window_id, w.name), link(w.window_id, "Results ›", "predictions")]))}</div>`;
+  const first = (SESSION && SESSION.user && (SESSION.user.first || SESSION.user.name)) || "";
+  const nx = (d.upcoming || [])[0];
+  app.innerHTML = `<div class="calm">
+    <div class="calm-head"><div><h1>${first ? "Welcome back, " + esc(first) : "Home"}</h1>
+      <p>${d.live.length ? d.live.length + (d.live.length === 1 ? " tournament" : " tournaments") + " live" : "Nothing live right now"}${nx ? ` · next starts in <span class="cd" data-cd="${nx.begin}"></span>` : ""}${REGION ? " · " + REGION : ""}</p></div>
+      ${ACCT ? "" : `<button id="ap-open" class="sec">Add my Epic account</button>`}</div>
+    <section><h3>Live now</h3>${live || `<div class="card flat"><b>Nothing is live right now${REGION ? " in " + REGION : ""}.</b> <span class="mut">Plan ahead with the next events below.</span></div>`}</section>
+    ${favs.length ? `<section><h3>★ Your favourites</h3><div class="evgrid">${favs.map(evCard).join("")}</div></section>` : ""}
+    <section><h3>Starting soon</h3><div class="evgrid">${nextUp.slice(0, 3).map(evCard).join("") || '<div class="card flat mut">No upcoming events.</div>'}</div></section>
+    <section><h3>Just finished</h3><div class="card">${table(["Ended", "Region", "Tournament", ""], d.finished.slice(0, 5).map(w => [fmt(w.end), w.region, star(w.window_id) + link(w.window_id, w.name), link(w.window_id, "Results ›", "predictions")]))}</div></section></div>`;
   countdowns();
   if ($("#newsx")) $("#newsx").onclick = () => { store.set("seen_new", NEWS_VER); $("#newscard").remove(); };
   if ($("#ap-open")) $("#ap-open").onclick = e => { e.stopPropagation(); acctPop(); };
@@ -330,7 +329,7 @@ async function tournament(id, tab) {
   const tick = () => { const t = w.begin - Date.now() / 1000, e = w.end - Date.now() / 1000; $("#cd") && ($("#cd").innerHTML = t > 0 ? `starts in <b class="cd">${dur(t)}</b>` : e > 0 ? `games can start for <b class="cd">${dur(e)}</b>` : ""); };
   tick(); every(1000, tick);
   const open = w.status === "upcoming" || ACTIVE.includes(w.status);
-  const stripMe = async force => { if (!ACCT || w.status === "upcoming") return; const r = await fetchMe(w.window_id, force); const el = $("#mestrip"); if (el) el.innerHTML = meLine(r, w.window_id); const mg = $("#myg"); if (mg) mg.innerHTML = myGames(r); };
+  const stripMe = async force => { if (!ACCT || w.status === "upcoming") return; const r = await fetchMe(w.window_id, force); const el = $("#mestrip"); if (el) el.innerHTML = meLine(r, w.window_id); const mg = $("#myg"); if (mg) { mg.innerHTML = myGames(r); $$(".sid", mg).forEach(b => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.sid); b.textContent = "copied"; } catch (e) { b.textContent = b.dataset.sid; } }); } };
   loadSessions(w, tab);
   stripMe(); if (open) every(180000, () => stripMe(true));   // your own result, checked automatically on every event page
   if (tab === "overview") await tabOverview(w, open);
@@ -744,6 +743,8 @@ async function status() {
 // ---------------------------------------------------------------- Router
 async function route() {
   clearAll();
+  applySessionUi();
+  if (!sessionOk()) { window.scrollTo(0, 0); return landing(); }   // the rest of the site is for signed-in visitors only
   const h = location.hash.replace(/^#\/?/, ""), parts = h.split("/"), p = parts[0];
   const page = p || "home", arg = decodeURIComponent(parts.slice(1).join("/"));
   setNav(page, parts[2]);
@@ -777,5 +778,7 @@ async function checkHealth() {
   } catch (e) { }
 }
 checkHealth(); setInterval(checkHealth, 60000);
+$("#signout").onclick = signOut;
+checkSession();
 window.addEventListener("hashchange", route);
 route();

@@ -8,7 +8,7 @@ import time
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-from fngameanalyzer import art, auth, collector, config, drops, insights, me, service, storage, strategy, tracks
+from fngameanalyzer import art, auth, signin, collector, config, drops, insights, me, service, storage, strategy, tracks
 
 app = FastAPI()
 
@@ -66,6 +66,40 @@ def home_page():
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page():
     return Response(open(os.path.join(WEB, "admin.html"), encoding="utf-8").read(), media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/auth/config")
+def auth_config():
+    return {"google_client_id": signin.google_client_id()}
+
+
+@app.post("/api/auth/google")
+async def auth_google(req: Request):
+    body = await req.json()
+    try:
+        user = signin.google_user(body.get("credential"))
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    signin.record(user)
+    return {"token": signin.issue(user), "user": {k: user[k] for k in ("name", "first", "picture", "email")}}
+
+
+@app.post("/api/auth/owner")
+async def auth_owner(req: Request):
+    """Owner sign-in with the admin key (also the way in while Google sign-in is not set up)."""
+    body = await req.json()
+    if not _is_admin(body.get("key")):
+        return JSONResponse({"error": "That key was not accepted."}, status_code=401)
+    user = {"sub": "owner", "email": "", "name": "Owner", "first": "Owner", "picture": "", "via": "owner"}
+    return {"token": signin.issue(user), "user": {k: user[k] for k in ("name", "first", "picture", "email")}}
+
+
+@app.get("/api/auth/me")
+def auth_me(authorization: str = Header(default="")):
+    u = signin.verify(authorization.replace("Bearer ", "", 1))
+    if not u:
+        return JSONResponse({"error": "not signed in"}, status_code=401)
+    return {"user": {k: u.get(k, "") for k in ("name", "first", "picture", "email")}}
 
 
 @app.get("/api/art")
@@ -132,6 +166,11 @@ def map_image(name: str):
 @app.get("/map.js")
 def map_js():
     return _file("map.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/landing.js")
+def landing_js():
+    return _file("landing.js", "application/javascript; charset=utf-8")
 
 
 @app.get("/drops.js")

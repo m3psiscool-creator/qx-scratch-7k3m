@@ -18,13 +18,13 @@ _ctx = threading.local()   # per-request switch: allow similar classes when a cl
 def approx():
     return getattr(_ctx, 'approx', False)
 
-DECAY = 0.7
+DECAY = 0.5           # back-test of 250 finished events (scripts/backtest_prestart.py, sweep): 0.5 beat 0.7 (p90 error 27% -> 25%)
 BETA_GRID = [0.0, 0.25, 0.5, 0.75, 1.0]
 Z90 = 1.645
 Z80 = 1.2816          # Low = 10th percentile, Safe = 90th: an 80% band (was 90%), so the two ends sit closer together
 # Back-test of 500+ finished events: the centre is well calibrated, but the real spread was wider than the model's sd before
 # the event and a quarter in (heavy tails), about right at the half, and slightly narrower late. Multiplier on the sd by progress.
-BAND_SCALE = [(0.0, 1.15), (0.25, 1.10), (0.5, 0.95), (0.75, 0.90), (1.0, 0.85)]
+BAND_SCALE = [(0.0, 1.05), (0.25, 1.25), (0.5, 0.95), (0.75, 0.90), (1.0, 0.85)]
 
 
 def band_scale(p):
@@ -51,7 +51,7 @@ def _fmt(w):
     return (w.get("meta") or {}).get("format")
 
 
-MIN_SAME_REGION = 4    # fewer previous events than this in the region: other regions are added
+MIN_SAME_REGION = 8    # fewer previous events than this in the region: other regions are added
 
 
 def comparable(target, finished):

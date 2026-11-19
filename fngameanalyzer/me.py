@@ -69,7 +69,7 @@ def lookup(window_id, name, account_id=None):
         st = s.get("trackedStats") or {}
         stats = {k: st.get(k, 0) for k in rules.STATS}
         end = round(parse_time(s["endTime"])) if s.get("endTime") else 0
-        games.append({"n": i + 1, "placement": stats[PLACE], "elims": stats[ELIM], "win": stats[WIN], "end": end,
+        games.append({"n": i + 1, "session": s.get("sessionId"), "placement": stats[PLACE], "elims": stats[ELIM], "win": stats[WIN], "end": end,
                       "points": rules.game_points(rl, stats) if rl else None,
                       "gap_min": round((end - prev) / 60, 1) if prev and end else None})
         prev = end or prev

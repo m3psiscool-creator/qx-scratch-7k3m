@@ -664,7 +664,7 @@ async function fncs() {
 // ---------------------------------------------------------------- Accuracy
 // Accuracy and Status are owner pages: no menu entry, the data needs the admin key (asked once, remembered in this browser)
 async function aj(url) {
-  const r = await fetch(url, { headers: { "x-admin-key": store.get("akey", "") } });
+  const r = await fetch(url, { headers: { "x-admin-key": store.get("akey", ""), ...(SESSION && SESSION.token ? { authorization: "Bearer " + SESSION.token } : {}) } });
   if (r.status === 401) return { unauthorized: true };
   return r.json();
 }
@@ -744,8 +744,9 @@ async function status() {
 async function route() {
   clearAll();
   applySessionUi();
-  if (!sessionOk()) { window.scrollTo(0, 0); return landing(); }   // the rest of the site is for signed-in visitors only
   const h = location.hash.replace(/^#\/?/, ""), parts = h.split("/"), p = parts[0];
+  if (!sessionOk()) { window.scrollTo(0, 0); return PUBLIC_PAGES.includes(p) ? publicPage(p) : landing(); }   // everything else is for signed-in visitors only
+  if (PUBLIC_PAGES.includes(p)) { window.scrollTo(0, 0); setNav(p); return publicPage(p); }
   const page = p || "home", arg = decodeURIComponent(parts.slice(1).join("/"));
   setNav(page, parts[2]);
   window.scrollTo(0, 0);

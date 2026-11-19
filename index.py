@@ -19,9 +19,13 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
              "/api/window": 60, "/api/board": 30, "/api/series": 30, "/api/thresholds": 30,
              "/api/archive": 300, "/api/classes": 300, "/api/class": 300, "/api/fncs": 120,
              "/api/players": 300, "/api/player": 300,
-             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/hotspots": 120, "/api/drops/loot": 300, "/api/maps": 300, "/api/tracks/player": 60, "/api/tracks/recent": 120, "/api/tracks/windows": 120, "/api/tracks/window": 120, "/api/tracks/playerwindow": 120, "/api/tracks/game": 600, "/api/drops/areas": 120, "/api/calendar.ics": 300, "/api/health": 30, "/api/art": 21600}
+             "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/hotspots": 120, "/api/drops/loot": 300, "/api/maps": 300, "/api/tracks/player": 60, "/api/tracks/recent": 120, "/api/tracks/windows": 120, "/api/tracks/window": 120, "/api/tracks/playerwindow": 120, "/api/tracks/game": 600, "/api/drops/areas": 120, "/api/calendar.ics": 300, "/api/health": 30, "/api/art": 21600, "/api/public/demo": 3600}
 
 
+# API paths anyone may call (sign-in itself, the tournament pictures, the calendar feed, aggregate numbers for the signed-out home page)
+OPEN_API = ("/api/auth/", "/api/public/", "/api/art", "/api/calendar.ics")
+# these check their own key (owner/worker/cron endpoints)
+SELF_AUTH = ("/api/admin/", "/api/tick", "/api/login")
 MAIN_HOST = "fncslab.com"
 ALT_HOSTS = {"www.fncslab.com", "fncslab.org", "www.fncslab.org", "fncslab.info", "www.fncslab.info", "fncslab.store", "www.fncslab.store"}
 
@@ -32,12 +36,23 @@ async def meter(request, call_next):
     if host in ALT_HOSTS:   # one address for the site: the other domains send visitors to fncslab.com
         q = ("?" + request.url.query) if request.url.query else ""
         return RedirectResponse("https://" + MAIN_HOST + request.url.path + q, status_code=308)
+    path = request.url.path
+    gated = path.startswith("/api/") and not path.startswith(OPEN_API)
+    if gated and request.method != "OPTIONS" and not path.startswith(SELF_AUTH):
+        tok = request.headers.get("authorization", "")
+        if not (_is_admin(request.headers.get("x-admin-key")) or signin.verify(tok[7:] if tok.lower().startswith("bearer ") else tok)):
+            return JSONResponse({"error": "Sign in required."}, status_code=401, headers={"Cache-Control": "no-store"})
     resp = await call_next(request)
     ttl = CACHE_TTL.get(request.url.path)
     if request.url.path.startswith("/api/status"):
         resp.headers["Cache-Control"] = "no-store"
     if ttl and request.method == "GET" and resp.status_code == 200 and "x-admin-key" not in request.headers:
-        resp.headers["Cache-Control"] = f"public, s-maxage={ttl}, stale-while-revalidate={ttl * 3}"
+        if gated:   # answers only for signed-in visitors: never stored in a shared cache
+            resp.headers["Cache-Control"] = f"private, max-age={min(ttl, 60)}"
+        else:
+            resp.headers["Cache-Control"] = f"public, s-maxage={ttl}, stale-while-revalidate={ttl * 3}"
+    elif gated:
+        resp.headers["Cache-Control"] = "private, no-store"
     try:
         storage.egress_flush()   # keeps a running total of data read from the database
     except Exception:
@@ -98,6 +113,11 @@ def auth_me(authorization: str = Header(default="")):
     if not u:
         return JSONResponse({"error": "not signed in"}, status_code=401)
     return {"user": {k: u.get(k, "") for k in ("name", "first", "picture", "email")}}
+
+
+@app.get("/api/public/demo")
+def public_demo():
+    return _api(drops.demo)
 
 
 @app.get("/api/art")
@@ -169,6 +189,11 @@ def map_js():
 @app.get("/landing.js")
 def landing_js():
     return _file("landing.js", "application/javascript; charset=utf-8")
+
+
+@app.get("/pages.js")
+def pages_js():
+    return _file("pages.js", "application/javascript; charset=utf-8")
 
 
 @app.get("/drops.js")
@@ -692,3 +717,11 @@ async def seed_window(req: Request, x_admin_key: str = Header(default="")):
     storage.upsert_window(w)
     storage.save_final(w["window_id"], w)
     return {"ok": True, "window_id": w["window_id"]}
+
+
+@app.get("/{page}", response_class=HTMLResponse, include_in_schema=False)
+def public_page(page: str):
+    """Addresses for the public pages (shared links, Google's consent screen): the app opens them as #/page."""
+    if page in ("about", "how", "faq", "privacy", "terms", "contact"):
+        return RedirectResponse("/#/" + page, status_code=302)
+    return JSONResponse({"error": "Not found"}, status_code=404)

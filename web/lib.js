@@ -19,7 +19,13 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } },
 };
-async function j(url, opt) { const r = await fetch(url, opt); return r.json(); }
+// every data request carries the sign-in token; the server answers 401 without it, and a dead session drops back to the sign-in page
+async function j(url, opt) {
+  opt = opt || {}; const t = (typeof SESSION !== "undefined" && SESSION && SESSION.token) || ""; if (t) opt = { ...opt, headers: { authorization: "Bearer " + t, ...(opt.headers || {}) } };
+  const r = await fetch(url, opt);
+  if (r.status === 401 && t && !(opt.headers && opt.headers["x-admin-key"]) && typeof signOut === "function") { signOut(); return { error: "Please sign in again." }; }
+  return r.json();
+}
 
 // ---------------------------------------------------------------- icons (stroke, 24px grid)
 const ICON = {

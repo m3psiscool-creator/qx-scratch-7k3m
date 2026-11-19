@@ -1001,3 +1001,36 @@ def maps():
                            chests=sum(v for k, v in kinds.items() if k in CHEST_KINDS))
         out.append(row)
     return out
+
+
+_demo = {"t": 0, "v": None}
+
+
+def demo():
+    """Public, aggregate-only data for the signed-out home page: the best-covered tournament that has a real map picture, its landing
+    heat (counts per cell) and the busiest landing areas. No player names, no per-team rows."""
+    if _demo["v"] is not None and time.time() - _demo["t"] < 3600:
+        return _demo["v"]
+    avail = storage.drops_available()
+    order = sorted(avail, key=lambda k: -avail[k][0])[:8]
+    for wid in order:
+        try:
+            inf = map_info(wid)
+            m = inf.get("map") or {}
+            if not m.get("image") or (inf.get("map_check") or {}).get("status") == "mismatch":
+                continue
+            top = (inf.get("goal") or {}).get("rank") or 100
+            g = grid(wid, top=top, game=0)
+            h = hotspots(wid, top=top, game=0, count=5)
+            if not h.get("spots"):
+                continue
+            keep = ("landings", "qualifier_share", "avg_points", "contest", "contest_estimated", "x", "y", "r", "share_of_landings", "avg_placement_pct")
+            v = {"name": inf["name"], "region": inf["region"], "mode": inf.get("mode"), "top": top, "landings": g["total"],
+                 "map": {"image": m["image"], "fit": m.get("fit"), "name": m.get("name") or inf.get("label")},
+                 "grid": {"size": g["size"], "all": g["all"], "q": g["q"]},
+                 "spots": [{k: s.get(k) for k in keep} for s in h["spots"][:4]]}
+            _demo.update(t=time.time(), v=v)
+            return v
+        except Exception:
+            continue
+    raise ValueError("No landing data with a map picture yet.")

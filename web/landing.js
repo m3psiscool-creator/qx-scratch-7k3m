@@ -41,8 +41,10 @@ async function googleSlots() {
 
 // ---------------------------------------------------------------- the signed-out page
 function landing() {
-  destroyCharts();
-  const FEAT = [["target", "Strategy plan", "Points to aim for, checkpoints for each game, finisher profiles and a safety margin."], ["map", "Dropspots", "Landing heatmaps and which drops qualified, for every map."], ["pin", "Chest map", "Every chest and container with how often it was opened early."], ["route", "Rotations", "Pick a tournament and a player, then replay each game's drop and rotations."]];
+  destroyCharts(); document.title = "FNCS Lab";
+  const FEAT = [["target", "Strategy plan", "Points to aim for, checkpoints for each game, finisher profiles and a safety margin."], ["map", "Dropspots", "Landing heatmaps and which drops qualified, for every map."], ["pin", "Chest map", "Every chest and container with how often it was opened early."], ["route", "Rotations", "Pick a tournament and a player, then replay each game's drop and rotations."], ["layers", "Contest rate", "How often two or more teams landed in the same place, for any area you draw."], ["gauge", "Accuracy log", "Every prediction scored against the real cutoff, so you know how far to trust it."]];
+  const STRIP = ["Cutoff predictions", "Contest rate", "Landing heatmaps", "Chest map", "Rotations", "Storm circles", "Finisher profiles", "Safety margin", "Games that fit", "Accuracy log", "Live leaderboards", "FNCS · Cash Cups · Skin Cups"];
+  const VS = [["Picking a drop", "Landing where you always land", "Heatmaps of where qualifying teams landed, and how contested each spot was"], ["Knowing the cutoff", "Guessing from last week", "A live Low / Likely / Safe range for your rank"], ["Pacing a window", "Playing until you are tired", "Points to aim for after every game and how many games still fit"], ["Reviewing", "Remembering how it felt", "Drops and rotations replayed from the real match"], ["Trusting the numbers", "Hoping", "Every prediction scored against the real result"]];
   app.innerHTML = `<div class="lp">
   <section class="lp-hero">
     <div>
@@ -51,7 +53,7 @@ function landing() {
       <p class="lp-lead">Live leaderboards, predicted final cutoffs and a game plan for every tournament. See where teams landed, how they rotated, and what it took to qualify.</p>
       <div class="gslot"></div>
       <p class="small" id="lp-msg" style="margin-top:10px;color:var(--bad)"></p>
-      <p class="small" style="margin-top:4px">Free. Sign in once with Google.</p>
+      <p class="small" style="margin-top:4px">Free. Sign in once with Google. <a href="#/how" style="margin-left:8px">See how it works ↓</a></p>
     </div>
     <div class="lp-demo art" data-art="S43_TriosCashCup_Event2_EU" data-fam="CASHCUP">
       <div class="lp-demo-top"><b>EU Trios Cash Cup · Event 2</b><span class="pill live">live</span></div>
@@ -59,6 +61,8 @@ function landing() {
       <div class="lp-est"><div><span>Low</span><b>480</b></div><div class="mid"><span>MOST LIKELY</span><b>520</b></div><div><span>Safe</span><b>560</b></div></div>
     </div>
   </section>
+
+  <div class="lp-strip" aria-hidden="true"><div class="lp-track">${[...STRIP, ...STRIP].map(t => `<span>${t}</span>`).join("")}</div></div>
 
   <section class="lp-sec" id="lp-try">
     <div class="lp-eye">Try it, no account needed</div>
@@ -73,22 +77,36 @@ function landing() {
         <div class="lp-ctl"><label for="s2t">Time left</label><input id="s2t" type="range" min="10" max="180" value="75" step="5"><output id="s2to"></output>
           <label for="s2p">Typical finish</label><select id="s2p"><option value="13">Out early (13 min)</option><option value="19" selected>Mid-game (19 min)</option><option value="25">Deep run (25 min)</option></select><span></span></div>
         <div class="lp-res"><div class="big" id="s2r"></div><div class="small" id="s2s"></div></div></div>
-      <div class="card" id="s3"><h3>Where should I land?</h3><p class="small">Brighter squares had more qualifying teams (example island).</p>
-        <div class="lp-map"><div class="lp-grid" id="s3g" role="group" aria-label="Map grid"></div><div class="lp-res" id="s3r"></div></div></div>
+      <div class="card" id="s3"><h3>Where should I land?</h3><p class="small" id="s3p">Loading real landing data from a recent tournament…</p>
+        <div id="s3w"><div class="lp-skel"></div></div></div>
       <div class="card" id="s4"><h3>Which play style fits my goal?</h3><p class="small">How past finishers who reached Top 500 got their points.</p>
         <div class="lp-prof" id="s4b" role="group" aria-label="Play style"></div><div class="lp-rows" id="s4r"></div><div class="lp-res" id="s4s"></div></div>
     </div>
   </section>
 
   <section class="lp-sec">
+    <div class="lp-eye">Playing with and without it</div>
+    <h2>The same hours, with a plan</h2>
+    <div class="lp-vs"><div class="h"></div><div class="h">Without FNCS Lab</div><div class="h us">With FNCS Lab</div>${VS.map(([k, a, b]) => `<div class="k">${k}</div><div class="a">${a}</div><div class="b">${b}</div>`).join("")}</div>
+  </section>
+
+  <section class="lp-sec" id="lp-features">
     <div class="lp-eye">Inside, after you sign in</div>
-    <h2>Everything for the live window, in one place</h2>
+    <h2>One part of the tournament at a time</h2>
+    <p class="lp-sub">Everything for the live window, built from every cup that came before.</p>
     <div class="lp-feats">${FEAT.map(([ic, t, d]) => `<div class="lp-feat"><div class="ic">${icon(ic)}</div><b>${t}</b><span>${d}</span></div>`).join("")}</div>
   </section>
 
+  <section class="lp-sec">
+    <div class="lp-eye">Questions before you sign in</div>
+    <h2>Good to know</h2>
+    ${faqBlock(FAQ.slice(0, 5))}
+    <p class="small" style="margin-top:14px"><a href="#/faq">All questions</a> · <a href="#/how">How the numbers are made</a> · <a href="#/about">About</a></p>
+  </section>
+
   <section class="lp-final"><h2>Get the cutoff before your next cup</h2><p class="lp-sub" style="margin-inline:auto">Sign in with Google and the full site opens.</p><div class="gslot" style="display:flex;justify-content:center;margin-top:20px"></div></section>
-  <p class="lp-foot">Unofficial fan site, not affiliated with Epic Games. Predictions are estimates, not guarantees.</p></div>`;
-  googleSlots(); landingScenarios(); landingReveal();
+  ${pubFoot()}</div>`;
+  googleSlots(); landingScenarios(); landingReveal(); realMap();
 }
 
 function landingScenarios() {
@@ -124,12 +142,12 @@ function landingScenarios() {
     $("#s4s").innerHTML = `<div class="big">Place ${s.place} · ${s.elims} elims</div><div class="small">Average per game. ${s.txt}</div>`;
   };
   ["s1p", "s1g"].forEach(i => $("#" + i).oninput = s1); ["s2t", "s2p"].forEach(i => $("#" + i).oninput = s2);
-  s1(); s2(); s3(); s4();
+  s1(); s2(); s4(); window.lpGridFallback = () => { $("#s3w").innerHTML = '<div class="lp-map"><div class="lp-grid" id="s3g" role="group" aria-label="Map grid"></div><div class="lp-res" id="s3r"></div></div>'; $("#s3p").textContent = "Brighter squares had more qualifying teams (example island)."; s3(); };
 }
 
 // the boxes ease in one after another as they scroll into view (not all at once); skipped for reduced motion
 function landingReveal() {
-  const items = $$(".lp-try .card, .lp-feat");
+  const items = $$(".lp-try .card, .lp-feat, .lp-vs");
   const calm = matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window);
   if (calm) return;
   items.forEach(el => el.classList.add("rv"));
@@ -142,4 +160,50 @@ function landingReveal() {
     });
   }, { threshold: 0.15, rootMargin: "0px 0px -8% 0px" });
   items.forEach(el => io.observe(el));
+}
+
+// "Where should I land?" on a real map: aggregate landing data of a recent tournament (public, no player names)
+async function realMap() {
+  const w = $("#s3w"); if (!w) return;
+  let d; try { const r = await fetch("/api/public/demo"); d = await r.json(); } catch (e) { d = null; }
+  if (!d || d.error || !d.map || !d.map.image || !$("#s3w")) { if (window.lpGridFallback && $("#s3w")) window.lpGridFallback(); return; }
+  const im = new Image(); im.crossOrigin = "anonymous";
+  const ready = new Promise((ok, no) => { im.onload = ok; im.onerror = no; }); im.src = d.map.image;
+  try { await ready; } catch (e) { if ($("#s3w")) window.lpGridFallback(); return; }
+  if (!$("#s3w")) return;
+  const pic = d.map.fit && typeof warp === "function" ? warp(im, d.map.fit) : im;
+  $("#s3p").innerHTML = `Real data: <b>${esc(d.name)}</b> (${esc(d.region)}), ${nf(d.landings)} landings. Tap a numbered area. Blue = teams that finished top ${nf(d.top)}.`;
+  $("#s3w").innerHTML = `<div class="lp-realmap"><canvas id="s3c" aria-label="Map with the busiest landing areas"></canvas></div><div class="lp-spots" id="s3l"></div><div class="lp-res" id="s3r"></div>`;
+  const cv = $("#s3c"), S = Math.min(640, cv.parentElement.clientWidth || 480), R = window.devicePixelRatio || 1;
+  cv.width = cv.height = Math.round(S * R); cv.style.width = cv.style.height = S + "px";
+  const heat = (sparse, lo, hi) => {
+    const n = d.grid.size, c = document.createElement("canvas"); c.width = c.height = n; const x = c.getContext("2d"), imd = x.createImageData(n, n);
+    const cs = sparse.map(s => s[1]).sort((a, b) => a - b), top = cs.length ? cs[Math.min(cs.length - 1, Math.floor(cs.length * 0.985))] : 1;
+    sparse.forEach(([cell, cnt]) => { const a = Math.min(1, Math.sqrt(cnt / Math.max(1, top))); imd.data.set([lo[0] + (hi[0] - lo[0]) * a, lo[1] + (hi[1] - lo[1]) * a, lo[2] + (hi[2] - lo[2]) * a, Math.round(255 * Math.min(1, .4 + .75 * a))], cell * 4); });
+    x.putImageData(imd, 0, 0); return c;
+  };
+  const hAll = heat(d.grid.all, [255, 214, 40], [255, 40, 30]), hQ = heat(d.grid.q, [40, 225, 255], [30, 70, 255]);
+  const spots = d.spots, best = spots.reduce((b, s, i) => (s.qualifier_share > spots[b].qualifier_share ? i : b), 0);
+  let sel = best;
+  const draw = () => {
+    const x = cv.getContext("2d"); x.setTransform(R, 0, 0, R, 0, 0); x.clearRect(0, 0, S, S);
+    x.drawImage(pic, 0, 0, S, S); x.fillStyle = "rgba(8,10,16,.38)"; x.fillRect(0, 0, S, S);
+    x.imageSmoothingEnabled = true; x.filter = `blur(${S / 150}px)`; x.globalAlpha = .85; x.drawImage(hAll, 0, 0, S, S); x.drawImage(hQ, 0, 0, S, S); x.filter = "none"; x.globalAlpha = 1;
+    const p = spots[sel];
+    x.save(); x.beginPath(); x.rect(0, 0, S, S); x.arc(p.x * S, p.y * S, p.r * S, 0, 7); x.fillStyle = "rgba(4,6,12,.5)"; x.fill("evenodd"); x.restore();
+    spots.forEach((s, i) => { const cx = s.x * S, cy = s.y * S, on = i === sel; x.beginPath(); x.arc(cx, cy, on ? 15 : 12, 0, 7); x.fillStyle = on ? "#fff" : "rgba(20,24,40,.92)"; x.fill(); x.lineWidth = 2; x.strokeStyle = on ? "#7c6cff" : "#fff"; x.stroke();
+      x.fillStyle = on ? "#14172a" : "#fff"; x.font = "700 13px system-ui"; x.textAlign = "center"; x.textBaseline = "middle"; x.fillText(i + 1, cx, cy + 1); });
+    x.beginPath(); x.arc(p.x * S, p.y * S, p.r * S, 0, 7); x.setLineDash([6, 4]); x.lineWidth = 2; x.strokeStyle = "#fff"; x.stroke(); x.setLineDash([]);
+  };
+  const info = () => {
+    const s = spots[sel], ct = s.contest == null ? null : Math.round(s.contest * 100), cls = ct == null ? "" : ct >= 60 ? "bad" : ct >= 30 ? "warn" : "good";
+    $("#s3l").innerHTML = spots.map((q, i) => `<button type="button" class="lp-sp" aria-pressed="${i === sel}" data-i="${i}">${i + 1}</button>`).join("");
+    $$("#s3l button").forEach(b => b.onclick = () => { sel = +b.dataset.i; draw(); info(); });
+    $("#s3r").innerHTML = `<div class="small">Area ${sel + 1}</div><div class="big">${Math.round(s.qualifier_share * 100)}% qualified</div>
+      <div class="small">${Math.round(s.share_of_landings * 100)}% of all landings · ${Math.round(s.avg_points)} points per game</div>
+      <div class="small">Contest rate <b class="${cls}">${ct == null ? "–" : ct + "%"}</b>${s.contest_estimated ? " (estimated)" : ""}: share of games where two or more teams landed here</div>
+      <div class="lp-bar"><i style="width:${Math.round(s.qualifier_share * 100)}%"></i></div>${sel === best ? '<div class="small good" style="margin-top:4px">Best qualify rate of the busy areas</div>' : ""}`;
+  };
+  cv.onclick = e => { const r = cv.getBoundingClientRect(), u = (e.clientX - r.left) / r.width, v = (e.clientY - r.top) / r.height; let bi = -1, bd = 0.09; spots.forEach((s, i) => { const dd = Math.hypot(s.x - u, s.y - v); if (dd < bd) { bd = dd; bi = i; } }); if (bi >= 0) { sel = bi; draw(); info(); } };
+  cv.style.cursor = "pointer"; draw(); info();
 }

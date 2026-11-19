@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>FNCS Lab · Admin</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root{--bg:#0b0d14;--sf:#121623;--sf2:#181d2d;--line:#252b40;--line2:#323a55;--tx:#eef0f8;--tx2:#b4b9d0;--mut:#8a92b0;--ac:#7c6cff;--ac-h:#9588ff;--good:#2dd4a3;--warn:#ffb547;--bad:#ff6b7a;color-scheme:dark}
+@media(prefers-color-scheme:light){:root:not([data-theme=dark]){--bg:#f5f6fb;--sf:#fff;--sf2:#f0f1f8;--line:#dfe2ef;--line2:#c9cde2;--tx:#141729;--tx2:#444a66;--mut:#6b7392;--ac:#6a58f5;--ac-h:#5744e6;--good:#0f9f78;--warn:#b86e00;--bad:#d6334a;color-scheme:light}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.55 Inter,system-ui,sans-serif;padding:0 max(16px,env(safe-area-inset-left,0px))}
+.wrap{max-width:860px;margin:0 auto;padding:28px 0 60px;display:flex;flex-direction:column;gap:14px}
+h1{margin:0;font-size:1.6rem;letter-spacing:-.03em}h2{margin:0 0 4px;font-size:1.02rem}p{margin:0}
+.sub{color:var(--mut)}.small{font-size:.84rem;color:var(--tx2)}
+.card{background:var(--sf);border:1px solid var(--line);border-radius:18px;padding:20px}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.k{background:var(--sf);border:1px solid var(--line);border-radius:16px;padding:14px 16px;min-width:0}
+.k .l{font-size:.78rem;color:var(--mut);font-weight:500}.k .v{font-size:1.35rem;font-weight:700;margin-top:4px;letter-spacing:-.02em}
+.good{color:var(--good)}.warn{color:var(--warn)}.bad{color:var(--bad)}
+input{width:100%;background:var(--sf2);color:var(--tx);border:1px solid var(--line2);border-radius:11px;padding:10px 12px;font:inherit}
+button,.btn{display:inline-flex;align-items:center;border:1px solid transparent;border-radius:11px;padding:9px 16px;font:600 .9rem Inter,system-ui;background:var(--ac);color:#fff;cursor:pointer;text-decoration:none}
+button:hover,.btn:hover{background:var(--ac-h)}button.sec,.btn.sec{background:var(--sf2);color:var(--tx);border-color:var(--line2)}
+button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+ol{margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:12px}
+pre{background:var(--sf2);border-radius:12px;padding:12px;font-size:.78rem;overflow:auto;white-space:pre-wrap;margin:8px 0 0;color:var(--tx2)}
+#msg{min-height:1.3em;font-size:.88rem}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+@media(max-width:700px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style></head>
+<body><div class="wrap">
+<div class="row" style="justify-content:space-between"><div><h1>Admin</h1><p class="sub">Collector, database and Epic login</p></div><a class="btn sec" href="/">Back to site</a></div>
+
+<div class="card" id="gate" hidden>
+  <h2>Admin key</h2><p class="small" style="margin-bottom:10px">Enter the key to open this page. It is remembered in this browser only.</p>
+  <div class="row"><input id="key" type="password" placeholder="Admin key" autocomplete="off" style="flex:1;min-width:200px"><button id="unlock">Unlock</button></div>
+  <p id="gmsg" class="bad small" style="margin-top:8px"></p>
+</div>
+
+<div id="main" hidden>
+  <div class="grid">
+    <div class="k"><div class="l">Database</div><div class="v" id="kdb">…</div></div>
+    <div class="k"><div class="l">Epic login</div><div class="v" id="klg">…</div></div>
+    <div class="k"><div class="l">Collector last ran</div><div class="v" id="ktk">…</div></div>
+    <div class="k"><div class="l">Database reads, month</div><div class="v" id="keg">…</div></div>
+  </div>
+  <p id="dbnote" class="small" style="margin-top:10px"></p>
+
+  <div class="card" style="margin-top:14px">
+    <h2>Actions</h2>
+    <div class="row" style="margin-top:10px">
+      <button id="refresh" class="sec">Refresh</button>
+      <button id="test" class="sec">Test Epic login</button>
+      <button id="tick">Run collector now</button>
+      <button id="perm" class="sec">Make login permanent</button>
+    </div>
+    <p id="msg" style="margin-top:10px"></p>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h2>Provide the Epic login</h2>
+    <p class="small">Needed when the login shows "needed" or the test fails. Your Epic account must be signed in on epicgames.com in this browser.</p>
+    <ol>
+      <li>Open <a id="lurl" href="#" target="_blank" rel="noopener">the Epic authorization page</a>. It shows a short block of text containing an <b>authorizationCode</b>.</li>
+      <li>Copy the code (the long string only) and paste it here.<div class="row" style="margin-top:8px"><input id="code" placeholder="authorizationCode" autocomplete="off" style="flex:1;min-width:220px"><button id="save">Save login</button></div></li>
+      <li>After saving, press <b>Make login permanent</b> once, so no more codes are needed.</li>
+    </ol>
+  </div>
+
+  <div class="card" style="margin-top:14px"><h2>Recent collector log</h2><pre id="log">…</pre><h2 style="margin-top:14px">Epic login events</h2><pre id="alog">…</pre></div>
+</div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+const store={get:k=>{try{return localStorage.getItem(k)||""}catch(e){return ""}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const say=(t,c)=>{const m=$("#msg");m.className=c||"";m.textContent=t};
+const age=s=>s==null?"never":s<90?s+"s ago":s<5400?Math.round(s/60)+" min ago":Math.round(s/3600*10)/10+" h ago";
+async function api(url,opt={}){
+  const r=await fetch(url,{...opt,headers:{"x-admin-key":store.get("akey"),"content-type":"application/json",...(opt.headers||{})}});
+  if(r.status===401) return {unauthorized:true};
+  const t=await r.text(); try{return JSON.parse(t)}catch(e){return {error:"Unexpected answer ("+r.status+"): "+t.slice(0,160)}}
+}
+async function load(test){
+  const d=await api("/api/admin/overview"+(test?"?test=1":""));
+  if(d.unauthorized){ $("#main").hidden=true; $("#gate").hidden=false; if(store.get("akey")) $("#gmsg").textContent="That key was not accepted."; return null; }
+  $("#gate").hidden=true; $("#main").hidden=false;
+  if(d.error){ say(d.error,"bad"); return d; }
+  const kdb=$("#kdb"); kdb.textContent=d.db_ok?"online":"offline"; kdb.className="v "+(d.db_ok?"good":"bad");
+  $("#dbnote").textContent=d.db_ok?"":"The database refused the connection: "+(d.db_error||"")+"  Data collection and logins are paused until it is back (Neon console: check the plan and quota).";
+  if(!d.db_ok){ ["klg","ktk","keg"].forEach(i=>{$("#"+i).textContent="–";$("#"+i).className="v"}); return d; }
+  const lg=$("#klg"), L=d.login||{}, T=d.login_test;
+  let txt,cls;
+  if(T&&!T.ok){txt="needed";cls="bad"}
+  else if(!L.logged_in){txt="needed";cls="bad"}
+  else if(L.permanent){txt="permanent";cls="good"}
+  else {const h=Math.round((L.refresh_valid_for_s||0)/360)/10; txt=(L.refresh_valid_for_s>0?h+" h left":"expired?"); cls=L.refresh_valid_for_s>0?"warn":"bad"; if(T&&T.ok){txt="valid · "+txt;cls="good"}}
+  lg.textContent=txt; lg.className="v "+cls;
+  const tk=$("#ktk"); tk.textContent=age(d.last_tick_age_s); tk.className="v "+((d.last_tick_age_s!=null&&d.last_tick_age_s<2400)?"good":"warn");
+  $("#keg").textContent=d.egress_mb_month+" MB";
+  $("#lurl").href=d.login_url;
+  $("#log").textContent=(d.last_log||[]).map(x=>x.join("  ")).join("\n")||"nothing yet";
+  $("#alog").textContent=(d.auth_log||[]).map(x=>new Date(x.at*1000).toLocaleString()+"  "+x.kind+"  "+x.detail).join("\n")||"none yet";
+  if(T) say(T.ok?"Epic login works.":"Epic login failed: "+T.error,T.ok?"good":"bad");
+  return d;
+}
+async function act(btn,fn){btn.disabled=true;try{await fn()}catch(e){say(String(e),"bad")}btn.disabled=false}
+$("#unlock").onclick=()=>{store.set("akey",$("#key").value.trim());load()};
+$("#key").onkeydown=e=>{if(e.key==="Enter")$("#unlock").click()};
+$("#refresh").onclick=e=>act(e.target,()=>load());
+$("#test").onclick=e=>act(e.target,async()=>{say("Testing…");await load(true)});
+$("#tick").onclick=e=>act(e.target,async()=>{say("Running one collector pass (up to 40 s)…");const r=await api("/api/tick?sync=1");say(r.ok?"Collector ran in "+r.seconds+" s.":(r.error||"Collector failed: "+JSON.stringify(r).slice(0,200)),r.ok?"good":"bad");await load()});
+$("#perm").onclick=e=>act(e.target,async()=>{say("Setting up the permanent login…");const r=await api("/api/login_device",{method:"POST",body:JSON.stringify({key:store.get("akey")})});say(r.ok?"Permanent login saved and tested ("+(r.client||"ok")+").":(r.error||"failed"),r.ok?"good":"bad");await load()});
+$("#save").onclick=e=>act(e.target,async()=>{
+  let c=$("#code").value.trim(); const m=c.match(/"authorizationCode"\s*:\s*"([^"]+)"/); if(m)c=m[1];
+  if(!c){say("Paste the authorizationCode first.","bad");return}
+  say("Saving…");const r=await api("/api/login",{method:"POST",body:JSON.stringify({code:c,key:store.get("akey")})});
+  say(r.ok?"Login saved. Now press Make login permanent.":(r.error||"failed"),r.ok?"good":"bad"); if(r.ok)$("#code").value=""; await load();
+});
+load();
+</script></body></html>

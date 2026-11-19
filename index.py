@@ -63,6 +63,38 @@ def home_page():
     return _file("index.html", "text/html; charset=utf-8")
 
 
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page():
+    return Response(open(os.path.join(WEB, "admin.html"), encoding="utf-8").read(), media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/admin/overview")
+def admin_overview(x_admin_key: str = Header(default=""), test: int = 0):
+    """Owner only: everything the /admin page shows. ?test=1 also makes one real call with the stored Epic login."""
+    if not _is_admin(x_admin_key):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    out = {"now": time.time(), "regions": config.TRACKED_REGIONS, "login_url": config.LOGIN_URL, "db_ok": True}
+    try:
+        tick = storage.kv_get("last_tick") or {}
+        out["login"] = auth.status()
+        out["last_tick_age_s"] = round(time.time() - tick["at"]) if tick.get("at") else None
+        out["idle_until"] = tick.get("idle_until")
+        out["last_log"] = tick.get("log", [])[-6:]
+        out["auth_log"] = (storage.kv_get("auth_log") or [])[-8:]
+        out["egress_mb_month"] = round(storage.egress_month() / 1e6, 1)
+    except Exception as e:
+        out["db_ok"] = False
+        out["db_error"] = str(e)[:300]
+        return out
+    if test:
+        try:
+            auth.Session().bearer()
+            out["login_test"] = {"ok": True}
+        except Exception as e:
+            out["login_test"] = {"ok": False, "error": str(e)[:300]}
+    return out
+
+
 @app.get("/app.js")
 def app_js():
     return _file("app.js", "application/javascript; charset=utf-8")

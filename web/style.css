@@ -617,3 +617,9 @@ body.signedout .pubin{display:inline-flex!important}
 .pubfoot p{margin:0;font-size:.78rem}
 .lp .pubfoot{margin-top:-30px}
 #signout[hidden]{display:none!important}
+.lp-realmap{position:relative;width:100%}
+.lp-realmap canvas{width:100%!important;height:auto!important;aspect-ratio:1/1;max-width:100%}
+.lp-spots{position:relative;z-index:3;display:flex;flex-wrap:wrap;gap:10px;margin:14px 0 4px;padding:2px;clear:both}
+#s3w{display:flex;flex-direction:column;gap:12px}
+#s3w>*{flex:0 0 auto}
+.lp-sp{flex:0 0 auto;position:relative;z-index:3}

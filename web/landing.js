@@ -132,7 +132,7 @@ function landingScenarios() {
     const h = heat[sel], name = COLS[sel % 10] + (Math.floor(sel / 10) + 1);
     $("#s3r").innerHTML = `<div class="small">Square</div><div class="big">${name}</div><div class="small">${h.teams} teams landed here</div><div class="small">${h.q}% of them qualified</div><div class="lp-bar"><i style="width:${h.q}%"></i></div>${sel === best.i ? '<div class="small good" style="margin-top:4px">Best qualify rate among busy squares</div>' : ""}`;
   };
-  const STY = { Fragger: { place: 9.1, elims: 4.6, per: [["Elims", 64], ["Placement", 36]], txt: "Highest ceiling, but 4 in 10 runs end below the cutoff." }, Balanced: { place: 5.8, elims: 2.4, per: [["Elims", 44], ["Placement", 56]], txt: "Most finishers who reached Top 500 played this way." }, Survivor: { place: 3.2, elims: 1.1, per: [["Elims", 22], ["Placement", 78]], txt: "Steady points, but needs a deep run in most games." } };
+  const STY = { Fragger: { place: 9.1, elims: 4.6, per: [["Elims", 64], ["Placement", 36]], txt: "Highest ceiling, but 4 in 10 runs end below the cutoff." }, Balanced: { place: 5.8, elims: 2.4, per: [["Elims", 44], ["Placement", 56]], txt: "Most finishers who reached Top 500 played this way." }, Placement: { place: 3.2, elims: 1.1, per: [["Elims", 22], ["Placement", 78]], txt: "Steady points, but needs a deep run in most games." } };
   let sty = "Balanced";
   const s4 = () => {
     $("#s4b").innerHTML = Object.keys(STY).map(k => `<button type="button" aria-pressed="${k === sty}" data-k="${k}">${k}</button>`).join("");
@@ -175,7 +175,7 @@ async function realMap() {
   $("#s3p").innerHTML = `Real data: <b>${esc(d.name)}</b> (${esc(d.region)}), ${nf(d.landings)} landings. Tap a numbered area. Blue = teams that finished top ${nf(d.top)}.`;
   $("#s3w").innerHTML = `<div class="lp-realmap"><canvas id="s3c" aria-label="Map with the busiest landing areas"></canvas></div><div class="lp-spots" id="s3l"></div><div class="lp-res" id="s3r"></div>`;
   const cv = $("#s3c"), S = Math.min(640, cv.parentElement.clientWidth || 480), R = window.devicePixelRatio || 1;
-  cv.width = cv.height = Math.round(S * R); cv.style.width = cv.style.height = S + "px";
+  cv.width = cv.height = Math.round(S * R);
   const heat = (sparse, lo, hi) => {
     const n = d.grid.size, c = document.createElement("canvas"); c.width = c.height = n; const x = c.getContext("2d"), imd = x.createImageData(n, n);
     const cs = sparse.map(s => s[1]).sort((a, b) => a - b), top = cs.length ? cs[Math.min(cs.length - 1, Math.floor(cs.length * 0.985))] : 1;

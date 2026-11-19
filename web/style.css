@@ -443,7 +443,6 @@ body.signedout main{max-width:1120px}
 .lp-sub{color:var(--tx2);max-width:56ch;margin:12px 0 0}
 .gslot{min-height:44px}
 .lp-note{color:var(--mut);font-size:.9rem}
-.lp-ownerbox{display:flex;gap:8px;margin-top:8px;max-width:320px}.lp-ownerbox input{flex:1}
 .lp-demo{border:1px solid var(--line2);border-radius:24px;padding:26px;display:flex;flex-direction:column;gap:12px;min-height:280px;justify-content:flex-end;background:var(--sf);box-shadow:var(--shadow)}
 .lp-demo-top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 .lp-demo-top b{font-size:1.1rem;letter-spacing:-.02em}
@@ -499,3 +498,11 @@ body.signedout main{max-width:1120px}
 .dr-item b{font-size:.9rem;line-height:1.3;overflow-wrap:anywhere}
 .dr-item small{line-height:1.35;overflow-wrap:anywhere}
 .dr-item.art{overflow:hidden}
+/* Continue with Google: Google's real button sits invisibly over a button styled like the rest of the site */
+.gbtn{position:relative;width:280px;height:46px;border-radius:12px;overflow:hidden}
+.gface{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:12px;background:var(--sf2);border:1px solid var(--line2);border-radius:12px;color:var(--tx);font:650 .95rem var(--body);transition:border-color .15s,background .15s}
+.gface svg{width:18px;height:18px}
+.gbtn:hover .gface{border-color:var(--ac);background:var(--ac-soft)}
+.gbtn:focus-within .gface{outline:2px solid var(--ac);outline-offset:2px}
+.ghit{position:absolute;inset:0;opacity:.01;overflow:hidden;display:flex;justify-content:center}
+.ghit>div,.ghit iframe{height:46px!important}

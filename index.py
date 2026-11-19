@@ -6,7 +6,7 @@ import re
 import time
 
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from fngameanalyzer import art, auth, signin, collector, config, drops, insights, me, service, storage, strategy, tracks
 
@@ -22,8 +22,16 @@ CACHE_TTL = {"/api/predict": 120, "/api/bubble": 120, "/api/home": 20, "/api/liv
              "/api/scoring": 600, "/api/profile": 600, "/api/pace": 300, "/api/safety": 120, "/api/ladder": 120, "/api/tempo": 600, "/api/me": 30, "/api/account": 600, "/api/sessions": 120, "/api/drops/events": 120, "/api/drops/info": 300, "/api/drops/grid": 120, "/api/drops/area": 120, "/api/drops/pois": 120, "/api/drops/loot": 300, "/api/maps": 300, "/api/tracks/player": 60, "/api/tracks/recent": 120, "/api/tracks/windows": 120, "/api/tracks/window": 120, "/api/tracks/playerwindow": 120, "/api/tracks/game": 600, "/api/drops/areas": 120, "/api/calendar.ics": 300, "/api/health": 30, "/api/art": 21600}
 
 
+MAIN_HOST = "fncslab.com"
+ALT_HOSTS = {"www.fncslab.com", "fncslab.org", "www.fncslab.org", "fncslab.info", "www.fncslab.info", "fncslab.store", "www.fncslab.store"}
+
+
 @app.middleware("http")
 async def meter(request, call_next):
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(":")[0].lower()
+    if host in ALT_HOSTS:   # one address for the site: the other domains send visitors to fncslab.com
+        q = ("?" + request.url.query) if request.url.query else ""
+        return RedirectResponse("https://" + MAIN_HOST + request.url.path + q, status_code=308)
     resp = await call_next(request)
     ttl = CACHE_TTL.get(request.url.path)
     if request.url.path.startswith("/api/status"):
@@ -81,16 +89,6 @@ async def auth_google(req: Request):
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     signin.record(user)
-    return {"token": signin.issue(user), "user": {k: user[k] for k in ("name", "first", "picture", "email")}}
-
-
-@app.post("/api/auth/owner")
-async def auth_owner(req: Request):
-    """Owner sign-in with the admin key (also the way in while Google sign-in is not set up)."""
-    body = await req.json()
-    if not _is_admin(body.get("key")):
-        return JSONResponse({"error": "That key was not accepted."}, status_code=401)
-    user = {"sub": "owner", "email": "", "name": "Owner", "first": "Owner", "picture": "", "via": "owner"}
     return {"token": signin.issue(user), "user": {k: user[k] for k in ("name", "first", "picture", "email")}}
 
 

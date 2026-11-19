@@ -1,5 +1,5 @@
 "use strict";
-// Signed-out home and site sign-in (Google, or the owner key). The rest of the site is only shown to signed-in visitors.
+// Signed-out home and site sign-in (Google). The rest of the site is only shown to signed-in visitors.
 let SESSION = store.get("sess", null);   // { token, user: {name, first, picture} }
 function sessionOk() {
   if (!SESSION || !SESSION.token) return false;
@@ -23,7 +23,7 @@ function loadScriptOnce(src) { return new Promise((ok, no) => { if ($(`script[sr
 async function googleSlots() {
   const slots = $$(".gslot"); if (!slots.length) return;
   if (!GCFG) { try { GCFG = await j("/api/auth/config"); } catch (e) { GCFG = {}; } }
-  if (!GCFG.google_client_id) { slots.forEach(s => { s.innerHTML = '<div class="lp-note">Google sign-in is being set up. The owner can sign in below.</div>'; }); return; }
+  if (!GCFG.google_client_id) { slots.forEach(s => { s.innerHTML = '<div class="lp-note">Google sign-in is being set up. Check back soon.</div>'; }); return; }
   try { await loadScriptOnce("https://accounts.google.com/gsi/client"); } catch (e) { slots.forEach(s => { s.innerHTML = '<div class="lp-note">Could not reach Google. Check your connection and reload.</div>'; }); return; }
   google.accounts.id.initialize({
     client_id: GCFG.google_client_id,
@@ -33,7 +33,10 @@ async function googleSlots() {
       if (d.token) setSession(d); else { const m = $("#lp-msg"); if (m) m.textContent = d.error || "Sign-in failed."; }
     },
   });
-  slots.forEach(s => { s.innerHTML = ""; google.accounts.id.renderButton(s, { theme: "outline", size: "large", text: "continue_with", shape: "rectangular", width: 280 }); });
+  slots.forEach(s => {
+    s.innerHTML = '<div class="gbtn"><span class="gface"><svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>Continue with Google</span><div class="ghit"></div></div>';
+    google.accounts.id.renderButton(s.querySelector(".ghit"), { type: "standard", theme: "filled_black", size: "large", text: "continue_with", width: 280 });
+  });
 }
 
 // ---------------------------------------------------------------- the signed-out page
@@ -49,8 +52,6 @@ function landing() {
       <div class="gslot"></div>
       <p class="small" id="lp-msg" style="margin-top:10px;color:var(--bad)"></p>
       <p class="small" style="margin-top:4px">Free. Sign in once with Google.</p>
-      <p class="small"><a href="#" id="lp-owner">Owner sign-in</a></p>
-      <div id="lp-ownerbox" hidden class="lp-ownerbox"><input id="lp-key" type="password" placeholder="Admin key" autocomplete="off"><button id="lp-keygo">Enter</button></div>
     </div>
     <div class="lp-demo art" data-art="S43_TriosCashCup_Event2_EU" data-fam="CASHCUP">
       <div class="lp-demo-top"><b>EU Trios Cash Cup · Event 2</b><span class="pill live">live</span></div>
@@ -88,12 +89,6 @@ function landing() {
   <section class="lp-final"><h2>Get the cutoff before your next cup</h2><p class="lp-sub" style="margin-inline:auto">Sign in with Google and the full site opens.</p><div class="gslot" style="display:flex;justify-content:center;margin-top:20px"></div></section>
   <p class="lp-foot">Unofficial fan site, not affiliated with Epic Games. Predictions are estimates, not guarantees.</p></div>`;
   googleSlots(); landingScenarios();
-  $("#lp-owner").onclick = e => { e.preventDefault(); $("#lp-ownerbox").hidden = !$("#lp-ownerbox").hidden; if (!$("#lp-ownerbox").hidden) $("#lp-key").focus(); };
-  const go = async () => {
-    const r = await fetch("/api/auth/owner", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: $("#lp-key").value.trim() }) });
-    const d = await r.json(); if (d.token) setSession(d); else $("#lp-msg").textContent = d.error || "Sign-in failed.";
-  };
-  $("#lp-keygo").onclick = go; $("#lp-key").onkeydown = e => { if (e.key === "Enter") go(); };
 }
 
 function landingScenarios() {

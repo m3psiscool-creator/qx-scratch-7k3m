@@ -88,7 +88,7 @@ function landing() {
 
   <section class="lp-final"><h2>Get the cutoff before your next cup</h2><p class="lp-sub" style="margin-inline:auto">Sign in with Google and the full site opens.</p><div class="gslot" style="display:flex;justify-content:center;margin-top:20px"></div></section>
   <p class="lp-foot">Unofficial fan site, not affiliated with Epic Games. Predictions are estimates, not guarantees.</p></div>`;
-  googleSlots(); landingScenarios();
+  googleSlots(); landingScenarios(); landingReveal();
 }
 
 function landingScenarios() {
@@ -125,4 +125,21 @@ function landingScenarios() {
   };
   ["s1p", "s1g"].forEach(i => $("#" + i).oninput = s1); ["s2t", "s2p"].forEach(i => $("#" + i).oninput = s2);
   s1(); s2(); s3(); s4();
+}
+
+// the boxes ease in one after another as they scroll into view (not all at once); skipped for reduced motion
+function landingReveal() {
+  const items = $$(".lp-try .card, .lp-feat");
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches || !("IntersectionObserver" in window);
+  if (calm) return;
+  items.forEach(el => el.classList.add("rv"));
+  const groups = new Map();
+  const io = new IntersectionObserver(es => {
+    es.filter(e => e.isIntersecting).forEach((e, i) => {
+      const el = e.target; io.unobserve(el);
+      el.style.transitionDelay = (i * 160) + "ms";
+      requestAnimationFrame(() => el.classList.add("in"));
+    });
+  }, { threshold: 0.15, rootMargin: "0px 0px -8% 0px" });
+  items.forEach(el => io.observe(el));
 }
